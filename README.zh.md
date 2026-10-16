@@ -318,9 +318,7 @@ gh release create v0.1.4 -t "FastCode 0.1.4" \
 - **SimpleLittleDev** —— 原始 FastCode TUI 的作者。本项目基于其 npm 包
   [`@simplelittledev/fastcode`](https://www.npmjs.com/package/@simplelittledev/fastcode)（0.1.3）
   的编译产物进行修复与手机适配，npm 上的贡献与荣誉归其所有。
-- **HKUDS（香港大学数据智能实验室）** —— 危险命令拒绝列表移植自其开源项目
-  [`HKUDS/FastCode`](https://github.com/HKUDS/FastCode) 的 nanobot
-  （`nanobot/agent/tools/shell.py`），感谢该项目的所有贡献者。
+
 - 以及全部上游开源依赖的作者：Ink、React、meow、cfonts、marked、chalk 等。
 
 原始作者署名与上游项目名称、版权归各自所有；本仓库仅做修复与 Termux 适配。
