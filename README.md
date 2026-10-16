@@ -32,14 +32,13 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 
 | Feature | Description |
 |---|---|
-| 💬 AI chat coding | Conversational coding right in the terminal, streamed |
-| 📂 Read / write files | read, write, append, patch, replace — sandboxed to the current directory |
-| ⚙️ Run commands | execute shell commands and return output; `rm -rf`, `dd`, `mkfs`, fork bombs are **blocked before execution** |
-| 🔎 Code search | grep, structure lookup, batch file reads |
-| 🤖 Multi-provider | **DeepSeek / OpenAI / Anthropic**, plus Gemini, Qwen, GLM, Kimi, Grok, OpenRouter, Ollama — 13 providers |
+| 💬 Multi-model chat | **13 providers**, switch with `/provider` and `/model` |
+| 🛠️ Local coding agent | read/write files, grep, patch, run shell commands (on by default) |
+| 🔎 Code navigation | search a project, locate by structure, batch-read files |
 | 🧩 Agent Skills | install `SKILL.md` skills to extend behaviour |
 | 🎨 Themes | `/theme` |
 | 💰 Usage | token and cost readout in the status bar |
+| 🤖 Model support | **DeepSeek / OpenAI / Anthropic**, plus Gemini, Qwen, GLM, Kimi, Grok, OpenRouter, Ollama |
 
 **Key bindings**
 
@@ -47,6 +46,19 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 |---|---|
 | `Ctrl+C` | quit (press twice; a single press only warns) |
 | `Esc` | cancel the current thought / stream |
+
+---
+
+## 🛡️ Safety and reliability
+
+| Capability | Behaviour | Override |
+|---|---|---|
+| 🔒 Project trust | first run in an unknown folder asks before agent tools load | `fastcode trust` / `untrust` / `trusted`; `FASTCODE_TRUST_ALL=1` |
+| 🚫 Dangerous-command guard | `rm -rf`, `dd`, `mkfs`, fork bombs are refused **before** execution | `FASTCODE_ALLOW_DANGEROUS=1` |
+| ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
+| 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
+
+> The dangerous-command deny list is ported from HKUDS/FastCode nanobot (`nanobot/agent/tools/shell.py`).
 
 ---
 

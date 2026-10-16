@@ -387,7 +387,7 @@ npm publish --access public
 | Project trust | First run in a folder asks before agent tools load; the list lives in ~/.fastcode/trusted.json | fastcode trust / untrust / trusted, FASTCODE_TRUST_ALL=1 |
 | Dangerous-command guard | rm -rf, del /f, rmdir /s, format / mkfs / diskpart, dd if=, writes to /dev/sd, shutdown / reboot / poweroff and fork bombs are refused before execution | FASTCODE_ALLOW_DANGEROUS=1, FASTCODE_SHELL_ALLOWLIST, FASTCODE_SHELL_DENY_EXTRA |
 | Unified tool-output cap | Output is truncated while it is produced, not sliced afterwards (default 30000 characters) | FASTCODE_TOOL_OUTPUT_LIMIT |
-| Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
+| Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash (cache cap 256MB by default) | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
 
 The dangerous-command deny list is ported from HKUDS/FastCode nanobot
 (nanobot/agent/tools/shell.py).

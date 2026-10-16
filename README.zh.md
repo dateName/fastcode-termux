@@ -28,16 +28,15 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 
 ## ✨ 功能特性
 
-| 特性 | 说明 |
+| 特性 | 描述 |
 |---|---|
-| 💬 AI 对话编程 | 在终端里对话式编程，流式输出 |
-| 📂 读写文件 | 读取 / 写入 / 追加 / 打补丁 / 替换，沙箱限制在当前目录 |
-| ⚙️ 执行命令 | 运行 shell 命令并回传结果；`rm -rf`、`dd`、`mkfs`、fork bomb 等**执行前拦截** |
-| 🔎 代码搜索 | grep、按结构定位、批量读文件 |
-| 🤖 多模型 | **DeepSeek / OpenAI / Anthropic**、Gemini、通义千问、GLM、Kimi、Grok、OpenRouter、Ollama 等 13 家 |
-| 🧩 Agent Skills | 安装 `SKILL.md` 技能扩展能力 |
+| 💬 多模型聊天 | **13 个提供者**，用 `/provider`、`/model` 随时切换 |
+| 🛠️ 本地编码代理 | 读写文件、grep、打补丁、运行 shell 命令（默认开启） |
+| 🔎 代码导航 | 搜索项目、按结构定位、批量读取文件 |
+| 🧩 Agent Skills | 安装 `SKILL.md` 技能以扩展行为 |
 | 🎨 主题 | `/theme` 切换配色 |
-| 💰 用量统计 | 状态栏显示 token 与花费 |
+| 💰 用量统计 | 状态栏显示 token 与成本 |
+| 🤖 模型支持 | **DeepSeek / OpenAI / Anthropic**，以及 Gemini、通义千问、GLM、Kimi、Grok、OpenRouter、Ollama 等 |
 
 **快捷键**
 
@@ -45,6 +44,19 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 |---|---|
 | `Ctrl+C` | 退出（按两次；单按只提示，不会误退） |
 | `Esc` | 终止当前思考 / 流式输出 |
+
+---
+
+## 🛡️ 安全与可靠性
+
+| 能力 | 行为 | 覆盖 |
+|---|---|---|
+| 🔒 项目信任 | 首次在未知文件夹运行时，会在代理工具加载前询问 | `fastcode trust` / `untrust` / `trusted`；`FASTCODE_TRUST_ALL=1` |
+| 🚫 危险命令拦截 | `rm -rf`、`dd`、`mkfs`、fork bomb 等在**执行前**被拒绝 | `FASTCODE_ALLOW_DANGEROUS=1` |
+| ✂️ 统一输出上限 | 输出在生产时被截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
+| 💾 会话日志 | 仅附加的 JSONL，崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
+
+> 危险命令拒绝列表移植自 HKUDS/FastCode 的 nanobot（`nanobot/agent/tools/shell.py`）。
 
 ---
 
