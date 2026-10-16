@@ -91,6 +91,10 @@
   可用 FASTCODE_ALLOW_DANGEROUS=1 放行，或 FASTCODE_SHELL_ALLOWLIST 收紧。
 - **项目信任**：src/config/trust.ts + src/ui/TrustGate.ts，未信任目录不会直接启用 agent 工具。
 - **输出上限**：src/agent/limits.ts 统一为边产边截断，避免超长输出撑爆内存。
+- **分发模型（自包含打包）**：dist/cli.js 由 esbuild 把依赖与 cfonts 字体内联后提交进 Git，
+  用户 `git clone` 后免 `npm install` 运行——不执行任何安装期脚本（npm install scripts），
+  依赖版本锁定在提交产物中。代价：需信任所提交的 dist/cli.js；构建可复现
+  （`cd package && npm install && npm run build`，产物可 diff 核验）。
 
 ### 新增需注意项（L-5）
 

@@ -6,7 +6,8 @@
 ## 1. 分层总览
 
     +-----------------------------------------------------------+
-    | 入口层   bin/fastcode.mjs  ->  dist/index.js              |
+    | 入口层   bin/fastcode.mjs -> dist/cli.js (esbuild 自包含)  |
+    |                           -> dist/index.js (tsc 回退)      |
     +-----------------------------------------------------------+
     | 命令行层 dist/cli.js  (TUI 之外的所有子命令)              |
     +-----------------------------------------------------------+
@@ -20,11 +21,11 @@
 依赖方向：上层依赖下层，下层不反向依赖界面层。
 唯一例外：providers/ 被 cli、app、commands、lib/diagnostics 共享。
 
-## 2. 模块清单（58 个 JS，约 121 KB）
+## 2. 模块清单（src/ 58 个 TS 模块；dist 为编译产物，另有自包含打包产物 dist/cli.js）
 
-    bin/                    启动壳，负责把入口解析成 file URL 后 import
-    dist/index.js           入口：先跑 cli，再决定是否进入 TUI
-    dist/cli.js             参数解析与全部非交互子命令
+    bin/                    启动壳：优先 import dist/cli.js，回退 dist/index.js / src
+    dist/cli.js             两个含义：esbuild 自包含单文件（运行产物）；也是逻辑上的 CLI 入口
+    dist/index.js           tsc 编译入口（回退路径）：先跑 cli，再决定是否进入 TUI
     dist/app.js             TUI 主组件：状态、聊天循环、斜杠命令分发
     dist/ui/                展示组件（Banner/Message/Prompt/Spinner/StatusBar）+ TrustGate（首次信任确认）
     dist/commands/          19 个斜杠命令，单文件一个命令
@@ -33,9 +34,14 @@
     dist/skills/            SKILL.md 发现、解析、安装
     dist/plugins/           插件包发现与拼装
     dist/config/            paths（目录布局）、store（配置与密钥）、trust（项目信任列表）、themes
-    dist/lib/               http、markdown、platform、uiMode、startup、diagnostics
+    dist/lib/               http、markdown、platform、uiMode、startup、diagnostics、pkg（版本读取）
     dist/session/           log（JSONL 会话落盘 / 恢复 / 缓存剪枝）
     dist/types.js           共享类型占位
+
+    仓库根：
+    package/scripts/        build.mjs（esbuild 打包）、esbuild-plugins.mjs（字体内联、require 垫片、桩依赖）
+    scripts/                install.sh（一键安装）、build-portable.sh（便携包）、update-termux.sh、smoke-test.mjs
+    .github/workflows/      release.yml（打 tag 自动构建并发布）
 
 每个文件的职责与依赖见 docs/MODULES.md。
 
@@ -43,8 +49,8 @@
 
 ### 3.1 冷启动
 
-    1) bin/fastcode.mjs  解析自身路径 -> import dist/index.js
-    2) dist/index.js     调 parseCli()
+    1) bin/fastcode.mjs  解析自身路径 -> 优先 import dist/cli.js（自包含），否则 dist/index.js
+    2) dist/cli.js 自带全部依赖；dist/index.js 则调 parseCli()
     3) parseCli 命中子命令  -> 执行并退出（不加载 Ink）
     4) 否则要求 stdout 是 TTY，动态 import ink/react/app.js
     5) app.js 读取 config -> 生成欢迎语 -> 渲染界面
@@ -68,6 +74,17 @@
     环境变量 KEY  ->  先查 auth.json  ->  再查进程环境变量
 
 config.json 与 auth.json 是两个独立文件；改模型只动 config.json。
+
+### 3.4 分发与打包（clone 即可跑）
+
+    - 源码在 package/src，用 esbuild 打成自包含单文件 package/dist/cli.js：
+      Ink/React/meow/cfonts 字体内联，node 内置模块 external，并注入 createRequire 垫片
+      （package/scripts/build.mjs + esbuild-plugins.mjs）。
+    - dist/cli.js **提交进 Git**，因此 git clone 后无需 npm install 即可运行（关键）。
+    - scripts/install.sh 将其软链到 $PREFIX/bin/fastcode（Termux）或 ~/.local/bin；
+      仅当产物缺失时才回退 npm install && npm run build。
+    - 便携包 / Release：scripts/build-portable.sh 产出 release/ 下的 tar.gz/zip 与 npm pack 的 .tgz；
+      .github/workflows/release.yml 在 push v* tag 时自动构建并上传。
 
 ## 4. 扩展点（怎么加东西）
 
@@ -134,6 +151,7 @@ shell 工具在 spawn 之前先过 evaluateShellCommand()。
 1. **已有 TypeScript 源码树 src/**：58 个模块由 dist 逆向重建，types.ts 恢复了真实接口，
    tsc 编译零错误。dist 现在是 src 的编译产物，**源码才是唯一事实来源**。
    构建：cd package && npm install && npm run build
+   （= tsc 编译 + esbuild 打包出自包含的 dist/cli.js；`npm run build:bundle` 只跑打包。）
 2. **已有自检脚本**：node scripts/smoke-test.mjs（覆盖沙箱越界、SSE 换行、配置与密钥分离等）。
 3. **仍偏大的三个文件**建议后续拆分：app.ts、agent/tools.ts、skills/manager.ts。
 

@@ -1,7 +1,8 @@
 # FastCode 0.1.3 → 0.1.4 修复清单
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
-由于上游源码仓库已删除，以下修改直接作用于 package/dist 下的编译 JS，未重建源码。
+前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
+（package/src 成为唯一事实来源，dist 由 `tsc + esbuild` 重新生成）。
 
 | # | 文件 | 问题 | 修复 |
 |---|------|------|------|
@@ -27,6 +28,12 @@
 | 20 | src/session/log.ts、src/app.ts、src/cli.ts | 会话只在内存，崩溃即全丢 | JSONL 逐行追加落盘到 ~/.fastcode/sessions，新增 fastcode sessions/resume 与 TUI 恢复；缓存上限默认 256MB，可用 FASTCODE_SESSION_CACHE_MB 调整，超出先删最旧 |
 | 21 | src/config/trust.ts、src/ui/TrustGate.ts、src/cli.ts | 在陌生目录直接启用 agent 工具，无确认 | 项目信任机制：首次进入目录弹出确认，信任列表存 ~/.fastcode/trusted.json，新增 fastcode trust/untrust/trusted，FASTCODE_TRUST_ALL=1 可跳过 |
 | 22 | src/agent/guards.ts、src/agent/tools.ts | shell 工具可执行任意破坏性命令 | 移植 HKUDS/FastCode nanobot 的危险命令 deny 列表（rm -rf / del /f / rmdir /s / format|mkfs|diskpart / dd if= / 写 /dev/sd / shutdown|reboot|poweroff / fork bomb），执行前拦截；支持 allowlist、追加规则与 FASTCODE_ALLOW_DANGEROUS 放行 |
+| 23 | package/scripts/build.mjs、esbuild、package/dist/cli.js | `git clone` 后直接运行报 ERR_MODULE_NOT_FOUND（依赖未安装） | 用 esbuild 把全部依赖打包成自包含单文件 dist/cli.js 并**提交进 Git**；bin/fastcode.mjs 优先加载它，缺依赖时给友好指引；`git clone` 后免 npm install |
+| 24 | package/scripts/esbuild-plugins.mjs | 打包后启动时的大字横幅（ink-big-text）消失 | cfonts 用动态 require 读字体，打包后失败而静默返回 false；构建时把 cfonts/fonts/*.json 内联成静态映射 |
+| 25 | package/scripts/esbuild-plugins.mjs | 打包后 CJS 依赖（supports-color）调用 require('os') 抛 "Dynamic require ... is not supported" | 注入 createRequire banner，为 ESM 产物提供真实 require |
+| 26 | package/src/lib/pkg.ts、src/cli.ts、src/lib/diagnostics.ts | 打包后 import.meta.url 变化，版本读取失败，doctor 显示 0.0.0 | 新增 readPackageMeta()，对 bundle / tsc / tsx 三种路径逐一尝试 |
+| 27 | package/src/session/log.ts | 会话缓存上限默认偏小 | 默认 64MB → 256MB（仍可用 FASTCODE_SESSION_CACHE_MB 调整） |
+| 28 | scripts/install.sh、scripts/install-termux.sh、.github/workflows/release.yml、.gitattributes、scripts/build-portable.sh | 缺真正可用的一键安装 / 自动发布 / 换行一致 | install.sh 改为把 dist/cli.js 软链到 PATH（有产物免 npm）；install-termux.sh 变薄封装；新增 CI 打 tag 自动发 Release；build-portable.sh 产出 tar.gz/zip + npm pack + SHA256SUMS；.gitattributes 统一 LF |
 
 ## 验证方式
 
@@ -55,6 +62,7 @@
 
 ## 尚未处理 / 已知限制
 
-- 上游源码缺失，无法重新生成 dist；后续若要改功能，建议先反编译或重建 TypeScript 源码树。
+- 上游源码已删除，但本仓库已逆向重建 TypeScript 源码树（package/src），dist 可随时用
+  `cd package && npm run build`（tsc + esbuild）重新生成；改功能请改 src，不要再直接改 dist。
 - 技能市场 skillshub.wtf 需要付费，属上游问题，未改。
 - 未做真实 Termux 设备上的交互测试（本环境无法运行 Android/Termux）。
