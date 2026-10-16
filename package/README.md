@@ -392,6 +392,14 @@ npm publish --access public
 The dangerous-command deny list is ported from HKUDS/FastCode nanobot
 (nanobot/agent/tools/shell.py).
 
+## 🙏 Credits
+
+- **SimpleLittleDev** — author of the original FastCode TUI; the npm package
+  `@simplelittledev/fastcode` and its credit belong to them.
+- **HKUDS (HKU Data Intelligence Lab)** — the dangerous-command deny list is ported from
+  [HKUDS/FastCode](https://github.com/HKUDS/FastCode) nanobot; thanks to its contributors.
+- All upstream dependency authors (Ink, React, meow, cfonts, marked, chalk, ...).
+
 ## 📜 License
 
 MIT © SimpleLittleDev

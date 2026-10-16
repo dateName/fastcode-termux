@@ -300,7 +300,7 @@ gh release create v0.1.4 -t "FastCode 0.1.4" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | architecture, modules, data flow |
 | [docs/MODULES.md](docs/MODULES.md) | what every source file does |
 | [docs/AUDIT.md](docs/AUDIT.md) | security and robustness audit |
-| [PATCHES.md](PATCHES.md) | all 22 fixes up to 0.1.4 |
+| [PATCHES.md](PATCHES.md) | all 29 fixes up to 0.1.4 |
 
 ---
 
@@ -310,5 +310,23 @@ gh release create v0.1.4 -t "FastCode 0.1.4" \
   This repo fixes and adapts that compiled artifact for mobile, with the TypeScript source reverse-engineered into `package/src`.
 - `HKUDS/FastCode` is a different Python project (code understanding) and is **not** the upstream of this TUI.
 - The dangerous-command rules are ported from HKUDS/FastCode nanobot.
+
+---
+
+## 🙏 Credits
+
+This project is a fix + Termux adaptation that stands on other people's work. Thanks to:
+
+- **SimpleLittleDev** — author of the original FastCode TUI. This repo is a fix + mobile
+  adaptation built on the compiled artifact of the npm package
+  [`@simplelittledev/fastcode`](https://www.npmjs.com/package/@simplelittledev/fastcode) (0.1.3);
+  credit for the npm package belongs to them.
+- **HKUDS (HKU Data Intelligence Lab)** — the dangerous-command deny list is ported from
+  its open-source project [`HKUDS/FastCode`](https://github.com/HKUDS/FastCode) nanobot
+  (`nanobot/agent/tools/shell.py`); thanks to all its contributors.
+- All upstream open-source dependency authors: Ink, React, meow, cfonts, marked, chalk, and others.
+
+Original author credits, upstream project names and copyrights remain the property of their
+respective owners; this repo only fixes and adapts for Termux.
 
 <sub>Made for Termux 🐧📱 · FastCode 0.1.4</sub>

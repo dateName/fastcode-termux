@@ -30,7 +30,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 
 | 特性 | 描述 |
 |---|---|
-| 💬 多模型聊天 | **13 个提供者**，用 `/provider`、`/model` 随时切换 |
+| 💬 多模型聊天 | **13 个服务商**，用 `/provider`、`/model` 随时切换 |
 | 🛠️ 本地编码代理 | 读写文件、grep、打补丁、运行 shell 命令（默认开启） |
 | 🔎 代码导航 | 搜索项目、按结构定位、批量读取文件 |
 | 🧩 Agent Skills | 安装 `SKILL.md` 技能以扩展行为 |
@@ -49,12 +49,12 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 
 ## 🛡️ 安全与可靠性
 
-| 能力 | 行为 | 覆盖 |
+| 能力 | 行为 | 覆盖方式 |
 |---|---|---|
 | 🔒 项目信任 | 首次在未知文件夹运行时，会在代理工具加载前询问 | `fastcode trust` / `untrust` / `trusted`；`FASTCODE_TRUST_ALL=1` |
 | 🚫 危险命令拦截 | `rm -rf`、`dd`、`mkfs`、fork bomb 等在**执行前**被拒绝 | `FASTCODE_ALLOW_DANGEROUS=1` |
-| ✂️ 统一输出上限 | 输出在生产时被截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
-| 💾 会话日志 | 仅附加的 JSONL，崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
+| ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
+| 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
 
 > 危险命令拒绝列表移植自 HKUDS/FastCode 的 nanobot（`nanobot/agent/tools/shell.py`）。
 
@@ -67,7 +67,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | Node.js | ≥ 18.17（`node -v` 检查） |
 | git | 方式一 / 方式三 安装需要（方式二便携版不需要） |
 | 系统 | Termux(Android) / Linux / macOS / Windows |
-| 架构 | aarch64 / armv7 / x86_64 均可；若遇二进制不兼容，请改用「从源码」安装 |
+| 架构 | aarch64 / armv7 / x86_64 均可；若遇二进制不兼容，请改用方式三（手动安装，在本机重新拉取依赖） |
 
 Termux 安装依赖并放开存储权限：
 
@@ -196,7 +196,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 |---|---|
 | 安装很慢 / 卡住 | 换 npm 镜像：`npm config set registry https://registry.npmmirror.com` |
 | 权限错误 / 读不到手机文件 | 先跑 `termux-setup-storage`；确认 `~/storage/shared` 已生成 |
-| 架构不兼容 / 原生模块报错 | 改用**从源码安装**（方式 3），让依赖在本机重新编译 |
+| 架构不兼容 / 原生模块报错 | 改用**方式三：手动安装**（`npm install`），让依赖在本机重新拉取 |
 | API Key 无效 | 用 `fastcode doctor` 看缺哪个；检查环境变量名与值，或 `/login` 重新登录 |
 | 如何更新 | 仓库安装：`bash ~/fastcode/scripts/install.sh`；npm：`npm i -g @simplelittledev/fastcode@latest` |
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
@@ -298,7 +298,7 @@ gh release create v0.1.4 -t "FastCode 0.1.4" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块、数据流 |
 | [docs/MODULES.md](docs/MODULES.md) | 每个文件干什么 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 安全审计结论 |
-| [PATCHES.md](PATCHES.md) | 到 0.1.4 为止的 22 项修复清单 |
+| [PATCHES.md](PATCHES.md) | 到 0.1.4 为止的 29 项修复清单 |
 
 ---
 
@@ -308,5 +308,21 @@ gh release create v0.1.4 -t "FastCode 0.1.4" \
   本仓库在其编译产物上修复 + 手机适配，并已逆向重建 TypeScript 源码（`package/src`）。
 - `github.com/HKUDS/FastCode` 是另一个 Python 项目（代码理解框架），与本 TUI 无关。
 - 危险命令拦截的规则移植自 HKUDS/FastCode 的 nanobot。
+
+---
+
+## 🙏 致谢
+
+本项目是站在他人肩膀上的二次修复与适配，特别感谢：
+
+- **SimpleLittleDev** —— 原始 FastCode TUI 的作者。本项目基于其 npm 包
+  [`@simplelittledev/fastcode`](https://www.npmjs.com/package/@simplelittledev/fastcode)（0.1.3）
+  的编译产物进行修复与手机适配，npm 上的贡献与荣誉归其所有。
+- **HKUDS（香港大学数据智能实验室）** —— 危险命令拒绝列表移植自其开源项目
+  [`HKUDS/FastCode`](https://github.com/HKUDS/FastCode) 的 nanobot
+  （`nanobot/agent/tools/shell.py`），感谢该项目的所有贡献者。
+- 以及全部上游开源依赖的作者：Ink、React、meow、cfonts、marked、chalk 等。
+
+原始作者署名与上游项目名称、版权归各自所有；本仓库仅做修复与 Termux 适配。
 
 <sub>Made for Termux 🐧📱 · FastCode 0.1.4</sub>
