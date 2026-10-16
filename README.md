@@ -321,10 +321,6 @@ This project is a fix + Termux adaptation that stands on other people's work. Th
   adaptation built on the compiled artifact of the npm package
   [`@simplelittledev/fastcode`](https://www.npmjs.com/package/@simplelittledev/fastcode) (0.1.3);
   credit for the npm package belongs to them.
-- **HKUDS (HKU Data Intelligence Lab)** — the dangerous-command deny list is ported from
-  its open-source project [`HKUDS/FastCode`](https://github.com/HKUDS/FastCode) nanobot
-  (`nanobot/agent/tools/shell.py`); thanks to all its contributors.
-- All upstream open-source dependency authors: Ink, React, meow, cfonts, marked, chalk, and others.
 
 Original author credits, upstream project names and copyrights remain the property of their
 respective owners; this repo only fixes and adapts for Termux.
