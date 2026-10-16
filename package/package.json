@@ -28,7 +28,7 @@
     "check": "npm test && npm run typecheck && npm run lint && npm run build",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --import tsx test/*.test.ts",
+    "test": "node ../scripts/smoke-test.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

@@ -57,6 +57,7 @@
 
     cd package
     npm install
+    npm run check          # 冒烟测试(22 项) + typecheck + lint + build
     node bin/fastcode.mjs doctor
     node bin/fastcode.mjs update
 
