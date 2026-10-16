@@ -133,6 +133,19 @@ store.saveConfig({ ...cfg, providerId: "deepseek", model: "deepseek-chat" });
 ok("saveConfig writes config.json", existsSync(paths.getPaths().config));
 ok("config and keys stay in separate files", !existsSync(paths.getPaths().auth));
 
+// API keys are scoped to provider + model and never leak across models.
+store.setCredential("deepseek", "deepseek-chat", "sk-1234567890abcd");
+ok("a scoped key resolves for its own provider+model", store.resolveApiKey("deepseek", "deepseek-chat", []).status === "ok");
+ok("a key does NOT resolve for another model", store.resolveApiKey("deepseek", "deepseek-reasoner", []).status === "missing");
+process.env.DEEPSEEK_API_KEY = "sk-fromenv";
+ok("env var is a provider-wide fallback", store.resolveApiKey("deepseek", "deepseek-reasoner", ["DEEPSEEK_API_KEY"]).status === "ok");
+delete process.env.DEEPSEEK_API_KEY;
+ok("maskKey hides the middle", store.maskKey("sk-1234567890abcd") === "sk-****abcd");
+writeFileSync(paths.getPaths().auth, JSON.stringify({ keys: { openai: "sk-legacy-0000wxyz" } }));
+ok("a legacy provider-only key is unbound, not used", store.resolveApiKey("openai", "gpt-4o", []).status === "unbound");
+store.setCredential("openai", "gpt-4o", "sk-new-1234efgh");
+ok("re-binding a scope clears the provider's legacy key", store.listLegacy().length === 0);
+
 const slog = await load("session/log.js");
 const session = slog.createSessionLog({ providerId: "deepseek" });
 session.append({ type: "message", role: "user", content: "hi" });

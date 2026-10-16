@@ -115,6 +115,8 @@ export interface AppActions {
     disablePlugin(name: string): void;
     clearHistory(): void;
     pushSystemMessage(text: string): void;
+    /** Begin the guided API-key flow (choose provider → model → key). */
+    startLogin(options: { provider?: string; model?: string }): void;
 }
 export interface SkillManifest {
     name: string;

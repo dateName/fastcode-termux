@@ -1,7 +1,9 @@
 export declare const whoamiCommand: {
     name: string;
     description: string;
-    run(): {
+    run({ state }: {
+        state: any;
+    }): {
         message: string;
     };
 };

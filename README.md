@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Version | **0.1.4** |
+| Version | **0.1.5** |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
@@ -100,11 +100,11 @@ The script symlinks `package/dist/cli.js` into `$PREFIX/bin` (Termux) or `~/.loc
 
 ### 2. Portable bundle (no npm)
 
-Download the latest `fastcode-portable-0.1.4.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
+Download the latest `fastcode-portable-0.1.5.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
 
 ```bash
-tar -xzf fastcode-portable-0.1.4.tar.gz
-cd fastcode-portable-0.1.4
+tar -xzf fastcode-portable-0.1.5.tar.gz
+cd fastcode-portable-0.1.5
 ./fastcode
 ```
 
@@ -174,13 +174,16 @@ Pick **one** provider and export its key:
 echo 'export DEEPSEEK_API_KEY=sk-your-key' >> ~/.bashrc
 ```
 
-**Or** log in from the TUI (the key is masked as `********` and never echoed into the transcript):
+**Or** bind a key from the TUI. It is scoped to a specific provider + model, and the input is masked:
 
 ```text
-/login deepseek <your key>
+/login                                      # guided: provider → model → key (masked)
+/login deepseek deepseek-chat sk-your-key   # or on one line
 ```
 
-> 🔐 Keys live in a separate file, `~/.fastcode/auth.json`, apart from `config.json`. Changing the model never touches them.
+Every save echoes **provider · model · key tail (`sk-****abcd`) · file**, so you always know which model a key belongs to.
+
+> 🔐 Keys live in `~/.fastcode/auth.json`, keyed by `<provider>::<model>`, separate from `config.json`. A key is used only when the current provider **and** model match its scope, so switching models never borrows another model's key. Old provider-only keys are treated as *unbound* (never used silently) until you re-bind or discard them — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Env vars (`DEEPSEEK_API_KEY`, …) are provider-wide and apply to every model of that provider.
 
 ---
 
@@ -214,7 +217,7 @@ Inside the TUI: `/help` · `/model` · `/provider` · `/login` · `/agent` · `/
 | How to update | `cd ~/fastcode && git pull && bash scripts/install.sh` (install.sh alone does not pull) |
 | npm install gives old/broken behavior | the npm registry can lag the repo — prefer the clone or the portable bundle for now; `fastcode update` compares versions |
 | "requires a TTY" | run in a real terminal; pipes and some remote tools trigger this |
-| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.4) |
+| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.5) |
 | Command blocked | that's the safety guard; override with `FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -262,9 +265,9 @@ sh scripts/build-portable.sh
 Artifacts land in `release/`:
 
 ```text
-fastcode-portable-0.1.4.tar.gz       self-contained single-file bundle
-fastcode-portable-0.1.4.zip          same (needs the `zip` command)
-simplelittledev-fastcode-0.1.4.tgz   npm package (npm pack)
+fastcode-portable-0.1.5.tar.gz       self-contained single-file bundle
+fastcode-portable-0.1.5.zip          same (needs the `zip` command)
+simplelittledev-fastcode-0.1.5.tgz   npm package (npm pack)
 SHA256SUMS                           checksums
 ```
 
@@ -283,16 +286,16 @@ npm publish --access public
 CI publishes automatically (`.github/workflows/release.yml`) — just push a tag:
 
 ```bash
-git tag v0.1.4
-git push origin v0.1.4        # Actions: build + package + upload Release
+git tag v0.1.5
+git push origin v0.1.5        # Actions: build + package + upload Release
 ```
 
 Or manually:
 
 ```bash
-gh release create v0.1.4 -t "FastCode 0.1.4" \
-  release/fastcode-portable-0.1.4.tar.gz \
-  release/simplelittledev-fastcode-0.1.4.tgz \
+gh release create v0.1.5 -t "FastCode 0.1.5" \
+  release/fastcode-portable-0.1.5.tar.gz \
+  release/simplelittledev-fastcode-0.1.5.tgz \
   release/SHA256SUMS
 ```
 
@@ -314,7 +317,7 @@ gh release create v0.1.4 -t "FastCode 0.1.4" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | architecture, modules, data flow |
 | [docs/MODULES.md](docs/MODULES.md) | what every source file does |
 | [docs/AUDIT.md](docs/AUDIT.md) | security and robustness audit |
-| [PATCHES.md](PATCHES.md) | all 29 fixes up to 0.1.4 |
+| [PATCHES.md](PATCHES.md) | all 33 fixes up to 0.1.5 |
 
 ---
 
@@ -339,4 +342,4 @@ This project is a fix + Termux adaptation that stands on other people's work. Th
 Original author credits, upstream project names and copyrights remain the property of their
 respective owners; this repo only fixes and adapts for Termux.
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.4</sub>
+<sub>Made for Termux 🐧📱 · FastCode 0.1.5</sub>

@@ -9,7 +9,7 @@ import { detectPlatform, platformLabel } from "./platform.js";
 import { readPackageMeta } from "./pkg.js";
 import { shouldUseStableTerminalUi } from "./uiMode.js";
 import { getPaths } from "../config/paths.js";
-import { loadConfig, resolveApiKey } from "../config/store.js";
+import { loadConfig, resolveApiKey, resolveProviderKey } from "../config/store.js";
 import { PROVIDERS } from "../providers/index.js";
 import { listInstalledSkills } from "../skills/manager.js";
 import { listInstalledPlugins } from "../plugins/manager.js";
@@ -36,9 +36,10 @@ export function collectDiagnostics() {
         paths = undefined;
     }
     const provider = PROVIDERS.find((p) => p.id === config.providerId);
-    const keyPresent = provider
-        ? provider.authEnv.length === 0 || Boolean(resolveApiKey(provider.id, provider.authEnv))
-        : false;
+    const keyLookup = provider && provider.authEnv.length > 0
+        ? resolveApiKey(provider.id, config.model, provider.authEnv)
+        : { status: "ok" as const };
+    const keyPresent = Boolean(provider) && (provider.authEnv.length === 0 || keyLookup.status === "ok");
     let skillsInstalled = 0;
     let pluginsInstalled = 0;
     try {
@@ -71,6 +72,7 @@ export function collectDiagnostics() {
         providerId: config.providerId,
         model: config.model,
         keyPresent,
+        keyStatus: provider ? keyLookup.status : "missing",
         keyEnv: provider?.authEnv?.[0],
         skillsInstalled,
         pluginsInstalled,
@@ -90,7 +92,7 @@ export function collectDiagnostics() {
             id: p.id,
             label: p.label,
             env: p.authEnv,
-            keyPresent: p.authEnv.length === 0 || Boolean(resolveApiKey(p.id, p.authEnv)),
+            keyPresent: p.authEnv.length === 0 || Boolean(resolveProviderKey(p.id, p.authEnv).key),
         })),
     };
 }
@@ -111,7 +113,14 @@ export function formatDiagnostics(info) {
     lines.push("  shell guard   " + info.shellDenyPatterns + " deny patterns" + (info.allowDangerous ? "   [FASTCODE_ALLOW_DANGEROUS is ON]" : ""));
     lines.push("  tool output   " + info.toolOutputLimit + " chars max (streaming cap)");
     lines.push(`  provider      ${info.providerId} · model ${info.model}`);
-    lines.push(`  api key       ${info.keyPresent ? "present" : `MISSING — set ${info.keyEnv ?? "the provider env var"} or /login ${info.providerId} <key>`}`);
+    let apiKeyStatus;
+    if (info.keyPresent)
+        apiKeyStatus = "present";
+    else if (info.keyStatus === "unbound")
+        apiKeyStatus = `UNBOUND — a stored ${info.providerId} key isn't tied to a model; re-bind with /login ${info.providerId} ${info.model} <key>`;
+    else
+        apiKeyStatus = `MISSING — set ${info.keyEnv ?? "the provider env var"} or /login ${info.providerId} ${info.model} <key>`;
+    lines.push(`  api key       ${apiKeyStatus}`);
     lines.push(`  skills        ${info.skillsInstalled} installed, ${info.enabledSkills} enabled`);
     lines.push(`  plugins       ${info.pluginsInstalled} installed, ${info.enabledPlugins} enabled`);
     lines.push("");

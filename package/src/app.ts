@@ -19,8 +19,9 @@ import { StatusBar } from "./ui/StatusBar.js";
 import { MessageBubble } from "./ui/Message.js";
 import { Prompt } from "./ui/Prompt.js";
 import { COMMANDS, findCommand, parseSlash } from "./commands/index.js";
-import { getProviderOrThrow } from "./providers/index.js";
-import { loadConfig, saveConfig, resolveApiKey, } from "./config/store.js";
+import { saveScopedKey } from "./commands/login.js";
+import { getProvider, getProviderOrThrow, PROVIDERS } from "./providers/index.js";
+import { loadConfig, saveConfig, resolveApiKey, getLegacy, } from "./config/store.js";
 import { getTheme } from "./config/themes.js";
 import { createStartupTranscript } from "./lib/startup.js";
 import { shouldUseLiveStreamingUi, shouldUseStableTerminalUi } from "./lib/uiMode.js";
@@ -29,6 +30,23 @@ import { buildSkillsPrompt } from "./skills/manager.js";
 import { createSessionLog, loadSessionMessages, openSessionLog } from "./session/log.js";
 import { isTrusted, trustProject } from "./config/trust.js";
 import { TrustGate } from "./ui/TrustGate.js";
+/**
+ * Mask the secret part of a `/login` invocation in the transcript:
+ * `/login prov` → unchanged, `/login prov <key>` → key masked,
+ * `/login prov model <key>` → provider/model shown, key masked.
+ */
+function maskLoginEcho(args) {
+    const parts = ["/login", args[0] ?? ""];
+    if (args.length === 2) {
+        parts.push("********");
+    }
+    else if (args.length >= 3) {
+        parts.push(args[1]);
+        for (let i = 2; i < args.length; i += 1)
+            parts.push("********");
+    }
+    return parts.filter((p) => p !== "").join(" ");
+}
 export const App = ({ initialPrompt, resume }) => {
     const { exit } = useApp();
     const startupRef = useRef(null);
@@ -66,6 +84,7 @@ export const App = ({ initialPrompt, resume }) => {
     const [streamingId, setStreamingId] = useState(null);
     const [streamingText, setStreamingText] = useState("");
     const [input, setInput] = useState("");
+    const [pendingLogin, setPendingLogin] = useState(null);
     const [busy, setBusy] = useState(false);
     const [totalIn, setTotalIn] = useState(0);
     const [totalOut, setTotalOut] = useState(0);
@@ -81,6 +100,16 @@ export const App = ({ initialPrompt, resume }) => {
     // The banner picks a font that fits the terminal width (see ui/Banner.ts)
     // and renders nothing when even the smallest font is too wide.
     const showBanner = transcript.length <= startup.transcript.length && !busy;
+    const promptPlaceholder = pendingLogin
+        ? pendingLogin.step === "provider"
+            ? "Provider id (e.g. deepseek) · Esc to cancel"
+            : pendingLogin.step === "model"
+                ? "Model id (e.g. deepseek-chat) · Esc to cancel"
+                : pendingLogin.provider && getLegacy(pendingLogin.provider)
+                    ? "Paste API key (masked), or type 'keep' · Esc to cancel"
+                    : "Paste API key (masked) · Esc to cancel"
+        : undefined;
+    const promptMask = pendingLogin?.step === "key" ? "*" : undefined;
     // Persist config whenever it changes.
     useEffect(() => {
         saveConfig(config);
@@ -88,6 +117,12 @@ export const App = ({ initialPrompt, resume }) => {
     // Esc cancels streaming. Double Ctrl+C quits.
     useInput((inputChar, key) => {
         if (key.escape) {
+            if (pendingLogin) {
+                setPendingLogin(null);
+                setInput("");
+                pushSystem("API key entry cancelled.");
+                return;
+            }
             if (abortRef.current) {
                 abortRef.current.abort();
                 abortRef.current = null;
@@ -151,6 +186,13 @@ export const App = ({ initialPrompt, resume }) => {
             setTranscript([]);
         },
         pushSystemMessage: pushSystem,
+        startLogin: ({ provider, model }) => {
+            setPendingLogin({
+                step: provider ? (model ? "key" : "model") : "provider",
+                provider,
+                model,
+            });
+        },
     }), [pushSystem]);
     const runSlash = useCallback(async (raw) => {
         const parsed = parseSlash(raw);
@@ -162,10 +204,8 @@ export const App = ({ initialPrompt, resume }) => {
             return true;
         }
         // Echo the slash invocation for transcript clarity, but never echo a
-        // secret: "/login <provider> <key>" would otherwise print the API key.
-        const echo = parsed.name === "login" && parsed.args.length >= 2
-            ? `/login ${parsed.args[0]} ${"*".repeat(8)}`
-            : raw;
+        // secret: the login key is masked, while provider/model stay readable.
+        const echo = parsed.name === "login" ? maskLoginEcho(parsed.args) : raw;
         pushUser(echo);
         try {
             const res = await cmd.run({
@@ -225,10 +265,20 @@ export const App = ({ initialPrompt, resume }) => {
         }
         pushUser(text);
         const provider = getProviderOrThrow(config.providerId);
-        const apiKey = resolveApiKey(provider.id, provider.authEnv);
-        if (!apiKey && provider.authEnv.length > 0) {
-            pushSystem(`Cannot send: no API key for ${provider.label}. Run \`/login ${provider.id} <key>\`.`);
-            return;
+        let apiKey;
+        if (provider.authEnv.length > 0) {
+            const lookup = resolveApiKey(provider.id, config.model, provider.authEnv);
+            if (lookup.status === "unbound") {
+                pushSystem(`Cannot send: your stored ${provider.label} key isn't bound to a model, so it won't be used.\n` +
+                    `Re-bind it with \`/login ${provider.id} ${config.model} <key>\` (or \`/logout ${provider.id}\` to discard it).`);
+                return;
+            }
+            if (lookup.status === "missing") {
+                pushSystem(`Cannot send: no API key for ${provider.label} · ${config.model}.\n` +
+                    `Run \`/login ${provider.id} ${config.model} <key>\` for this model, or set ${provider.authEnv[0]} (provider-wide).`);
+                return;
+            }
+            apiKey = lookup.key;
         }
         const nextHistory = [...history, { role: "user", content: text }];
         setHistory(nextHistory);
@@ -308,11 +358,20 @@ export const App = ({ initialPrompt, resume }) => {
             ]);
         }
         catch (err) {
-            if (err.name === "AbortError") {
+            const message = String(err?.message ?? err);
+            if (err?.name === "AbortError") {
                 pushSystem("Cancelled.");
             }
+            else if (/\b(401|403)\b/.test(message) || /invalid api key|unauthorized|authentication/i.test(message)) {
+                pushSystem(`Authentication failed for ${provider.label} · ${config.model}. The key may be wrong or not allowed for this model.\n` +
+                    `Check with \`/whoami\`, or re-save: \`/login ${provider.id} ${config.model} <key>\`.`);
+            }
+            else if (/\b(402|429)\b/.test(message) || /quota|insufficient|rate limit|billing|balance/i.test(message)) {
+                pushSystem(`Request blocked: ${provider.label} reports no remaining quota / rate limit for ${config.model}.\n` +
+                    `Top up the account or switch model/provider. (${message.slice(0, 200)})`);
+            }
             else {
-                pushSystem(`Error: ${err.message}`);
+                pushSystem(`Error: ${message}`);
             }
         }
         finally {
@@ -335,6 +394,60 @@ export const App = ({ initialPrompt, resume }) => {
         pushUser,
         runSlash,
     ]);
+    // Guided `/login`: provider → model → key. Text prompts only; the key step
+    // is masked. `keep` re-binds an existing unbound (legacy) key to a model.
+    const handleWizardSubmit = useCallback(async (raw) => {
+        const value = raw.trim();
+        setInput("");
+        if (!value || !pendingLogin)
+            return;
+        if (pendingLogin.step === "provider") {
+            const provider = getProvider(value);
+            if (!provider) {
+                pushSystem(`Unknown provider "${value}". Available: ${PROVIDERS.map((p) => p.id).join(", ")}`);
+                return;
+            }
+            if (provider.authEnv.length === 0) {
+                pushSystem(`${provider.label} doesn't require an API key. Nothing to save.`);
+                setPendingLogin(null);
+                return;
+            }
+            setPendingLogin({ step: "model", provider: provider.id });
+            const models = await provider.listModels(undefined).catch(() => []);
+            const names = models.slice(0, 8).map((m) => m.id).join(", ");
+            pushSystem(`Provider: ${provider.label} (${provider.id}).\n` +
+                `Type the model id to bind this key to — e.g. \`${provider.defaultModel}\`.` +
+                (names ? `\n  known models: ${names}` : ""));
+            return;
+        }
+        if (pendingLogin.step === "model") {
+            const provider = getProvider(pendingLogin.provider);
+            if (!provider) {
+                setPendingLogin(null);
+                return;
+            }
+            setPendingLogin({ step: "key", provider: provider.id, model: value });
+            pushSystem(`Scope: ${provider.id} · ${value}.\nPaste the API key for this model (input is masked).` +
+                (getLegacy(provider.id) ? `\nOr type \`keep\` to re-bind the stored ${provider.label} key.` : ""));
+            return;
+        }
+        const provider = getProvider(pendingLogin.provider);
+        if (!provider) {
+            setPendingLogin(null);
+            return;
+        }
+        let key = value;
+        if (value.toLowerCase() === "keep") {
+            const legacy = getLegacy(provider.id);
+            if (!legacy) {
+                pushSystem(`No stored ${provider.label} key to reuse — paste the key instead.`);
+                return;
+            }
+            key = legacy;
+        }
+        pushSystem(saveScopedKey(provider.id, provider.label, pendingLogin.model, key));
+        setPendingLogin(null);
+    }, [pendingLogin, pushSystem]);
     useEffect(() => {
         if (!initialPrompt || initialPromptSubmittedRef.current)
             return;
@@ -359,5 +472,5 @@ export const App = ({ initialPrompt, resume }) => {
         };
         return _jsx(TrustGate, { theme: theme, cwd: process.cwd(), onDecision: decide });
     }
-    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingText, markdown: true, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamingId !== null ? "Streaming" : "Thinking"), stable: stableUi && !agentActivity }) })) : null, _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: handleSubmit, disabled: busy, stable: stableUi }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length }), _jsxs(Text, { color: theme.muted, children: [COMMANDS.length, " commands \u00B7 ", config.enabledSkills.length, " skill(s) active"] })] })] }));
+    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingText, markdown: true, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamingId !== null ? "Streaming" : "Thinking"), stable: stableUi && !agentActivity }) })) : null, _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: pendingLogin ? handleWizardSubmit : handleSubmit, disabled: busy, stable: stableUi, placeholder: promptPlaceholder, mask: promptMask }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length }), _jsxs(Text, { color: theme.muted, children: [COMMANDS.length, " commands \u00B7 ", config.enabledSkills.length, " skill(s) active"] })] })] }));
 };

@@ -21,7 +21,7 @@ export const anthropicProvider = {
     },
     async *stream(req, apiKey) {
         if (!apiKey) {
-            throw new Error("Missing ANTHROPIC_API_KEY. Run /login anthropic or set the env var.");
+            throw new Error("Missing ANTHROPIC_API_KEY. Bind one with /login anthropic <model> <key>, or set the env var.");
         }
         const messages = req.messages.map((m) => ({ role: m.role, content: m.content }));
         const body = {

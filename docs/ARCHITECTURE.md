@@ -1,6 +1,6 @@
 # FastCode 架构说明（Termux 优先）
 
-本文描述 FastCode 0.1.4 的整体架构、模块划分、数据流、扩展点与 Termux 适配位置。
+本文描述 FastCode 0.1.5 的整体架构、模块划分、数据流、扩展点与 Termux 适配位置。
 目标是：任何人只看这一篇，就能知道改哪个文件、影响哪些模块。
 
 ## 1. 分层总览
@@ -71,9 +71,10 @@
 
 ### 3.3 配置与密钥的读取顺序
 
-    环境变量 KEY  ->  先查 auth.json  ->  再查进程环境变量
+    auth.json 中作用域匹配的 Key(provider+model)  ->  服务商环境变量  ->  legacy 键(不使用，提示重绑)
 
-config.json 与 auth.json 是两个独立文件；改模型只动 config.json。
+Key 绑定到「服务商 + 模型」作用域：provider 或 model 任一不匹配即视为「当前模型未配置」。
+config.json 与 auth.json 是两个独立文件；改模型只动 config.json，不会碰到 Key。
 
 ### 3.4 分发与打包（clone 即可跑）
 
@@ -124,7 +125,7 @@ config.json 与 auth.json 是两个独立文件；改模型只动 config.json。
 | shell 执行 | agent/tools.js runShell() | 走 Termux 的 /bin/sh，注入 FASTCODE_SANDBOX 标记 |
 | 自检 | lib/diagnostics.js | fastcode doctor 打印 Termux 专属建议 |
 
-## 5.1 安全与恢复（0.1.4）
+## 5.1 安全与恢复（0.1.5）
 
 | 关注点 | 位置 | 行为 |
 |---|---|---|
@@ -146,7 +147,7 @@ shell 工具在 spawn 之前先过 evaluateShellCommand()。
 - 依赖方向清晰，没有循环依赖；
 - 单文件最大约 320 行（app.js），多数在 20 到 120 行。
 
-**已补齐（0.1.4）：**
+**已补齐（0.1.5）：**
 
 1. **已有 TypeScript 源码树 src/**：58 个模块由 dist 逆向重建，types.ts 恢复了真实接口，
    tsc 编译零错误。dist 现在是 src 的编译产物，**源码才是唯一事实来源**。

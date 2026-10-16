@@ -1,4 +1,4 @@
-# FastCode 0.1.3 → 0.1.4 修复清单
+# FastCode 0.1.3 → 0.1.5 修复清单
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
@@ -13,13 +13,13 @@
 | 5 | dist/lib/platform.js | Termux 判断要求 PREFIX 目录存在，部分环境误判为非 Termux，导致不启用稳定 UI | 同时识别 TERMUX_VERSION，不再强制目录存在 |
 | 6 | dist/app.js | runSlash 的 useCallback 依赖数组缺少 agentMode、enabledPlugins、skillsRegistry，斜杠命令读到过期状态 | 补齐依赖项 |
 | 7 | dist/lib/diagnostics.js、dist/cli.js | 缺少部署自检与更新入口 | 新增 fastcode doctor 和 fastcode update |
-| 8 | package.json | 版本号 | 0.1.3 → 0.1.4 |
+| 8 | package.json | 版本号 | 0.1.3 → 0.1.5 |
 | 9 | dist/agent/tools.js | walk() 对每个条目 stat()（跟随软链接），悬空软链接抛 ENOENT 使 grep / list_files 整次失败；且会经软链接扫出沙箱（如 Termux /storage/emulated/0） | stat/readdir/visit 逐项容错；有效软链接仍遍历；越出沙箱根的软链接不深入；按祖先链检测软链接环；5000 条上限 |
 | 10 | dist/providers/openaiCompatible.js | 新版模型（o 系列 / GPT-5+）拒绝 max_tokens 与 temperature，请求 400，表现为“无法识别最新主流模型” | 首次请求失败且报参数错误时，自动用 max_completion_tokens 且不带 temperature 重试一次 |
 | 11 | dist/providers/openaiCompatible.js | /models 实时列表只返回 id，丢失标签与价格；且内置列表不全会盖掉实时结果 | 实时列表与内置元数据合并，内置未返回的模型保留 |
 | 12 | dist/providers/*、providers/index.js | 仅 8 个服务商，模型清单陈旧 | 新增 xAI(Grok)、Moonshot(Kimi)、Zhipu(GLM)、Qwen(DashScope)、Custom(OpenAI 兼容)；刷新各服务商默认模型 |
 | 13 | dist/cli.js、dist/lib/diagnostics.js | Termux 下不想开 TUI 只想改配置；config 与 key 的分离不够直观 | 新增 fastcode provider / model / config 子命令，直接读写 config.json 且绝不触碰 auth.json；doctor 分别打印 config 文件与 keys 文件路径 |
-| 14 | docs/*、scripts/*、release/ | 缺架构文档、缺免安装部署方式、缺可复现的构建与自检 | 新增 docs/ARCHITECTURE、MODULES、CONFIGURATION、DEPLOYMENT；新增 scripts/build-portable.sh（一键出行便携包）与 scripts/smoke-test.mjs（10 项自检全部通过）；产出免安装便携包 tar.gz/zip |
+| 14 | docs/*、scripts/*、release/ | 缺架构文档、缺免安装部署方式、缺可复现的构建与自检 | 新增 docs/ARCHITECTURE、MODULES、CONFIGURATION、DEPLOYMENT；新增 scripts/build-portable.sh（一键出行便携包）与 scripts/smoke-test.mjs（自检全部通过）；产出免安装便携包 tar.gz/zip |
 | 15 | src/*、tsconfig.json | 只有编译产物，无法维护、审计与升级 | 由 dist 逆向重建 58 个模块到 src/*.ts，types.ts 恢复真实接口；新增 tsconfig.json；tsc 编译零错误，dist 改由 src 生成 |
 | 16 | src/agent/tools.ts、scripts/smoke-test.mjs | 沙箱可经软链接逃逸（高危）：沙箱内软链接指向外部时 read/write/delete 可越界 | sandboxPath 增加真实路径校验（解析最深已存在祖先再比对）；smoke 增加软链接越界与越界写入用例 |
 | 17 | docs/AUDIT.md | 缺少安全与健壮性审计记录 | 新增审计报告：1 高危已修、2 中危已修、2 中危与 4 低危待办，含复现与建议 |
@@ -35,6 +35,10 @@
 | 27 | package/src/session/log.ts | 会话缓存上限默认偏小 | 默认 64MB → 256MB（仍可用 FASTCODE_SESSION_CACHE_MB 调整） |
 | 28 | scripts/install.sh、scripts/install-termux.sh、.github/workflows/release.yml、.gitattributes、scripts/build-portable.sh | 缺真正可用的一键安装 / 自动发布 / 换行一致 | install.sh 改为把 dist/cli.js 软链到 PATH（有产物免 npm）；install-termux.sh 变薄封装；新增 CI 打 tag 自动发 Release；build-portable.sh 产出 tar.gz/zip + npm pack + SHA256SUMS；.gitattributes 统一 LF |
 | 29 | src/app.ts、src/ui/Banner.ts | 启动大字横幅仅在终端 ≥88 列时显示，手机竖屏（Termux 约 56 列）看不到 | 按终端宽度自适应选字体（block 74 / simple 56 / slick 49 / shade 39 / chrome 32 / console 16 列），都放不下才不显示；真机（LG V40，35×56）已验证横幅正常且不换行 |
+| 30 | src/config/store.ts、src/lib/*、src/commands/* | API Key 被当成"服务商级"的单一字符串：首次输入不说明归属哪个服务商/模型，保存后不回显绑定，切换模型时信息错位 | Key 绑定到「服务商 + 模型」：auth.json v2 以 `<provider>::<model>` 作用域保存；resolveApiKey 必须 provider 与 model 同时匹配才使用；新增 maskKey 只回显尾号（sk-****abcd）；旧 provider-only 键识别为 legacy/unbound，绝不静默使用 |
+| 31 | src/commands/login.ts、logout.ts、whoami.ts、src/app.ts、src/ui/Prompt.ts | /login 无引导、不回显归属；logout 只能按服务商删 | /login 引导式流程：服务商 → 模型 → Key（输入掩码），无参数时逐步选择；保存后回显 服务商/模型/尾号/文件路径；logout 支持按作用域删除或 `--all`；whoami 列出作用域、legacy 与环境变量；发送前校验当前 provider+model 的 Key，缺失或 unbound 时拦截并给出精确命令 |
+| 32 | src/app.ts | 服务商鉴权失败 / 额度用完时报错笼统 | 401/403 提示重新检查或重存 Key；402/429 提示额度/限流并建议充值或切换模型；均带 provider·model 上下文 |
+| 33 | docs/CONFIGURATION.md、README.md、README.zh.md | 文档仍描述 provider 级 Key | 更新为「服务商 + 模型」作用域、legacy 迁移、引导式 /login、发送前校验与错误提示 |
 
 ## 验证方式
 
@@ -52,13 +56,13 @@
   - 欢迎语正常显示；
   - 输入 /help 能看到命令列表（19 条）；
   - 输入 /login anthropic sk-SECRET-123 后，最终画面不含明文 Key，且显示打码。
-- CLI：--version 输出 0.1.4；skills list / skills search 正常；doctor 输出诊断；update 输出版本对比。
+- CLI：--version 输出 0.1.5；skills list / skills search 正常；doctor 输出诊断；update 输出版本对比。
 
 ## 本地复现（需要 Node.js >= 18.17）
 
     cd package
     npm install
-    npm run check          # 冒烟测试(22 项) + typecheck + lint + build
+    npm run check          # 冒烟测试 + typecheck + lint + build
     node bin/fastcode.mjs doctor
     node bin/fastcode.mjs update
 
@@ -66,5 +70,6 @@
 
 - 上游源码已删除，但本仓库已逆向重建 TypeScript 源码树（package/src），dist 可随时用
   `cd package && npm run build`（tsc + esbuild）重新生成；改功能请改 src，不要再直接改 dist。
+- 旧 provider-only Key 只带服务商、不携带模型信息，无法自动判定归属，因此按 unbound 处理并提示重新绑定，不会自动迁移到当前模型。
 - 技能市场 skillshub.wtf 需要付费，属上游问题，未改。
 - 未做真实 Termux 设备上的交互测试（本环境无法运行 Android/Termux）。

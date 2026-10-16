@@ -1,13 +1,13 @@
 import { getProviderOrThrow } from "../providers/index.js";
-import { resolveApiKey } from "../config/store.js";
+import { resolveProviderKey } from "../config/store.js";
 export const modelCommand = {
     name: "model",
     description: "List models for the current provider, or switch model. Usage: /model [id]",
     async run({ args, state, actions }) {
         const provider = getProviderOrThrow(state.providerId);
         if (args.length === 0) {
-            const apiKey = resolveApiKey(provider.id, provider.authEnv);
-            const models = await provider.listModels(apiKey);
+            const { key } = resolveProviderKey(provider.id, provider.authEnv);
+            const models = await provider.listModels(key);
             if (models.length === 0) {
                 return { message: `No models available from ${provider.label}.` };
             }

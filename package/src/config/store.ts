@@ -4,6 +4,13 @@
  * We deliberately keep the format human-readable JSON so users on Termux can
  * edit it from `nano ~/.fastcode/config.json` if needed. Atomic writes prevent
  * partial files on Ctrl+C.
+ *
+ * API keys are NOT a single global string: each one is scoped to a concrete
+ * "provider + model" pair. auth.json stores one credential per
+ * `<provider>::<model>` scope, and a stored key is only used when the current
+ * provider AND model match that scope. The old provider-only format is read as
+ * "legacy": it is shown back to the user but never used silently, because a
+ * provider-only key does not tell us which model it was meant for.
  */
 import { readFileSync, writeFileSync, existsSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -23,6 +30,31 @@ export const DEFAULT_CONFIG = {
     skillsRegistry: "https://skillshub.wtf",
     lifetimeCostUsd: 0,
 };
+export interface StoredCredential {
+    provider: string;
+    model: string;
+    key: string;
+    addedAt: string;
+}
+export interface AuthStore {
+    version: number;
+    /** Scoped credentials, keyed by `provider::model`. */
+    keys: Record<string, StoredCredential>;
+    /** Old provider-only keys we refuse to use until the user re-binds them. */
+    legacy: Record<string, string>;
+}
+export type KeyLookup = {
+    status: "ok";
+    key: string;
+    source: "file" | "env";
+    envVar?: string;
+} | {
+    status: "unbound";
+    provider: string;
+    legacyKey: string;
+} | {
+    status: "missing";
+};
 export function loadConfig() {
     const { config } = getPaths();
     if (!existsSync(config))
@@ -39,34 +71,158 @@ export function saveConfig(cfg) {
     const { config } = getPaths();
     atomicWrite(config, JSON.stringify(cfg, null, 2));
 }
-export function loadAuth() {
+/** Composite scope id for a provider + model credential. */
+export function scopeId(providerId, model) {
+    return `${providerId}::${model}`;
+}
+export function loadAuth(): AuthStore {
     const { auth } = getPaths();
+    const empty: AuthStore = { version: 2, keys: {}, legacy: {} };
     if (!existsSync(auth))
-        return { keys: {} };
+        return empty;
     try {
         const raw = JSON.parse(readFileSync(auth, "utf8"));
-        return { keys: raw.keys ?? {} };
+        const keys: Record<string, StoredCredential> = {};
+        const legacy: Record<string, string> = {};
+        const source = raw && typeof raw === "object" ? (raw.keys ?? {}) : {};
+        for (const [id, value] of Object.entries<any>(source)) {
+            if (value && typeof value === "object" && typeof value.key === "string") {
+                const [idProvider, idModel] = id.split("::");
+                const provider = value.provider || idProvider || id;
+                const model = value.model || idModel || "";
+                keys[scopeId(provider, model)] = {
+                    provider,
+                    model,
+                    key: value.key,
+                    addedAt: value.addedAt ?? "",
+                };
+            }
+            else if (typeof value === "string" && value.trim()) {
+                legacy[id] = value;
+            }
+        }
+        if (raw && typeof raw === "object" && raw.legacy && typeof raw.legacy === "object") {
+            for (const [id, value] of Object.entries<any>(raw.legacy)) {
+                if (typeof value === "string" && value.trim())
+                    legacy[id] = value;
+            }
+        }
+        return { version: 2, keys, legacy };
     }
     catch {
-        return { keys: {} };
+        return empty;
     }
 }
-export function saveAuth(store) {
+export function saveAuth(store: AuthStore) {
     const { auth } = getPaths();
-    atomicWrite(auth, JSON.stringify(store, null, 2));
+    const payload: any = { version: 2, keys: store.keys };
+    if (Object.keys(store.legacy).length > 0)
+        payload.legacy = store.legacy;
+    atomicWrite(auth, JSON.stringify(payload, null, 2));
     lockdown(auth);
 }
-/** Resolve an API key from auth store, then ENV. */
-export function resolveApiKey(providerId, envVars) {
-    const auth = loadAuth();
-    if (auth.keys[providerId])
-        return auth.keys[providerId];
-    for (const envVar of envVars) {
-        const v = process.env[envVar];
-        if (v && v.trim())
-            return v.trim();
+export function getCredential(providerId, model): StoredCredential | undefined {
+    return loadAuth().keys[scopeId(providerId, model)];
+}
+export function listCredentials(): StoredCredential[] {
+    return Object.values(loadAuth().keys);
+}
+export function listLegacy(): Array<{
+    provider: string;
+    key: string;
+}> {
+    return Object.entries<any>(loadAuth().legacy).map(([provider, key]) => ({ provider, key }));
+}
+export function getLegacy(providerId): string | undefined {
+    return loadAuth().legacy[providerId];
+}
+/** Save/replace the credential for one provider+model scope (drops the legacy key). */
+export function setCredential(providerId, model, key): StoredCredential {
+    const store = loadAuth();
+    const credential = {
+        provider: providerId,
+        model,
+        key: key.trim(),
+        addedAt: new Date().toISOString(),
+    };
+    store.keys[scopeId(providerId, model)] = credential;
+    delete store.legacy[providerId];
+    saveAuth(store);
+    return credential;
+}
+export function removeCredential(providerId, model): boolean {
+    const store = loadAuth();
+    const id = scopeId(providerId, model);
+    if (!store.keys[id])
+        return false;
+    delete store.keys[id];
+    saveAuth(store);
+    return true;
+}
+/** Remove every credential for a provider (all models) plus its legacy key. */
+export function removeCredentialsForProvider(providerId): number {
+    const store = loadAuth();
+    let removed = 0;
+    for (const id of Object.keys(store.keys)) {
+        if (store.keys[id].provider === providerId) {
+            delete store.keys[id];
+            removed += 1;
+        }
     }
-    return undefined;
+    if (store.legacy[providerId]) {
+        delete store.legacy[providerId];
+        removed += 1;
+    }
+    if (removed > 0)
+        saveAuth(store);
+    return removed;
+}
+/** Turn a key into a safe terminal echo: `sk-****abcd`. */
+export function maskKey(key) {
+    const value = (key ?? "").trim();
+    if (!value)
+        return "";
+    if (value.length <= 8)
+        return "*".repeat(value.length);
+    return value.slice(0, 3) + "****" + value.slice(-4);
+}
+/**
+ * Resolve the key to use for a specific provider+model:
+ *   1. the scoped credential in auth.json (exact provider+model match), then
+ *   2. the provider's environment variable (provider-scoped, any model), and
+ *   3. report an "unbound" legacy key instead of using it silently.
+ */
+export function resolveApiKey(providerId, model, envVars): KeyLookup {
+    const store = loadAuth();
+    const scoped = store.keys[scopeId(providerId, model)];
+    if (scoped && scoped.key)
+        return { status: "ok", key: scoped.key, source: "file" };
+    for (const envVar of envVars ?? []) {
+        const value = process.env[envVar];
+        if (value && value.trim())
+            return { status: "ok", key: value.trim(), source: "env", envVar };
+    }
+    if (store.legacy[providerId])
+        return { status: "unbound", provider: providerId, legacyKey: store.legacy[providerId] };
+    return { status: "missing" };
+}
+/** Best-effort key for a provider regardless of model (used to list models). */
+export function resolveProviderKey(providerId, envVars): {
+    key?: string;
+    source?: "file" | "env";
+    envVar?: string;
+} {
+    const store = loadAuth();
+    for (const credential of Object.values(store.keys)) {
+        if (credential.provider === providerId && credential.key)
+            return { key: credential.key, source: "file" };
+    }
+    for (const envVar of envVars ?? []) {
+        const value = process.env[envVar];
+        if (value && value.trim())
+            return { key: value.trim(), source: "env", envVar };
+    }
+    return {};
 }
 /**
  * Write-then-rename so a Ctrl+C mid-write never leaves a corrupt file.

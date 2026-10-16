@@ -6,9 +6,14 @@ export function createStartupTranscript(config) {
     ];
     const provider = getProviderOrThrow(config.providerId);
     if (provider.authEnv.length > 0) {
-        const key = resolveApiKey(provider.id, provider.authEnv);
-        if (!key) {
-            messages.push(`No API key found for ${provider.label}. Run \`/login ${provider.id} <key>\` or set ${provider.authEnv[0]}.`);
+        const lookup = resolveApiKey(provider.id, config.model, provider.authEnv);
+        if (lookup.status === "unbound") {
+            messages.push(`Stored ${provider.label} key isn't bound to a model, so it won't be used. ` +
+                `Re-bind it with \`/login ${provider.id} ${config.model} <key>\` (or \`/logout ${provider.id}\` to discard it).`);
+        }
+        else if (lookup.status === "missing") {
+            messages.push(`No API key for ${provider.label} · ${config.model}. ` +
+                `Run \`/login ${provider.id} ${config.model} <key>\`, or set ${provider.authEnv[0]} (provider-wide, any model).`);
         }
     }
     return messages.map((content, index) => ({

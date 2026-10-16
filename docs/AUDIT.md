@@ -1,4 +1,4 @@
-# 安全与健壮性审计报告 — FastCode 0.1.4
+# 安全与健壮性审计报告 — FastCode 0.1.5
 
 审计对象：src/（58 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
@@ -25,7 +25,7 @@
   与沙箱真实路径比对；不在其中即拒绝（路径含软链接越界）。
 - 回归：smoke-test 新增用例——软链接越界读被拒、越界写被拒且外部无文件生成；
   同时确认沙箱内软链接仍可用、词法越界仍被拒。
-- 设计权衡（0.1.4）：沙箱支持“允许根目录”。**Termux 上默认放行 ~/storage/shared**
+- 设计权衡（0.1.5）：沙箱支持“允许根目录”。**Termux 上默认放行 ~/storage/shared**
   （手机项目/下载都在共享存储），可用 FASTCODE_ALLOW_SHARED_STORAGE=0 关闭，
   或用 FASTCODE_ALLOW_PATHS 增加根目录。判定以真实路径为准：
   指向 C:\Windows 等非允许位置的软链接（包括嵌套在共享存储内部的）仍被拒绝，
@@ -84,7 +84,7 @@
 - 现状：生产依赖 18 个直接包（ink、react、marked、meow 等）。
 - 建议：定期 npm audit，保留 lockfile。
 
-## 二之二、0.1.4 追加的缓解
+## 二之二、0.1.5 追加的缓解
 
 - **L-2 提示注入与破坏性命令**：已由 src/agent/guards.ts 的危险命令拦截缓解
   （deny 列表移植自 HKUDS/FastCode nanobot）。默认拦截 rm -rf、dd、mkfs、fork bomb 等；

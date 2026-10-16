@@ -64,7 +64,7 @@
 | dist/commands/index.js | 命令注册表 COMMANDS、findCommand、parseSlash |
 | about / cwd / clear / exit / help | 基本信息与退出 |
 | agent / tools | agent 模式与工具说明 |
-| model / provider / login / logout / whoami | 模型与服务商、密钥 |
+| model / provider / login / logout / whoami | 模型与服务商；引导式 Key 绑定（服务商 → 模型 → Key，掩码输入）与按作用域登出 |
 | skills / plugin | 技能与插件管理 |
 | theme / system / config / reset / cost | 外观、系统提示、配置、用量 |
 
@@ -81,7 +81,7 @@
 | 文件 | 职责 | 依赖 |
 |---|---|---|
 | dist/config/paths.js | 目录布局、目录创建、密钥文件 0600 | lib/platform |
-| dist/config/store.js | config.json / auth.json 读写；密钥解析；原子写入 | paths, themes |
+| dist/config/store.js | config.json / auth.json 读写；**按 `<provider>::<model>` 作用域**保存/解析 Key；legacy 键识别；maskKey；原子写入 | paths, themes |
 | dist/config/themes.js | 内置配色主题 | 无 |
 | dist/config/trust.js | 项目信任列表（trusted.json 读写） | config/paths |
 | dist/session/log.js | JSONL 会话落盘、恢复、缓存上限剪枝 | config/paths |
@@ -104,5 +104,5 @@
 | scripts/install-termux.sh | install.sh 的兼容薄封装 | install.sh |
 | scripts/build-portable.sh | 生成 release/ 便携包 tar.gz/zip + npm pack .tgz + SHA256SUMS | 无 |
 | scripts/update-termux.sh | 更新脚本（目录 / git / npm） | 无 |
-| scripts/smoke-test.mjs | 10 项自检（沙箱越界、SSE 换行、配置与密钥分离等） | 无 |
+| scripts/smoke-test.mjs | 自检（键作用域、沙箱越界、SSE 换行、配置与密钥分离等） | 无 |
 | .github/workflows/release.yml | 打 v* tag 时自动构建并上传 GitHub Release | 无 |

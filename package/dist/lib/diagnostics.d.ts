@@ -15,6 +15,7 @@ export declare function collectDiagnostics(): {
     providerId: any;
     model: any;
     keyPresent: boolean;
+    keyStatus: "ok" | "unbound" | "missing";
     keyEnv: any;
     skillsInstalled: number;
     pluginsInstalled: number;

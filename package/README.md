@@ -108,11 +108,12 @@ export OPENAI_API_KEY="sk-..."
 export OPENROUTER_API_KEY="sk-or-..."
 ```
 
-Or save a key from inside FastCode:
+Or bind a key from inside FastCode — scoped to a specific provider + model (input is masked):
 
 ```text
-/login openai sk-...
-/login anthropic sk-ant-...
+/login                                        # guided: provider → model → key
+/login openai gpt-4o-mini sk-...
+/login anthropic claude-3-5-sonnet-latest sk-ant-...
 ```
 
 Then start chatting:
@@ -247,8 +248,8 @@ Installed plugins live under:
 | `/plugin ...` | Import and manage always-active plugin packs |
 | `/provider [id]` | List or switch provider |
 | `/model [id]` | List or switch model |
-| `/login <provider> <key>` | Save API key |
-| `/logout <provider>` | Remove API key |
+| `/login [provider] [model] [key]` | Bind an API key to a provider + model (guided when omitted) |
+| `/logout <provider> [model]` | Remove a scoped key (`--all` for the whole provider) |
 | `/skills ...` | Search, install, enable, disable, list skills |
 | `/theme [id]` | Switch theme |
 | `/cost` | Show token and cost usage |
@@ -380,7 +381,7 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits (0.1.4)
+## Safety, sessions and limits (0.1.5)
 
 | Feature | Behaviour | Override |
 | --- | --- | --- |

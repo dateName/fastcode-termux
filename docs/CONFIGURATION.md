@@ -37,21 +37,56 @@
       "model": "deepseek-chat"
     }
 
-## 3. auth.json 字段
+## 3. auth.json：Key 绑定到「服务商 + 模型」
+
+Key 不是一个全局字符串，而是绑定到具体的 **provider + model** 作用域。
+文件结构（version 2）：
 
     {
+      "version": 2,
       "keys": {
-        "deepseek": "sk-...",
-        "openai": "sk-..."
+        "deepseek::deepseek-chat": {
+          "provider": "deepseek",
+          "model": "deepseek-chat",
+          "key": "sk-...",
+          "addedAt": "2026-01-01T00:00:00.000Z"
+        }
       }
     }
 
-键名是服务商 id。写入时会把文件权限收紧到 0600（Termux/Linux/macOS 生效）。
-TUI 里用 /login <provider> <key> 写入，界面会自动打码，不回显明文。
+- 作用域键名是 `<provider>::<model>`。
+- 取用时 **provider 与 model 必须同时匹配** 才使用；不匹配就当成「当前模型未配置」。
+- 写入时把文件权限收紧到 0600（Termux/Linux/macOS 生效）。
+- 界面与命令只回显尾号（如 `sk-****abcd`），不回显明文。
+
+### 旧 Key（legacy）与迁移
+
+旧版本的 provider-only 键 `"deepseek": "sk-..."` 会被识别为 **legacy**：
+
+    { "legacy": { "deepseek": "sk-..." } }
+
+legacy 键**不会被静默使用**——它没写明属于哪个模型，所以不能默认归属当前模型。
+在当前模型下会被视为「未配置」：`fastcode doctor` 显示 `UNBOUND`，发送消息会被拦住并提示。
+恢复方式：重新绑定（`/login <provider> <model> <key>`，或在 `/login` 向导弹出
+“type keep” 时输入 `keep` 复用该键），或 `/logout <provider>` 丢弃。
+
+### 交互式绑定（推荐）
+
+    /login                      # 向导：先选服务商 → 再选模型 → 再输入 Key（掩码输入）
+    /login deepseek             # 跳过服务商，直接进入选模型
+    /login deepseek deepseek-chat               # 直接进入输入 Key
+    /login deepseek deepseek-chat sk-xxxx       # 一行完成
+
+保存成功后必回显：服务商、模型、Key 尾号、保存位置。输入 Key 时终端以 `*` 掩码显示。
+
+发送消息前会校验当前 provider + model 是否有可用 Key；没有（或只有 legacy 键）就拦截并提示。
+服务商返回 401/403（鉴权失败）或 402/429（额度用完 / 限流）时，界面会给出明确提示而不是笼统报错。
 
 ## 4. 环境变量
 
-优先级：auth.json 里的 Key 高于环境变量。
+取值优先级：**作用域匹配的 auth.json Key** > **服务商环境变量** > legacy 键（不使用）。
+环境变量是「服务商级」的（对该服务商所有模型通用，如 `DEEPSEEK_API_KEY` 对 deepseek 的全部模型生效）；
+auth.json 里的 Key 是「服务商 + 模型级」的，换到别的模型就不会被复用。
 
 | 服务商 | 环境变量 |
 |---|---|

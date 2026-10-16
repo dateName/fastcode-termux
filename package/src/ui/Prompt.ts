@@ -15,9 +15,9 @@ import { jsxs as _jsxs, jsx as _jsx } from "react/jsx-runtime";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
 import { COMMANDS } from "../commands/index.js";
-export const Prompt = ({ theme, value, onChange, onSubmit, disabled, placeholder, stable = false, }) => {
+export const Prompt = ({ theme, value, onChange, onSubmit, disabled, placeholder, stable = false, mask, }) => {
     const suggestion = autocomplete(value);
-    return (_jsxs(Box, { flexDirection: "column", borderStyle: "round", borderColor: disabled ? theme.muted : theme.accent, paddingX: 1, children: [_jsxs(Box, { children: [_jsx(Text, { color: theme.accent, bold: true, children: "\u276F " }), disabled ? (_jsx(Text, { color: theme.muted, children: placeholder ?? "Working… (Esc to cancel)" })) : (_jsx(TextInput, { value: value, onChange: onChange, onSubmit: onSubmit, placeholder: placeholder ?? "Type a message or /help …", showCursor: !stable }))] }), !disabled && suggestion ? (_jsx(Box, { marginLeft: 2, children: _jsxs(Text, { color: theme.muted, children: ["\u21AA ", suggestion] }) })) : null] }));
+    return (_jsxs(Box, { flexDirection: "column", borderStyle: "round", borderColor: disabled ? theme.muted : theme.accent, paddingX: 1, children: [_jsxs(Box, { children: [_jsx(Text, { color: theme.accent, bold: true, children: "\u276F " }), disabled ? (_jsx(Text, { color: theme.muted, children: placeholder ?? "Working… (Esc to cancel)" })) : (_jsx(TextInput, { value: value, onChange: onChange, onSubmit: onSubmit, placeholder: placeholder ?? "Type a message or /help …", showCursor: !stable, mask: mask }))] }), !disabled && suggestion ? (_jsx(Box, { marginLeft: 2, children: _jsxs(Text, { color: theme.muted, children: ["\u21AA ", suggestion] }) })) : null] }));
 };
 function autocomplete(value) {
     if (!value.startsWith("/") || value.includes(" "))

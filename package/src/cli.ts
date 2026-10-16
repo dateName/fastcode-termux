@@ -8,7 +8,7 @@
 import meow from "meow";
 import { readPackageMeta } from "./lib/pkg.js";
 import { installSkill, listInstalledSkills, uninstallSkill, searchRegistry } from "./skills/manager.js";
-import { loadConfig, saveConfig } from "./config/store.js";
+import { loadConfig, saveConfig, resolveProviderKey } from "./config/store.js";
 import { getPaths } from "./config/paths.js";
 import { PROVIDERS, getProvider } from "./providers/index.js";
 import { collectDiagnostics, formatDiagnostics } from "./lib/diagnostics.js";
@@ -110,7 +110,8 @@ export async function parseCli(): Promise<any> {
             if (provider) {
                 let models = [];
                 try {
-                    models = await provider.listModels(undefined);
+                    const { key } = resolveProviderKey(provider.id, provider.authEnv);
+                    models = await provider.listModels(key);
                 }
                 catch {
                     models = [];
