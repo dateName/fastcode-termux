@@ -12,7 +12,7 @@ const STATIC = [
     { id: "meta-llama/llama-4-maverick", label: "Llama 4 Maverick" },
 ];
 const EXTRA_HEADERS = {
-    "http-referer": "https://github.com/SimpleLittleDev/FastCode",
+    "http-referer": "https://github.com/dateName/fastcode-termux",
     "x-title": "FastCode",
 };
 export const openrouterProvider = {

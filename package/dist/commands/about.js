@@ -8,7 +8,7 @@ export const aboutCommand = {
             `FastCode  — multi-LLM TUI coding assistant`,
             `Platform: ${platformLabel()}  •  Node ${process.version}`,
             ``,
-            `GitHub:   https://github.com/SimpleLittleDev/FastCode`,
+            `GitHub:   https://github.com/dateName/fastcode-termux`,
             `Skills:   https://skillshub.wtf`,
         ];
         return { message: lines.join("\n") };

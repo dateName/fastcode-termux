@@ -56,6 +56,19 @@ and usable from anywhere: Linux, macOS, Windows, and Android through Termux.
 
 ## 🚀 Install
 
+### Install from the source repo (recommended, always latest)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dateName/fastcode-termux/main/scripts/install.sh | bash
+```
+
+Or clone and install:
+
+```bash
+git clone --depth 1 https://github.com/dateName/fastcode-termux.git ~/fastcode
+cd ~/fastcode && npm install -g ./package
+```
+
 ### Global install
 
 ```bash
@@ -309,7 +322,7 @@ FASTCODE_HOME=/path/to/fastcode fastcode
 ## 🛠️ Development
 
 ```bash
-git clone https://github.com/SimpleLittleDev/FastCode
+git clone https://github.com/dateName/fastcode-termux
 cd FastCode
 npm install
 npm run dev
@@ -359,7 +372,7 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits (0.1.6)
+## Safety, sessions and limits (0.1.4)
 
 | Feature | Behaviour | Override |
 | --- | --- | --- |

@@ -1,6 +1,6 @@
 {
   "name": "@simplelittledev/fastcode",
-  "version": "0.1.6",
+  "version": "0.1.4",
   "description": "FastCode — a blazing-fast TUI coding assistant. Multi-LLM, skills.sh skills, slash commands. Works on Termux, Linux, Windows, and macOS.",
   "type": "module",
   "bin": {
@@ -57,11 +57,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SimpleLittleDev/FastCode.git"
+    "url": "git+https://github.com/dateName/fastcode-termux.git"
   },
-  "homepage": "https://github.com/SimpleLittleDev/FastCode#readme",
+  "homepage": "https://github.com/dateName/fastcode-termux#readme",
   "bugs": {
-    "url": "https://github.com/SimpleLittleDev/FastCode/issues"
+    "url": "https://github.com/dateName/fastcode-termux/issues"
   },
   "dependencies": {
     "boxen": "^7.1.1",
