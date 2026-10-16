@@ -41,6 +41,7 @@
 | 33 | docs/CONFIGURATION.md、README.md、README.zh.md | 文档仍描述 provider 级 Key | 更新为「服务商 + 模型」作用域、legacy 迁移、引导式 /login、发送前校验与错误提示 |
 | 34 | package/src/providers/openaiCompatible.ts | `/models` 实时列表与内置清单合并时，会把「内置里有、服务商已下架」的模型继续显示，模型选择器长期保留旧模型（如 `deepseek-chat`） | 实时列表视为权威：只显示服务商当前返回的模型（用内置标签/价格补全已知项）；离线或请求失败时才回退内置清单 |
 | 35 | package/src/providers/deepseek.ts、package/src/providers/anthropic.ts | 服务商内置/默认模型陈旧（DeepSeek 官方实时只剩 `deepseek-flash`、`deepseek-v4-pro`；Anthropic 从不联网取列表） | DeepSeek 内置与默认更新为 `deepseek-v4-pro`/`deepseek-flash`；Anthropic 的 listModels 改为先查 `/v1/models` 实时列表、失败再回退内置 |
+| 36 | package/src/agent/protocol.ts、scripts/smoke-test.mjs | 本地代理只认 `<fastcode_tool>`；DeepSeek 等模型会改用原生 DSML 标记（`<｜DSML｜invoke …>`），导致工具调用被当成普通文本显示、根本不执行 | parseToolCalls/stripToolCalls 增加 DSML 方言：先把 fullwidth/ASCII 竖线标记归一化为普通标签，再解析 calls→invoke→parameter；兼容 `<calls>`/`<tool_calls>`/`<function_calls>`、含不含外层块；smoke 增加 3 项回归 |
 
 ## 验证方式
 

@@ -81,6 +81,15 @@ ok("SSE parses CRLF frames", crlfEvents.length === 2 && crlfEvents[0] === "one" 
 const lfEvents = await sse(["data: a" + LF + LF + "data: b" + LF + LF]);
 ok("SSE still parses LF frames", lfEvents.length === 2, JSON.stringify(lfEvents));
 
+const protocol = await load("agent/protocol.js");
+const dsmlBlock = "<｜DSML｜｜calls>\n<｜DSML｜invoke name=\"shell\">\n<｜DSML｜parameter name=\"command\" string=\"true\">echo hi</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜｜calls>";
+const dsmlParsed = protocol.parseToolCalls("noise " + dsmlBlock);
+ok("parses the DeepSeek DSML tool-call dialect", dsmlParsed.length === 1 && dsmlParsed[0].tool === "shell" && dsmlParsed[0].command === "echo hi", JSON.stringify(dsmlParsed));
+const dsmlStripped = protocol.stripToolCalls("hello " + dsmlBlock + " world");
+ok("strips DSML markup from visible text", !/DSML/.test(dsmlStripped) && dsmlStripped.includes("hello") && dsmlStripped.includes("world"), JSON.stringify(dsmlStripped));
+const jsonParsed = protocol.parseToolCalls('<fastcode_tool>{"tool":"pwd"}</fastcode_tool>');
+ok("still parses <fastcode_tool> JSON", jsonParsed.length === 1 && jsonParsed[0].tool === "pwd", JSON.stringify(jsonParsed));
+
 const agentTools = await load("agent/tools.js");
 const tmp = mkdtempSync(join(tmpdir(), "fastcode-smoke-"));
 writeFileSync(join(tmp, "a.txt"), "hello needle" + LF, "utf8");

@@ -1,4 +1,55 @@
 const TOOL_RE = /<fastcode_tool>([\s\S]*?)<\/fastcode_tool>/g;
+// Some models (notably DeepSeek) emit their native "DSML" tool-call markup
+// instead of <fastcode_tool>. The markers look like `<｜DSML｜invoke ...>`
+// (U+FF5C fullwidth bar, sometimes doubled or spaced). We canonicalize those
+// markers back to plain angle-bracket tags and then parse the
+// calls -> invoke -> parameter structure as a second dialect.
+const DSML_OPEN_RE = /<\s*(?:[|｜]\s*)+DSML\s*(?:[|｜]\s*)+/gi;
+const DSML_CLOSE_RE = /<\/\s*(?:[|｜]\s*)+DSML\s*(?:[|｜]\s*)+/gi;
+const DSML_BLOCK_RE = /<([a-z_]*calls?)>([\s\S]*?)<\/\1>/gi;
+const DSML_INVOKE_RE = /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/gi;
+const DSML_PARAM_RE = /<parameter\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/parameter>/gi;
+/** Turn the DSML glyph markers into ordinary `<tag>` / `</tag>` tags. */
+function canonicalizeDsml(text) {
+    return text.replace(DSML_CLOSE_RE, "</").replace(DSML_OPEN_RE, "<");
+}
+function coerceDsmlValue(attrs, raw) {
+    const value = raw.replace(/^\n/, "").replace(/\n$/, "");
+    if (/\bstring\s*=\s*"true"/i.test(attrs))
+        return value;
+    const trimmed = value.trim();
+    if (trimmed === "")
+        return "";
+    try {
+        return JSON.parse(trimmed);
+    }
+    catch {
+        if (trimmed === "true")
+            return true;
+        if (trimmed === "false")
+            return false;
+        const n = Number(trimmed);
+        return Number.isNaN(n) ? value : n;
+    }
+}
+function parseDsmlCalls(text) {
+    const canonical = canonicalizeDsml(text);
+    const bodies = [];
+    for (const block of canonical.matchAll(DSML_BLOCK_RE))
+        bodies.push(block[2] ?? "");
+    if (bodies.length === 0)
+        bodies.push(canonical);
+    const calls = [];
+    for (const body of bodies) {
+        for (const invoke of body.matchAll(DSML_INVOKE_RE)) {
+            const call = { tool: invoke[1] };
+            for (const param of (invoke[2] ?? "").matchAll(DSML_PARAM_RE))
+                call[param[1]] = coerceDsmlValue(param[2] ?? "", param[3] ?? "");
+            calls.push(call);
+        }
+    }
+    return calls;
+}
 export function parseToolCalls(text) {
     const calls = [];
     for (const match of text.matchAll(TOOL_RE)) {
@@ -14,10 +65,11 @@ export function parseToolCalls(text) {
             // Ignore malformed tool blocks; the model can correct itself next turn.
         }
     }
+    calls.push(...parseDsmlCalls(text));
     return calls;
 }
 export function stripToolCalls(text) {
-    return text.replace(TOOL_RE, "").trim();
+    return canonicalizeDsml(text).replace(TOOL_RE, "").replace(DSML_BLOCK_RE, "").trim();
 }
 export function formatToolResults(results) {
     const blocks = results.map((r, index) => {
