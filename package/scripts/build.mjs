@@ -14,6 +14,7 @@ import * as esbuild from "esbuild";
 import { chmodSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { stubOptionalDeps, createInlineCfontsFonts, bannerJs } from "./esbuild-plugins.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = dirname(here);
@@ -23,24 +24,6 @@ const minify = !process.argv.includes("--no-minify");
 
 mkdirSync(join(pkgRoot, "dist"), { recursive: true });
 
-// ink lazily pulls in `react-devtools-core` (a dev-only optional dep) from
-// devtools.js. We never enable devtools, so stub it to keep the bundle
-// fully self-contained.
-const stubOptionalDeps = {
-  name: "stub-optional-deps",
-  setup(build) {
-    build.onResolve({ filter: /^react-devtools-core$/ }, (args) => ({
-      path: args.path,
-      namespace: "stub",
-    }));
-    build.onLoad({ filter: /.*/, namespace: "stub" }, () => ({
-      contents:
-        "const noop=()=>{};export const connectToDevTools=noop;export default{connectToDevTools:noop};",
-      loader: "js",
-    }));
-  },
-};
-
 const result = await esbuild.build({
   entryPoints: [entry],
   bundle: true,
@@ -49,9 +32,8 @@ const result = await esbuild.build({
   target: "node18",
   outfile,
   external: ["node:*"],
-  // The entry (src/index.ts) already starts with `#!/usr/bin/env node`;
-  // esbuild preserves it, so no banner is needed here.
-  plugins: [stubOptionalDeps],
+  banner: { js: bannerJs },
+  plugins: [stubOptionalDeps, createInlineCfontsFonts(pkgRoot)],
   minify,
   sourcemap: false,
   treeShaking: true,
