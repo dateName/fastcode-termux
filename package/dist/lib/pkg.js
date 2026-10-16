@@ -9,7 +9,7 @@
  *   - esbuild bundle: dist/cli.js         -> ../package.json
  */
 import { readFileSync } from "node:fs";
-const FALLBACK = { name: "@simplelittledev/fastcode", version: "0.0.0" };
+const FALLBACK = { name: "@datename/fastcode-termux", version: "0.0.0" };
 const CANDIDATES = ["../package.json", "../../package.json", "../../../package.json"];
 export function readPackageMeta() {
     for (const rel of CANDIDATES) {

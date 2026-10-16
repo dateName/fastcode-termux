@@ -225,7 +225,7 @@ Inside the TUI: `/help` · `/model` · `/provider` · `/login` · `/agent` · `/
 ## 🗑️ Uninstall
 
 ```bash
-npm uninstall -g @simplelittledev/fastcode
+npm uninstall -g @datename/fastcode-termux
 rm -rf ~/fastcode        # clone dir (optional)
 rm -rf ~/.fastcode       # config, keys, skills, sessions (optional)
 ```
@@ -267,7 +267,7 @@ Artifacts land in `release/`:
 ```text
 fastcode-portable-0.1.5.tar.gz       self-contained single-file bundle
 fastcode-portable-0.1.5.zip          same (needs the `zip` command)
-simplelittledev-fastcode-0.1.5.tgz   npm package (npm pack)
+datename-fastcode-termux-0.1.5.tgz   npm package (npm pack)
 SHA256SUMS                           checksums
 ```
 
@@ -295,7 +295,7 @@ Or manually:
 ```bash
 gh release create v0.1.5 -t "FastCode 0.1.5" \
   release/fastcode-portable-0.1.5.tar.gz \
-  release/simplelittledev-fastcode-0.1.5.tgz \
+  release/datename-fastcode-termux-0.1.5.tgz \
   release/SHA256SUMS
 ```
 

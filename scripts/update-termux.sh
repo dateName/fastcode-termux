@@ -22,7 +22,7 @@ case "$MODE" in
     ;;
   --npm)
     echo "==> 从 npm 安装最新版"
-    npm install -g @simplelittledev/fastcode@latest
+    npm install -g @datename/fastcode-termux@latest
     ;;
   *)
     DIR="$MODE"

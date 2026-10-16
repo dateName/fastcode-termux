@@ -10,13 +10,13 @@
 
 <p align="center">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D18.17-3c873a?style=for-the-badge&logo=node.js&logoColor=white">
-  <img alt="npm" src="https://img.shields.io/badge/npm-@simplelittledev%2Ffastcode-cb3837?style=for-the-badge&logo=npm&logoColor=white">
+  <img alt="npm" src="https://img.shields.io/badge/npm-@datename%2Ffastcode--termux-cb3837?style=for-the-badge&logo=npm&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-f59e0b?style=for-the-badge">
   <img alt="Termux" src="https://img.shields.io/badge/Termux-ready-7c3aed?style=for-the-badge&logo=android&logoColor=white">
 </p>
 
 ```bash
-npm install -g @simplelittledev/fastcode
+npm install -g @datename/fastcode-termux
 fastcode
 ```
 
@@ -80,14 +80,14 @@ npm link
 ### Global install
 
 ```bash
-npm install -g @simplelittledev/fastcode
+npm install -g @datename/fastcode-termux
 fastcode
 ```
 
 ### Run without installing globally
 
 ```bash
-npx @simplelittledev/fastcode
+npx @datename/fastcode-termux
 ```
 
 ### Start with a prompt
@@ -296,7 +296,7 @@ Install Node.js first:
 
 ```bash
 pkg install nodejs
-npm install -g @simplelittledev/fastcode
+npm install -g @datename/fastcode-termux
 fastcode
 ```
 

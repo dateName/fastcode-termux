@@ -2,7 +2,7 @@
 # 构建全部发布产物到 release/：
 #   fastcode-portable-<version>.tar.gz    免安装便携包（含依赖）
 #   fastcode-portable-<version>.zip       同上（系统有 zip 时生成）
-#   simplelittledev-fastcode-<version>.tgz  npm 包（npm pack 产物）
+#   datename-fastcode-termux-<version>.tgz  npm 包（npm pack 产物）
 #   SHA256SUMS                            以上文件的校验和
 # 用法：在项目根目录执行   sh scripts/build-portable.sh
 set -e
@@ -79,7 +79,7 @@ echo "==> 计算 SHA256"
 (
   cd "$RELEASE" || exit 1
   FILES=""
-  for f in "fastcode-portable-$VER.tar.gz" "fastcode-portable-$VER.zip" "simplelittledev-fastcode-$VER.tgz"; do
+  for f in "fastcode-portable-$VER.tar.gz" "fastcode-portable-$VER.zip" "datename-fastcode-termux-$VER.tgz"; do
     [ -f "$f" ] && FILES="$FILES $f"
   done
   # shellcheck disable=SC2086
@@ -101,7 +101,7 @@ echo ""
 echo "发布到 GitHub Release（示例）："
 echo "  gh release create v$VER -t \"FastCode $VER\" \\"
 echo "    release/fastcode-portable-$VER.tar.gz \\"
-echo "    release/simplelittledev-fastcode-$VER.tgz \\"
+echo "    release/datename-fastcode-termux-$VER.tgz \\"
 echo "    release/SHA256SUMS"
 echo ""
 echo "发布到 npm："

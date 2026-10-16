@@ -223,7 +223,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 ## 🗑️ 卸载
 
 ```bash
-npm uninstall -g @simplelittledev/fastcode
+npm uninstall -g @datename/fastcode-termux
 rm -rf ~/fastcode        # 克隆目录（可选）
 rm -rf ~/.fastcode       # 配置、Key、技能、会话（可选）
 ```
@@ -265,7 +265,7 @@ sh scripts/build-portable.sh
 ```text
 fastcode-portable-0.1.5.tar.gz       免安装便携包（自包含单文件）
 fastcode-portable-0.1.5.zip          同上（需系统有 zip）
-simplelittledev-fastcode-0.1.5.tgz   npm 包（npm pack）
+datename-fastcode-termux-0.1.5.tgz   npm 包（npm pack）
 SHA256SUMS                           以上文件的校验和
 ```
 
@@ -293,7 +293,7 @@ git push origin v0.1.5        # 触发 Actions：构建 + 打包 + 上传 Releas
 ```bash
 gh release create v0.1.5 -t "FastCode 0.1.5" \
   release/fastcode-portable-0.1.5.tar.gz \
-  release/simplelittledev-fastcode-0.1.5.tgz \
+  release/datename-fastcode-termux-0.1.5.tgz \
   release/SHA256SUMS
 ```
 

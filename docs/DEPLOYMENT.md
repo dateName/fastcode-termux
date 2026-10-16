@@ -79,7 +79,7 @@ Windows：
 
 ## 方式 C：npm 全局安装
 
-    npm install -g @simplelittledev/fastcode
+    npm install -g @datename/fastcode-termux
     fastcode --version
 
 > 注意：npm registry 上的版本可能落后于本仓库。若安装后行为异常或版本不对，
@@ -89,11 +89,11 @@ Windows：
 
 用本地 tarball 安装：
 
-    npm install -g ./simplelittledev-fastcode-0.1.5.tgz
+    npm install -g ./datename-fastcode-termux-0.1.5.tgz
 
 临时试用（不安装）：
 
-    npx @simplelittledev/fastcode doctor
+    npx @datename/fastcode-termux doctor
 
 ## 构建与发布（维护者）
 
@@ -105,7 +105,7 @@ Windows：
 
     fastcode-portable-0.1.5.tar.gz       免安装便携包
     fastcode-portable-0.1.5.zip          同上（需系统有 zip）
-    simplelittledev-fastcode-0.1.5.tgz   npm 包（npm pack）
+    datename-fastcode-termux-0.1.5.tgz   npm 包（npm pack）
     SHA256SUMS                           以上文件的校验和
 
 脚本步骤：复制 bin/dist 与元数据 ->（若含自包含的 dist/cli.js 则跳过依赖安装）
@@ -117,7 +117,7 @@ Windows：
 
     gh release create v0.1.5 -t "FastCode 0.1.5" \
       release/fastcode-portable-0.1.5.tar.gz \
-      release/simplelittledev-fastcode-0.1.5.tgz \
+      release/datename-fastcode-termux-0.1.5.tgz \
       release/SHA256SUMS
 
     cd package && npm publish --access public
@@ -157,7 +157,7 @@ Windows：
     cd ~/fastcode && git pull && bash scripts/install.sh   # 先 git pull 再软链（推荐）
     便携包：解压新版本目录，替换软链接指向
     本地： cd fastcode && git pull && bash scripts/install.sh
-    npm：  npm install -g @simplelittledev/fastcode@latest  # registry 可能落后于仓库
+    npm：  npm install -g @datename/fastcode-termux@latest  # registry 可能落后于仓库
     检查： fastcode update
 
 > 注意：`scripts/install.sh` 本身只做软链，**不会 git pull**；要更新必须先
@@ -165,7 +165,7 @@ Windows：
 
 ## 卸载
 
-    npm uninstall -g @simplelittledev/fastcode
+    npm uninstall -g @datename/fastcode-termux
     便携包：直接删除解压出的目录
     配置（可选）：rm -rf ~/.fastcode
 

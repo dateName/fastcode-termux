@@ -15,7 +15,7 @@ export interface PackageMeta {
     version: string;
 }
 
-const FALLBACK: PackageMeta = { name: "@simplelittledev/fastcode", version: "0.0.0" };
+    const FALLBACK: PackageMeta = { name: "@datename/fastcode-termux", version: "0.0.0" };
 
 const CANDIDATES = ["../package.json", "../../package.json", "../../../package.json"];
 
