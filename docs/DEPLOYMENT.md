@@ -17,30 +17,21 @@ Termux 安装依赖：
 
 ## 方式 A：从 Git 仓库一键安装（推荐）
 
-最省事，且永远是最新代码。自动安装 Node/git、浅克隆仓库、全局安装：
+仓库内已提交**自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等
+依赖全部内联），因此克隆后无需 `npm install` 即可运行。
 
-    curl -fsSL https://raw.githubusercontent.com/dateName/fastcode-termux/main/scripts/install.sh | bash
-
-先克隆再装（便于自己维护）：
-
-    git clone --depth 1 https://github.com/dateName/fastcode-termux.git ~/fastcode
-    cd ~/fastcode
+    git clone https://github.com/dateName/fastcode-termux.git
+    cd fastcode-termux
     bash scripts/install.sh
 
-手动等价命令：
+脚本把 `package/dist/cli.js` 软链到 `$PREFIX/bin`（Termux）或 `~/.local/bin`，
+**完全跳过 npm install**；只有产物缺失时才回退到 `npm install && npm run build`。
 
-    git clone --depth 1 https://github.com/dateName/fastcode-termux.git ~/fastcode
-    npm install -g ~/fastcode/package
+等价的手动方式（任选）：
 
-脚本参数：
-
-    --dir <路径>      克隆目录（默认 ~/fastcode）
-    --repo <地址>     换仓库或 fork
-    --branch <分支>   默认 main
-    --no-global       不全局安装，只在本地 npm install
-
-全局安装失败（权限问题）时脚本会自动回退到 ~/.local 前缀，并提示把
-`~/.local/bin` 加入 PATH。也可用环境变量覆盖：`FASTCODE_REPO`、`FASTCODE_BRANCH`、`FASTCODE_DIR`。
+    node package/dist/cli.js            # 直接运行打包产物
+    npm install -g ./package            # 或用 npm 全局安装（bin 会优先加载 cli.js）
+    cd package && npm install && npm link
 
 ## 方式 B：免安装便携包（Release 附件）
 
@@ -114,10 +105,10 @@ Windows：
     simplelittledev-fastcode-0.1.4.tgz   npm 包（npm pack）
     SHA256SUMS                           以上文件的校验和
 
-脚本步骤：复制 bin/dist 与元数据 -> 安装生产依赖 -> 写入 fastcode / fastcode.cmd
-启动脚本 -> 打 tar.gz/zip -> npm pack -> 计算 SHA256。
-包内依赖为纯 JavaScript，无平台原生二进制，因此同一份便携包可在
-Termux、Linux、macOS、Windows 通用，只有 Node 需各自安装。
+脚本步骤：复制 bin/dist 与元数据 ->（若含自包含的 dist/cli.js 则跳过依赖安装）
+写入 fastcode / fastcode.cmd 启动脚本 -> 打 tar.gz/zip -> npm pack -> 计算 SHA256。
+`dist/cli.js` 自带全部依赖且为纯 JavaScript、无平台原生二进制，因此同一份
+便携包可在 Termux、Linux、macOS、Windows 通用，只有 Node 需各自安装。
 
 发布：
 

@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps & build bundle
+        working-directory: package
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Build release artifacts (portable tar.gz/zip + npm pack + sha256)
+        run: sh scripts/build-portable.sh
+
+      - name: List artifacts
+        run: ls -lh release
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/fastcode-portable-*.tar.gz
+            release/simplelittledev-fastcode-*.tgz
+            release/SHA256SUMS
+          generate_release_notes: true

@@ -5,8 +5,8 @@
  * diagnosed without opening the TUI: Node version, Termux detection, whether
  * stdout is a real terminal, the config root, and which provider keys exist.
  */
-import { readFileSync } from "node:fs";
 import { detectPlatform, platformLabel } from "./platform.js";
+import { readPackageMeta } from "./pkg.js";
 import { shouldUseStableTerminalUi } from "./uiMode.js";
 import { getPaths } from "../config/paths.js";
 import { loadConfig, resolveApiKey } from "../config/store.js";
@@ -19,13 +19,7 @@ import { DEFAULT_DENY_PATTERNS } from "../agent/guards.js";
 import { toolOutputLimit } from "../agent/limits.js";
 const NODE_REQUIRED = "18.17";
 function readVersion() {
-    try {
-        const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
-        return pkg.version ?? "0.0.0";
-    }
-    catch {
-        return "0.0.0";
-    }
+    return readPackageMeta().version;
 }
 function nodeIsSupported() {
     const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);

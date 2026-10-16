@@ -56,17 +56,25 @@ and usable from anywhere: Linux, macOS, Windows, and Android through Termux.
 
 ## 🚀 Install
 
-### Install from the source repo (recommended, always latest)
+### Install from the source repo (recommended)
+
+The repo ships a self-contained bundle at `package/dist/cli.js`, so a plain
+`git clone` runs without `npm install`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dateName/fastcode-termux/main/scripts/install.sh | bash
+git clone https://github.com/dateName/fastcode-termux.git
+cd fastcode-termux
+bash scripts/install.sh
+fastcode
 ```
 
-Or clone and install:
+Manual equivalent:
 
 ```bash
-git clone --depth 1 https://github.com/dateName/fastcode-termux.git ~/fastcode
-cd ~/fastcode && npm install -g ./package
+git clone https://github.com/dateName/fastcode-termux.git
+cd fastcode-termux/package
+npm install          # ⚠️ do not skip
+npm link
 ```
 
 ### Global install

@@ -1,5 +1,5 @@
 export declare function collectDiagnostics(): {
-    version: any;
+    version: string;
     node: string;
     nodeRequired: string;
     nodeOk: boolean;

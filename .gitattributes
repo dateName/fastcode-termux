@@ -1,0 +1,11 @@
+# Normalize line endings to LF in the repo so shell scripts run on Termux/Linux
+# and generated artifacts (dist/) don't churn on Windows checkouts.
+* text=auto eol=lf
+*.sh text eol=lf
+*.bash text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.tgz binary
+*.tar.gz binary
+*.zip binary

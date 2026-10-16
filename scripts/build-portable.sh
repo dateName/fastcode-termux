@@ -26,8 +26,12 @@ echo "==> 复制程序本体"
 cp -R "$PKG/bin" "$PKG/dist" "$PKG/src" "$BUNDLE/package/"
 cp "$PKG/package.json" "$PKG/tsconfig.json" "$PKG/LICENSE" "$PKG/README.md" "$BUNDLE/package/"
 
-echo "==> 安装生产依赖（仅 runtime）"
-( cd "$BUNDLE/package" && npm install --omit=dev --no-audit --no-fund )
+if [ -f "$BUNDLE/package/dist/cli.js" ]; then
+  echo "==> dist/cli.js 自包含，跳过 npm install（无需依赖目录）"
+else
+  echo "==> 未找到 dist/cli.js，安装生产依赖（仅 runtime）"
+  ( cd "$BUNDLE/package" && npm install --omit=dev --no-audit --no-fund )
+fi
 
 echo "==> 写入启动脚本"
 cat > "$BUNDLE/fastcode" <<'EOF'

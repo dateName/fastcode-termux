@@ -21,6 +21,9 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 本项目基于官方已删除的上游 `SimpleLittleDev/FastCode` 0.1.3 编译产物做了修复与手机适配，
 并已**逆向重建 TypeScript 源码**（`package/src`，`npm run build` 可重新编译）。
 
+发布物为**自包含单文件** `package/dist/cli.js`（用 esbuild 把 Ink/React/meow 等依赖全部内联），
+因此 `git clone` 后**不需要 `npm install`** 就能运行。
+
 ---
 
 ## ✨ 功能特性
@@ -50,7 +53,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 项 | 要求 |
 |---|---|
 | Node.js | ≥ 18.17（`node -v` 检查） |
-| git | 一键脚本 / 手动克隆安装需要 |
+| git | 方式一 / 方式三 安装需要（方式二便携版不需要） |
 | 系统 | Termux(Android) / Linux / macOS / Windows |
 | 架构 | aarch64 / armv7 / x86_64 均可；若遇二进制不兼容，请改用「从源码」安装 |
 
@@ -66,52 +69,41 @@ termux-setup-storage     # 让 agent 能访问 ~/storage/shared（手机项目/�
 
 ## 📦 安装方式
 
-按推荐优先级排列：
+按推荐优先级排列。仓库内已提交 **自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等依赖全部打进单文件），因此克隆后**无需 `npm install`** 即可运行。
 
-### 1. 一键脚本（推荐，从 GitHub 仓库直接安装）
+> ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/dateName/fastcode-termux/main/scripts/install.sh | bash
-```
-
-脚本会自动：安装 Node/git → 浅克隆仓库 → 全局安装 `fastcode` → 自检。
-
-常用参数：
+### 方式一：一键脚本（推荐）
 
 ```bash
-bash scripts/install.sh --dir ~/fastcode     # 自定义克隆目录
-bash scripts/install.sh --repo <仓库地址>     # 换仓库 / fork
-bash scripts/install.sh --branch dev         # 指定分支
-bash scripts/install.sh --no-global          # 不全局安装，只在本地 npm install
+git clone https://github.com/dateName/fastcode-termux.git
+cd fastcode-termux
+bash scripts/install.sh
+fastcode          # 直接可用（短别名 fc）
 ```
 
-### 2. npm 安装
+脚本把 `package/dist/cli.js` 软链到 `$PREFIX/bin`（Termux）或 `~/.local/bin`，**完全跳过 npm install**；只有产物缺失时才回退到 `npm install && npm run build`。
 
-```bash
-npm install -g @simplelittledev/fastcode
-```
+### 方式二：便携版（无需 npm）
 
-### 3. 手动克隆
-
-```bash
-git clone --depth 1 https://github.com/dateName/fastcode-termux.git ~/fastcode
-cd ~/fastcode
-bash scripts/install.sh          # 或：npm install -g ./package
-```
-
-### 4. 便携包（可选，需先上传 Release）
-
-到 Release 页面下载 `fastcode-portable-0.1.4.tar.gz`（或 `.zip`，校验见 `SHA256SUMS`），
-解压即用，**不需要 npm**：
+到 Releases 页面下载最新 `fastcode-portable-0.1.4.tar.gz`（校验见 `SHA256SUMS`），解压即用：
 
 ```bash
 tar -xzf fastcode-portable-0.1.4.tar.gz
 cd fastcode-portable-0.1.4
-chmod +x fastcode
 ./fastcode
 ```
 
-> 便携包尚未上传时，可自行构建：见文末 [开发者](#-开发者)。
+> 便携版尚未上传时，可用 `sh scripts/build-portable.sh` 自行构建，或用 GitHub Actions 自动发布（见 [开发者](#-开发者)）。
+
+### 方式三：手动安装
+
+```bash
+git clone https://github.com/dateName/fastcode-termux.git
+cd fastcode-termux/package
+npm install          # ⚠️ 这一步不能省略
+npm link             # 之后即可全局使用 fastcode / fc
+```
 
 ---
 
@@ -198,6 +190,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
 | 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.4） |
 | 命令被拦截 | 那是危险命令保护；确认无误可临时 `export FASTCODE_ALLOW_DANGEROUS=1` |
+| `git clone` 后直接运行报 `ERR_MODULE_NOT_FOUND` | 说明你在用未打包的旧产物。跑 `bash scripts/install.sh`，或 `cd package && npm install`；仓库已含 `dist/cli.js` 时可直接 `node package/dist/cli.js` |
 
 ---
 
@@ -215,11 +208,25 @@ rm -rf ~/.fastcode       # 配置、Key、技能、会话（可选）
 
 ## 🏗️ 开发者
 
+### 构建自包含产物
+
+源码在 `package/src`，用 esbuild 打包成单文件 `package/dist/cli.js`：
+
+```bash
+cd package
+npm install
+npm run build          # = tsc（类型/多文件输出） + node scripts/build.mjs（esbuild 打包）
+npm run build:bundle   # 只跑 esbuild（可加 --no-minify 出不压缩版本调试）
+```
+
+> `dist/cli.js` 必须提交到 Git —— 这是「clone 即可用」的关键。
+
 ### 发布新版本
 
 1. 修改 `package/package.json` 的 `version`。
-2. 重新构建：`npm run build`（由 `src` 生成 `dist`）。
-3. 按下方流程产出并上传产物。
+2. `cd package && npm run build` 重新生成 `dist/cli.js` 并提交。
+3. 打 tag 推送，GitHub Actions 会自动构建并上传 Release（见下）。
+4. 按下方流程产出并上传产物。
 
 ### 构建便携包
 
@@ -230,7 +237,7 @@ sh scripts/build-portable.sh
 产物在 `release/`：
 
 ```text
-fastcode-portable-0.1.4.tar.gz       免安装便携包（含依赖）
+fastcode-portable-0.1.4.tar.gz       免安装便携包（自包含单文件）
 fastcode-portable-0.1.4.zip          同上（需系统有 zip）
 simplelittledev-fastcode-0.1.4.tgz   npm 包（npm pack）
 SHA256SUMS                           以上文件的校验和
@@ -244,6 +251,15 @@ npm publish --access public
 ```
 
 ### GitHub Releases
+
+推荐用 CI 自动发布（`.github/workflows/release.yml`）：打 tag 即可
+
+```bash
+git tag v0.1.4
+git push origin v0.1.4        # 触发 Actions：构建 + 打包 + 上传 Release
+```
+
+也可手动：
 
 ```bash
 gh release create v0.1.4 -t "FastCode 0.1.4" \

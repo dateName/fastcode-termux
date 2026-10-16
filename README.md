@@ -23,6 +23,9 @@ This repo fixes and adapts the deleted upstream `SimpleLittleDev/FastCode` 0.1.3
 mobile, and the TypeScript source has been reverse-engineered into `package/src`
 (`npm run build` rebuilds `dist`).
 
+The shipped artifact is a **self-contained single file** `package/dist/cli.js` (esbuild inlines
+Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
+
 ---
 
 ## ✨ Features
@@ -52,7 +55,7 @@ mobile, and the TypeScript source has been reverse-engineered into `package/src`
 | Item | Requirement |
 |---|---|
 | Node.js | ≥ 18.17 (check with `node -v`) |
-| git | needed by the one-line script / manual clone |
+| git | needed by method 1 / 3 (portable bundle does not need it) |
 | OS | Termux (Android) / Linux / macOS / Windows |
 | Arch | aarch64 / armv7 / x86_64 all work; if you hit a binary mismatch, use the **from-source** install |
 
@@ -68,51 +71,41 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 ## 📦 Install
 
-In order of preference:
+In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-### 1. One-line script (recommended, straight from the GitHub repo)
+> ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/dateName/fastcode-termux/main/scripts/install.sh | bash
-```
-
-The script installs Node/git, shallow-clones the repo, installs `fastcode` globally and self-checks.
-
-Flags:
+### 1. One-line script (recommended)
 
 ```bash
-bash scripts/install.sh --dir ~/fastcode     # custom clone directory
-bash scripts/install.sh --repo <url>         # another repo / fork
-bash scripts/install.sh --branch dev         # pick a branch
-bash scripts/install.sh --no-global          # local npm install only
+git clone https://github.com/dateName/fastcode-termux.git
+cd fastcode-termux
+bash scripts/install.sh
+fastcode          # ready to go (short alias: fc)
 ```
 
-### 2. npm
+The script symlinks `package/dist/cli.js` into `$PREFIX/bin` (Termux) or `~/.local/bin`, **skipping `npm install` entirely**; it only falls back to `npm install && npm run build` if the bundle is missing.
 
-```bash
-npm install -g @simplelittledev/fastcode
-```
+### 2. Portable bundle (no npm)
 
-### 3. Manual clone
-
-```bash
-git clone --depth 1 https://github.com/dateName/fastcode-termux.git ~/fastcode
-cd ~/fastcode
-bash scripts/install.sh          # or: npm install -g ./package
-```
-
-### 4. Portable bundle (optional — upload to Releases first)
-
-Download `fastcode-portable-0.1.4.tar.gz` (or `.zip`; see `SHA256SUMS`) from Releases,
-unpack and run — **no npm needed**:
+Download the latest `fastcode-portable-0.1.4.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
 
 ```bash
 tar -xzf fastcode-portable-0.1.4.tar.gz
-cd fastcode-portable-0.1.4 && chmod +x fastcode
+cd fastcode-portable-0.1.4
 ./fastcode
 ```
 
-> No bundle uploaded yet? Build your own — see [Maintainers](#-maintainers).
+> No bundle uploaded yet? Build your own with `sh scripts/build-portable.sh`, or let GitHub Actions publish it — see [Maintainers](#-maintainers).
+
+### 3. Manual install
+
+```bash
+git clone https://github.com/dateName/fastcode-termux.git
+cd fastcode-termux/package
+npm install          # ⚠️ do not skip
+npm link             # then `fastcode` / `fc` are global
+```
 
 ---
 
@@ -199,6 +192,7 @@ Inside the TUI: `/help` · `/model` · `/provider` · `/login` · `/agent` · `/
 | "requires a TTY" | run in a real terminal; pipes and some remote tools trigger this |
 | One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.4) |
 | Command blocked | that's the safety guard; override with `FASTCODE_ALLOW_DANGEROUS=1` |
+| `ERR_MODULE_NOT_FOUND` right after `git clone` | you're on an unpacked/old tree. Run `bash scripts/install.sh`, or `cd package && npm install`; when `dist/cli.js` is present you can run `node package/dist/cli.js` |
 
 ---
 
@@ -216,11 +210,25 @@ Portable bundle: just delete the unpacked directory.
 
 ## 🏗️ Maintainers
 
+### Build the self-contained bundle
+
+Source lives in `package/src`; esbuild bundles it into the single file `package/dist/cli.js`:
+
+```bash
+cd package
+npm install
+npm run build          # = tsc (types/multi-file) + node scripts/build.mjs (esbuild bundle)
+npm run build:bundle   # esbuild only (add --no-minify for a readable build)
+```
+
+> `dist/cli.js` must be committed — it's what makes `git clone` run without `npm install`.
+
 ### Release a new version
 
 1. Bump `version` in `package/package.json`.
-2. Rebuild: `npm run build` (generates `dist` from `src`).
-3. Produce and upload the artifacts below.
+2. `cd package && npm run build` to regenerate and commit `dist/cli.js`.
+3. Push a tag; GitHub Actions builds and uploads the Release (below).
+4. Or produce and upload the artifacts manually.
 
 ### Build the portable bundle
 
@@ -231,7 +239,7 @@ sh scripts/build-portable.sh
 Artifacts land in `release/`:
 
 ```text
-fastcode-portable-0.1.4.tar.gz       self-contained bundle (deps included)
+fastcode-portable-0.1.4.tar.gz       self-contained single-file bundle
 fastcode-portable-0.1.4.zip          same (needs the `zip` command)
 simplelittledev-fastcode-0.1.4.tgz   npm package (npm pack)
 SHA256SUMS                           checksums
@@ -245,6 +253,15 @@ npm publish --access public
 ```
 
 ### GitHub Releases
+
+CI publishes automatically (`.github/workflows/release.yml`) — just push a tag:
+
+```bash
+git tag v0.1.4
+git push origin v0.1.4        # Actions: build + package + upload Release
+```
+
+Or manually:
 
 ```bash
 gh release create v0.1.4 -t "FastCode 0.1.4" \

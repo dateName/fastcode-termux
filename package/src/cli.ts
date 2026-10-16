@@ -5,8 +5,8 @@
  * and script FastCode straight from a Termux shell, without starting Ink:
  * provider/model selection, config paths, skills, doctor and update.
  */
-import { readFileSync } from "node:fs";
 import meow from "meow";
+import { readPackageMeta } from "./lib/pkg.js";
 import { installSkill, listInstalledSkills, uninstallSkill, searchRegistry } from "./skills/manager.js";
 import { loadConfig, saveConfig } from "./config/store.js";
 import { getPaths } from "./config/paths.js";
@@ -278,13 +278,7 @@ function compareVersions(a, b) {
     return 0;
 }
 async function updateReport() {
-    let meta: any;
-    try {
-        meta = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    }
-    catch {
-        meta = { name: "@simplelittledev/fastcode", version: "0.0.0" };
-    }
+    const meta = readPackageMeta();
     const lines = ["FastCode " + meta.version, ""];
     const registry = process.env["FASTCODE_UPDATE_REGISTRY"] ??
         "https://registry.npmjs.org/" + encodeURIComponent(meta.name) + "/latest";
