@@ -114,7 +114,7 @@ config.json 与 auth.json 是两个独立文件；改模型只动 config.json。
 | 项目信任 | config/trust.ts + ui/TrustGate.ts | 首次在陌生目录启用 agent 工具前先确认；列表在 ~/.fastcode/trusted.json |
 | 危险命令拦截 | agent/guards.ts | 执行前匹配 deny 列表（移植自 HKUDS/FastCode nanobot）；可加白名单或放行 |
 | 输出上限 | agent/limits.ts | OutputBuffer 边产边截断，head/tail 两种模式，一个上限贯穿所有工具 |
-| 会话落盘 | session/log.ts | JSONL 逐行追加，崩溃可恢复；缓存上限默认 64MB，超出删最旧 |
+| 会话落盘 | session/log.ts | JSONL 逐行追加，崩溃可恢复；缓存上限默认 256MB，超出删最旧 |
 
 数据流补充：App 初始化时按 resume 决定 createSessionLog 还是 openSessionLog；
 每条 user/system/assistant 消息立即 append；退出时写 session_end 并剪枝。

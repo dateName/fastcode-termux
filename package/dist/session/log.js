@@ -7,7 +7,7 @@
  * pruned first.
  *
  *   FASTCODE_SESSION_LOG=0        disable logging
- *   FASTCODE_SESSION_CACHE_MB=N   sessions cache cap in MB (default 64)
+ *   FASTCODE_SESSION_CACHE_MB=N   sessions cache cap in MB (default 256)
  */
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ import { getPaths } from "../config/paths.js";
 const NL = String.fromCharCode(10);
 export function sessionCacheLimitBytes() {
     const mb = Number(process.env["FASTCODE_SESSION_CACHE_MB"]);
-    return (Number.isFinite(mb) && mb > 0 ? mb : 64) * 1024 * 1024;
+    return (Number.isFinite(mb) && mb > 0 ? mb : 256) * 1024 * 1024;
 }
 export function loggingEnabled() {
     return process.env["FASTCODE_SESSION_LOG"] !== "0";

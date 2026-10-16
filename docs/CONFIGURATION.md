@@ -82,7 +82,7 @@ TUI 里用 /login <provider> <key> 写入，界面会自动打码，不回显明
 | FASTCODE_ALLOW_SHARED_STORAGE | 设为 0 关闭 Termux 默认放行的 ~/storage/shared |
 | FASTCODE_TOOL_OUTPUT_LIMIT | 工具输出上限（字符），默认 30000，边产边截断 |
 | FASTCODE_SESSION_LOG | 设为 0 关闭 JSONL 会话落盘 |
-| FASTCODE_SESSION_CACHE_MB | 会话缓存上限 MB，默认 64，超出先删最旧 |
+| FASTCODE_SESSION_CACHE_MB | 会话缓存上限 MB，默认 256，超出先删最旧 |
 | FASTCODE_TRUST_ALL | 设为 1 跳过项目信任确认 |
 | FASTCODE_ALLOW_DANGEROUS | 设为 1 关闭危险命令拦截 |
 | FASTCODE_SHELL_ALLOWLIST | 只允许匹配这些正则的命令，分号分隔 |
@@ -126,7 +126,7 @@ shutdown/reboot/poweroff、fork bomb 会被直接拒绝；正文会给出命中�
     fastcode sessions show <id> 打印某次会话
     fastcode resume [id|latest] 在 TUI 中恢复该会话
 
-缓存上限默认 64MB（FASTCODE_SESSION_CACHE_MB 可调），超出时先删除最旧的日志。
+缓存上限默认 256MB（FASTCODE_SESSION_CACHE_MB 可调），超出时先删除最旧的日志。
 
 ## 5. 三种改主模型的方式（等价）
 

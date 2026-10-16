@@ -97,7 +97,7 @@
 - 位置：src/session/log.ts
 - 现状：会话以 JSONL 落盘到 ~/.fastcode/sessions，对话内容（可能含源码片段与密钥粘贴）
   会明文保存。
-- 建议：默认已有 64MB 上限与最旧优先剪枝；可用 FASTCODE_SESSION_LOG=0 关闭。
+- 建议：默认已有 256MB 上限与最旧优先剪枝；可用 FASTCODE_SESSION_LOG=0 关闭。
   若设备与他人共用，建议关闭或把 FASTCODE_HOME 放到私有目录。
 
 ## 三、统计
