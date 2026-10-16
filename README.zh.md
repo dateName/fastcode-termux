@@ -4,7 +4,7 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.5** |
+| 版本 | **0.1.6** |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
@@ -96,11 +96,11 @@ fastcode          # 直接可用（短别名 fc）
 
 ### 方式二：便携版（无需 npm）
 
-到 Releases 页面下载最新 `fastcode-portable-0.1.5.tar.gz`（校验见 `SHA256SUMS`），解压即用：
+到 Releases 页面下载最新 `fastcode-portable-0.1.6.tar.gz`（校验见 `SHA256SUMS`），解压即用：
 
 ```bash
-tar -xzf fastcode-portable-0.1.5.tar.gz
-cd fastcode-portable-0.1.5
+tar -xzf fastcode-portable-0.1.6.tar.gz
+cd fastcode-portable-0.1.6
 ./fastcode
 ```
 
@@ -213,7 +213,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | 如何更新 | `cd ~/fastcode && git pull && bash scripts/install.sh`（单跑 install.sh 不会拉取） |
 | npm 安装后行为旧 / 报错 | npm registry 可能落后于仓库 —— 暂时优先用克隆或便携版；`fastcode update` 会比较版本 |
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
-| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.5） |
+| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.6） |
 | 命令被拦截 | 那是危险命令保护；确认无误可临时 `export FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -261,9 +261,9 @@ sh scripts/build-portable.sh
 产物在 `release/`：
 
 ```text
-fastcode-portable-0.1.5.tar.gz       免安装便携包（自包含单文件）
-fastcode-portable-0.1.5.zip          同上（需系统有 zip）
-datename-fastcode-termux-0.1.5.tgz   npm 包（npm pack）
+fastcode-portable-0.1.6.tar.gz       免安装便携包（自包含单文件）
+fastcode-portable-0.1.6.zip          同上（需系统有 zip）
+datename-fastcode-termux-0.1.6.tgz   npm 包（npm pack）
 SHA256SUMS                           以上文件的校验和
 ```
 
@@ -282,16 +282,16 @@ npm publish --access public
 推荐用 CI 自动发布（`.github/workflows/release.yml`）：打 tag 即可
 
 ```bash
-git tag v0.1.5
-git push origin v0.1.5        # 触发 Actions：构建 + 打包 + 上传 Release
+git tag v0.1.6
+git push origin v0.1.6        # 触发 Actions：构建 + 打包 + 上传 Release
 ```
 
 也可手动：
 
 ```bash
-gh release create v0.1.5 -t "FastCode 0.1.5" \
-  release/fastcode-portable-0.1.5.tar.gz \
-  release/datename-fastcode-termux-0.1.5.tgz \
+gh release create v0.1.6 -t "FastCode 0.1.6" \
+  release/fastcode-portable-0.1.6.tar.gz \
+  release/datename-fastcode-termux-0.1.6.tgz \
   release/SHA256SUMS
 ```
 
@@ -313,8 +313,8 @@ gh release create v0.1.5 -t "FastCode 0.1.5" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块、数据流 |
 | [docs/MODULES.md](docs/MODULES.md) | 每个文件干什么 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 安全审计结论 |
-| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.5） |
-| [PATCHES.md](PATCHES.md) | 到 0.1.5 为止的 36 项修复清单 |
+| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.6） |
+| [PATCHES.md](PATCHES.md) | 到 0.1.6 为止的 36 项修复清单 |
 
 ---
 
@@ -337,4 +337,4 @@ gh release create v0.1.5 -t "FastCode 0.1.5" \
 
 原始作者署名与上游项目名称、版权归各自所有；本仓库仅做修复与 Termux 适配。
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.5</sub>
+<sub>Made for Termux 🐧📱 · FastCode 0.1.6</sub>

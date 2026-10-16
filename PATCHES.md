@@ -1,4 +1,4 @@
-# FastCode 0.1.3 → 0.1.5 修复清单
+# FastCode 0.1.3 → 0.1.6 修复清单
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
@@ -13,7 +13,7 @@
 | 5 | dist/lib/platform.js | Termux 判断要求 PREFIX 目录存在，部分环境误判为非 Termux，导致不启用稳定 UI | 同时识别 TERMUX_VERSION，不再强制目录存在 |
 | 6 | dist/app.js | runSlash 的 useCallback 依赖数组缺少 agentMode、enabledPlugins、skillsRegistry，斜杠命令读到过期状态 | 补齐依赖项 |
 | 7 | dist/lib/diagnostics.js、dist/cli.js | 缺少部署自检与更新入口 | 新增 fastcode doctor 和 fastcode update |
-| 8 | package.json | 版本号 | 0.1.3 → 0.1.5 |
+| 8 | package.json | 版本号 | 0.1.3 → 0.1.6 |
 | 9 | dist/agent/tools.js | walk() 对每个条目 stat()（跟随软链接），悬空软链接抛 ENOENT 使 grep / list_files 整次失败；且会经软链接扫出沙箱（如 Termux /storage/emulated/0） | stat/readdir/visit 逐项容错；有效软链接仍遍历；越出沙箱根的软链接不深入；按祖先链检测软链接环；5000 条上限 |
 | 10 | dist/providers/openaiCompatible.js | 新版模型（o 系列 / GPT-5+）拒绝 max_tokens 与 temperature，请求 400，表现为“无法识别最新主流模型” | 首次请求失败且报参数错误时，自动用 max_completion_tokens 且不带 temperature 重试一次 |
 | 11 | dist/providers/openaiCompatible.js | /models 实时列表只返回 id，丢失标签与价格；且内置列表不全会盖掉实时结果 | 实时列表与内置元数据合并，内置未返回的模型保留 |
@@ -59,7 +59,7 @@
   - 欢迎语正常显示；
   - 输入 /help 能看到命令列表（19 条）；
   - 输入 /login anthropic sk-SECRET-123 后，最终画面不含明文 Key，且显示打码。
-- CLI：--version 输出 0.1.5；skills list / skills search 正常；doctor 输出诊断；update 输出版本对比。
+- CLI：--version 输出 0.1.6；skills list / skills search 正常；doctor 输出诊断；update 输出版本对比。
 
 ## 本地复现（需要 Node.js >= 18.17）
 

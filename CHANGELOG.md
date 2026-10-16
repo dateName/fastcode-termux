@@ -2,9 +2,11 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.5
+## 0.1.6
 
-发布时间口径：GitHub Release `v0.1.5`；npm 包 `@datename/fastcode-termux@0.1.5`。
+发布时间口径：GitHub Release `v0.1.6`；npm 包 `@datename/fastcode-termux@0.1.6`（**首个发布到 npm 的版本**）。
+
+> 说明：`0.1.5` 曾打过 GitHub tag，但那份是不完整的中途构建（缺少包名迁移、模型清单修复、DSML 支持等），也**未发布到 npm**。`0.1.6` 是这些改动的完整版本，并首次发布到 npm。
 
 ### ⚠️ 包名变更
 - npm 包名由 `@simplelittledev/fastcode` 迁移为 **`@datename/fastcode-termux`**（发布到自有 scope）。
@@ -21,7 +23,7 @@
 - **CI 自动发布 npm**：`.github/workflows/release.yml` 增加 `npm publish` 步骤（推 `v*` tag 或手动 Run workflow，需仓库 Secret `NPM_TOKEN`）。
 
 ### 变更
-- 版本：`0.1.4` → **`0.1.5`**（`package.json`、`package-lock.json`、`README`、docs 全部对齐）。
+- 版本：`0.1.4` → **`0.1.6`**（`package.json`、`package-lock.json`、`README`、docs 全部对齐）。
 - 安装口径：优先「克隆 + 软链自包含产物」或「便携包」；方式三改为明确的“从源码重建”路径；FAQ 说明 npm registry 可能滞后于仓库。
 - 移除“上游仓库已删除”的措辞；删除香港大学（HKUDS）出处段落与相关说明。
 
@@ -32,7 +34,7 @@
 - **DSML 工具调用不执行**：此前会被当普通文本显示，现能解析并真正执行。
 
 ### 分发
-- `release/` 资产纳入版本库：`datename-fastcode-termux-0.1.5.tgz`、`fastcode-portable-0.1.5.tar.gz`、`SHA256SUMS`（`.gitignore` 只跟踪归档与校验和，忽略解压目录）。
+- `release/` 资产纳入版本库：`datename-fastcode-termux-0.1.6.tgz`、`fastcode-portable-0.1.6.tar.gz`、`SHA256SUMS`（`.gitignore` 只跟踪归档与校验和，忽略解压目录）。
 - `release.yml`：Release 步骤仅在 `v*` tag 时执行；`npm publish` 步骤在 tag 或手动 Run workflow 且配置 `NPM_TOKEN` 时执行。
 
 ### 验证
@@ -62,5 +64,6 @@
 | `a8b0d20` | Drop deleted-upstream wording and the HKUDS attribution |
 | `1f19064` | Make the live /models list authoritative; refresh DeepSeek/Anthropic models |
 | `bbb42c3` | Also parse DeepSeek's DSML tool-call dialect |
+| `ea89317` | Add CHANGELOG.md summarizing the 0.1.5 changes |
 
 > 更早的修复（0.1.3 → 0.1.4 及逆向重建源码树等）见 [PATCHES.md](PATCHES.md)。

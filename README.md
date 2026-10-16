@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Version | **0.1.5** |
+| Version | **0.1.6** |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
@@ -98,11 +98,11 @@ The script symlinks `package/dist/cli.js` into `$PREFIX/bin` (Termux) or `~/.loc
 
 ### 2. Portable bundle (no npm)
 
-Download the latest `fastcode-portable-0.1.5.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
+Download the latest `fastcode-portable-0.1.6.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
 
 ```bash
-tar -xzf fastcode-portable-0.1.5.tar.gz
-cd fastcode-portable-0.1.5
+tar -xzf fastcode-portable-0.1.6.tar.gz
+cd fastcode-portable-0.1.6
 ./fastcode
 ```
 
@@ -215,7 +215,7 @@ Inside the TUI: `/help` · `/model` · `/provider` · `/login` · `/agent` · `/
 | How to update | `cd ~/fastcode && git pull && bash scripts/install.sh` (install.sh alone does not pull) |
 | npm install gives old/broken behavior | the npm registry can lag the repo — prefer the clone or the portable bundle for now; `fastcode update` compares versions |
 | "requires a TTY" | run in a real terminal; pipes and some remote tools trigger this |
-| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.5) |
+| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.6) |
 | Command blocked | that's the safety guard; override with `FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -263,9 +263,9 @@ sh scripts/build-portable.sh
 Artifacts land in `release/`:
 
 ```text
-fastcode-portable-0.1.5.tar.gz       self-contained single-file bundle
-fastcode-portable-0.1.5.zip          same (needs the `zip` command)
-datename-fastcode-termux-0.1.5.tgz   npm package (npm pack)
+fastcode-portable-0.1.6.tar.gz       self-contained single-file bundle
+fastcode-portable-0.1.6.zip          same (needs the `zip` command)
+datename-fastcode-termux-0.1.6.tgz   npm package (npm pack)
 SHA256SUMS                           checksums
 ```
 
@@ -284,16 +284,16 @@ npm publish --access public
 CI publishes automatically (`.github/workflows/release.yml`) — just push a tag:
 
 ```bash
-git tag v0.1.5
-git push origin v0.1.5        # Actions: build + package + upload Release
+git tag v0.1.6
+git push origin v0.1.6        # Actions: build + package + upload Release
 ```
 
 Or manually:
 
 ```bash
-gh release create v0.1.5 -t "FastCode 0.1.5" \
-  release/fastcode-portable-0.1.5.tar.gz \
-  release/datename-fastcode-termux-0.1.5.tgz \
+gh release create v0.1.6 -t "FastCode 0.1.6" \
+  release/fastcode-portable-0.1.6.tar.gz \
+  release/datename-fastcode-termux-0.1.6.tgz \
   release/SHA256SUMS
 ```
 
@@ -315,8 +315,8 @@ gh release create v0.1.5 -t "FastCode 0.1.5" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | architecture, modules, data flow |
 | [docs/MODULES.md](docs/MODULES.md) | what every source file does |
 | [docs/AUDIT.md](docs/AUDIT.md) | security and robustness audit |
-| [CHANGELOG.md](CHANGELOG.md) | release notes (0.1.5) |
-| [PATCHES.md](PATCHES.md) | all 36 fixes up to 0.1.5 |
+| [CHANGELOG.md](CHANGELOG.md) | release notes (0.1.6) |
+| [PATCHES.md](PATCHES.md) | all 36 fixes up to 0.1.6 |
 
 ---
 
@@ -339,4 +339,4 @@ This project is a fix + Termux adaptation that stands on other people's work. Th
 Original author credits, upstream project names and copyrights remain the property of their
 respective owners; this repo only fixes and adapts for Termux.
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.5</sub>
+<sub>Made for Termux 🐧📱 · FastCode 0.1.6</sub>

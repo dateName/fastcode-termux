@@ -36,11 +36,11 @@ Termux 安装依赖：
 ## 方式 B：免安装便携包（Release 附件）
 
 包里已带好依赖，解压后不需要 npm install。到 Release 页面下载
-`fastcode-portable-0.1.5.tar.gz`（或 `.zip`，校验见 `SHA256SUMS`）。
+`fastcode-portable-0.1.6.tar.gz`（或 `.zip`，校验见 `SHA256SUMS`）。
 
 发布包结构：
 
-    fastcode-portable-0.1.5/
+    fastcode-portable-0.1.6/
       fastcode            启动脚本（Linux/macOS/Termux）
       fastcode.cmd        Windows 启动脚本
       package/            程序本体，内含 node_modules
@@ -48,10 +48,10 @@ Termux 安装依赖：
 
 使用步骤：
 
-    1) 把 fastcode-portable-0.1.5.tar.gz 传到设备
+    1) 把 fastcode-portable-0.1.6.tar.gz 传到设备
     2) 解压
-         tar -xzf fastcode-portable-0.1.5.tar.gz
-         cd fastcode-portable-0.1.5
+         tar -xzf fastcode-portable-0.1.6.tar.gz
+         cd fastcode-portable-0.1.6
     3) 直接运行
          ./fastcode --version
          ./fastcode doctor
@@ -89,7 +89,7 @@ Windows：
 
 用本地 tarball 安装：
 
-    npm install -g ./datename-fastcode-termux-0.1.5.tgz
+    npm install -g ./datename-fastcode-termux-0.1.6.tgz
 
 临时试用（不安装）：
 
@@ -103,9 +103,9 @@ Windows：
 
 产物在 `release/`：
 
-    fastcode-portable-0.1.5.tar.gz       免安装便携包
-    fastcode-portable-0.1.5.zip          同上（需系统有 zip）
-    datename-fastcode-termux-0.1.5.tgz   npm 包（npm pack）
+    fastcode-portable-0.1.6.tar.gz       免安装便携包
+    fastcode-portable-0.1.6.zip          同上（需系统有 zip）
+    datename-fastcode-termux-0.1.6.tgz   npm 包（npm pack）
     SHA256SUMS                           以上文件的校验和
 
 脚本步骤：复制 bin/dist 与元数据 ->（若含自包含的 dist/cli.js 则跳过依赖安装）
@@ -115,9 +115,9 @@ Windows：
 
 发布：
 
-    gh release create v0.1.5 -t "FastCode 0.1.5" \
-      release/fastcode-portable-0.1.5.tar.gz \
-      release/datename-fastcode-termux-0.1.5.tgz \
+    gh release create v0.1.6 -t "FastCode 0.1.6" \
+      release/fastcode-portable-0.1.6.tar.gz \
+      release/datename-fastcode-termux-0.1.6.tgz \
       release/SHA256SUMS
 
     cd package && npm publish --access public
@@ -149,7 +149,7 @@ Windows：
 
 ## 安装后校验
 
-    fastcode --version      # 应输出 0.1.5
+    fastcode --version      # 应输出 0.1.6
     fastcode doctor         # 检查 Node、平台、TTY、config/keys 路径、缺哪个 Key
 
 ## 更新
