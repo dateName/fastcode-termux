@@ -34,6 +34,7 @@
 | 26 | package/src/lib/pkg.ts、src/cli.ts、src/lib/diagnostics.ts | 打包后 import.meta.url 变化，版本读取失败，doctor 显示 0.0.0 | 新增 readPackageMeta()，对 bundle / tsc / tsx 三种路径逐一尝试 |
 | 27 | package/src/session/log.ts | 会话缓存上限默认偏小 | 默认 64MB → 256MB（仍可用 FASTCODE_SESSION_CACHE_MB 调整） |
 | 28 | scripts/install.sh、scripts/install-termux.sh、.github/workflows/release.yml、.gitattributes、scripts/build-portable.sh | 缺真正可用的一键安装 / 自动发布 / 换行一致 | install.sh 改为把 dist/cli.js 软链到 PATH（有产物免 npm）；install-termux.sh 变薄封装；新增 CI 打 tag 自动发 Release；build-portable.sh 产出 tar.gz/zip + npm pack + SHA256SUMS；.gitattributes 统一 LF |
+| 29 | src/app.ts、src/ui/Banner.ts | 启动大字横幅仅在终端 ≥88 列时显示，手机竖屏（Termux 约 56 列）看不到 | 按终端宽度自适应选字体（block 74 / simple 56 / slick 49 / shade 39 / chrome 32 / console 16 列），都放不下才不显示；真机（LG V40，35×56）已验证横幅正常且不换行 |
 
 ## 验证方式
 

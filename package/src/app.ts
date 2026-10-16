@@ -10,7 +10,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
  *   • Cancel streaming on Esc and quit cleanly on /exit.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Static, Text, useApp, useInput } from "ink";
 import { AGENT_SYSTEM_PROMPT, formatToolResults, parseToolCalls, stripToolCalls, } from "./agent/protocol.js";
 import { runAgentTool } from "./agent/tools.js";
 import { Banner } from "./ui/Banner.js";
@@ -31,7 +31,6 @@ import { isTrusted, trustProject } from "./config/trust.js";
 import { TrustGate } from "./ui/TrustGate.js";
 export const App = ({ initialPrompt, resume }) => {
     const { exit } = useApp();
-    const { stdout } = useStdout();
     const startupRef = useRef(null);
     if (!startupRef.current) {
         const config = loadConfig();
@@ -79,8 +78,9 @@ export const App = ({ initialPrompt, resume }) => {
     const theme = getTheme(config.theme);
     const stableUi = useMemo(() => shouldUseStableTerminalUi(), []);
     const liveStreamingUi = useMemo(() => shouldUseLiveStreamingUi(), []);
-    const columns = stdout?.columns ?? process.stdout.columns ?? 80;
-    const showBanner = transcript.length <= startup.transcript.length && !busy && columns >= 88;
+    // The banner picks a font that fits the terminal width (see ui/Banner.ts)
+    // and renders nothing when even the smallest font is too wide.
+    const showBanner = transcript.length <= startup.transcript.length && !busy;
     // Persist config whenever it changes.
     useEffect(() => {
         saveConfig(config);
