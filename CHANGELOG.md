@@ -66,4 +66,17 @@
 | `bbb42c3` | Also parse DeepSeek's DSML tool-call dialect |
 | `ea89317` | Add CHANGELOG.md summarizing the 0.1.5 changes |
 
+### npm 发布过程与结论（0.1.6）
+
+- 发布方式：CI 在 `v*` tag（或手动 Run workflow）时自动 `npm publish`；也可本地 `cd package && npm publish --access public`。
+- 现象：全新包首次发布会先出现占位版本 **`0.0.0-stage`**，npm 提示
+  `Your package is being processed and may take a few minutes to become available.`；
+  几分钟后目标版本正式上线（`dist-tags.latest` 变为 `0.1.6`）。这是 npm 对全新包的正常处理窗口，**不是失败**。
+- 校验：`npm view @datename/fastcode-termux version` → `0.1.6`。
+- 凭据注意：
+  - 能"免 OTP"的 token 才可用于无人值守 CI；而 npm 正在**收紧**这类 2FA-bypass token
+    （通知：`npm tokens that bypass 2FA are being restricted ... for direct publishing`）。
+  - **已改为优先 Trusted Publishing (OIDC)**：在 npm 包设置里关联本仓库 + `release.yml` 后，
+    CI 无需长期 token；未配置 OIDC 时回退用仓库 Secret `NPM_TOKEN`。
+
 > 更早的修复（0.1.3 → 0.1.4 及逆向重建源码树等）见 [PATCHES.md](PATCHES.md)。

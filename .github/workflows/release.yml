@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # required for npm Trusted Publishing (OIDC)
 
 jobs:
   release:
@@ -19,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Install deps & build bundle
@@ -46,12 +47,19 @@ jobs:
             release/SHA256SUMS
           generate_release_notes: true
 
-      # Publishes to npm on a v* tag OR a manual run (any ref) when the
-      # NPM_TOKEN secret is set. Keeps `npm install -g` from serving a stale build.
+      # Publishes to npm on a v* tag OR a manual run.
+      #  - Preferred: Trusted Publishing (OIDC) — no long-lived secret. Configure the
+      #    package on npmjs.com → Settings → Trusted Publishing with this repo+workflow,
+      #    then delete the NPM_TOKEN secret.
+      #  - Fallback: if NPM_TOKEN is set, it is used instead.
       - name: Publish to npm
-        if: ${{ env.NPM_TOKEN != '' }}
         working-directory: package
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: |
+          npm install -g npm@latest
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "No NPM_TOKEN set — using npm Trusted Publishing (OIDC)."
+            npm config delete //registry.npmjs.org/:_authToken || true
+          fi
+          npm publish --access public
