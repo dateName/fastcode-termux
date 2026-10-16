@@ -18,7 +18,7 @@
 FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它连接你常用的模型服务商，
 能像 agent 一样**读文件、改文件、执行命令、搜索代码**，并支持 Agent Skills 扩展能力。
 
-本项目基于官方已删除的上游 `SimpleLittleDev/FastCode` 0.1.3 编译产物做了修复与手机适配，
+本项目基于上游 `SimpleLittleDev/FastCode` 0.1.3 编译产物做了修复与手机适配，
 并已**逆向重建 TypeScript 源码**（`package/src`，`npm run build` 可重新编译）。
 
 发布物为**自包含单文件** `package/dist/cli.js`（用 esbuild 把 Ink/React/meow 等依赖全部内联），
@@ -55,8 +55,6 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 🚫 危险命令拦截 | `rm -rf`、`dd`、`mkfs`、fork bomb 等在**执行前**被拒绝 | `FASTCODE_ALLOW_DANGEROUS=1` |
 | ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
-
-> 危险命令拒绝列表移植自 HKUDS/FastCode 的 nanobot（`nanobot/agent/tools/shell.py`）。
 
 ---
 
@@ -321,10 +319,8 @@ gh release create v0.1.5 -t "FastCode 0.1.5" \
 
 ## ℹ️ 关于本项目
 
-- 官方源码仓库 `github.com/SimpleLittleDev/FastCode` 已被删除，npm 上最后一版是 0.1.3。
+- 上游源码仓库 `github.com/SimpleLittleDev/FastCode`，npm 上最后一版是 0.1.3。
   本仓库在其编译产物上修复 + 手机适配，并已逆向重建 TypeScript 源码（`package/src`）。
-- `github.com/HKUDS/FastCode` 是另一个 Python 项目（代码理解框架），与本 TUI 无关。
-- 危险命令拦截的规则移植自 HKUDS/FastCode 的 nanobot。
 
 ---
 

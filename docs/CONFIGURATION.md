@@ -147,7 +147,7 @@ auth.json 里的 Key 是「服务商 + 模型级」的，换到别的模型就�
     fastcode untrust [目录]   撤销信任
     fastcode trusted          列出已信任目录
 
-shell 工具在执行前先过危险命令拦截（deny 列表移植自 HKUDS/FastCode 的 nanobot）：
+shell 工具在执行前先过危险命令拦截（内置 deny 列表）：
 rm -rf、del /f、rmdir /s、format/mkfs/diskpart、dd if=、写入 /dev/sd、
 shutdown/reboot/poweroff、fork bomb 会被直接拒绝；正文会给出命中的正则。
 需要临时放行时 export FASTCODE_ALLOW_DANGEROUS=1。

@@ -19,7 +19,7 @@ FastCode is a multi-model **AI coding assistant** that runs in your terminal (TU
 It connects to your favourite provider and works like an agent — it **reads files, edits
 files, runs commands and searches code** — and supports Agent Skills.
 
-This repo fixes and adapts the deleted upstream `SimpleLittleDev/FastCode` 0.1.3 build for
+This repo fixes and adapts the upstream `SimpleLittleDev/FastCode` 0.1.3 build for
 mobile, and the TypeScript source has been reverse-engineered into `package/src`
 (`npm run build` rebuilds `dist`).
 
@@ -57,8 +57,6 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 🚫 Dangerous-command guard | `rm -rf`, `dd`, `mkfs`, fork bombs are refused **before** execution | `FASTCODE_ALLOW_DANGEROUS=1` |
 | ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
-
-> The dangerous-command deny list is ported from HKUDS/FastCode nanobot (`nanobot/agent/tools/shell.py`).
 
 ---
 
@@ -323,10 +321,8 @@ gh release create v0.1.5 -t "FastCode 0.1.5" \
 
 ## ℹ️ About this build
 
-- The original upstream repository (`SimpleLittleDev/FastCode`) was deleted; npm's last release is 0.1.3.
+- The upstream repository is `SimpleLittleDev/FastCode`; npm's last release is 0.1.3.
   This repo fixes and adapts that compiled artifact for mobile, with the TypeScript source reverse-engineered into `package/src`.
-- `HKUDS/FastCode` is a different Python project (code understanding) and is **not** the upstream of this TUI.
-- The dangerous-command rules are ported from HKUDS/FastCode nanobot.
 
 ---
 

@@ -390,15 +390,10 @@ npm publish --access public
 | Unified tool-output cap | Output is truncated while it is produced, not sliced afterwards (default 30000 characters) | FASTCODE_TOOL_OUTPUT_LIMIT |
 | Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash (cache cap 256MB by default) | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
 
-The dangerous-command deny list is ported from HKUDS/FastCode nanobot
-(nanobot/agent/tools/shell.py).
-
 ## 🙏 Credits
 
 - **SimpleLittleDev** — author of the original FastCode TUI; the npm package
   `@simplelittledev/fastcode` and its credit belong to them.
-- **HKUDS (HKU Data Intelligence Lab)** — the dangerous-command deny list is ported from
-  [HKUDS/FastCode](https://github.com/HKUDS/FastCode) nanobot; thanks to its contributors.
 - All upstream dependency authors (Ink, React, meow, cfonts, marked, chalk, ...).
 
 ## 📜 License

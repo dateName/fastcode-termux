@@ -130,7 +130,7 @@ config.json 与 auth.json 是两个独立文件；改模型只动 config.json，
 | 关注点 | 位置 | 行为 |
 |---|---|---|
 | 项目信任 | config/trust.ts + ui/TrustGate.ts | 首次在陌生目录启用 agent 工具前先确认；列表在 ~/.fastcode/trusted.json |
-| 危险命令拦截 | agent/guards.ts | 执行前匹配 deny 列表（移植自 HKUDS/FastCode nanobot）；可加白名单或放行 |
+| 危险命令拦截 | agent/guards.ts | 执行前匹配内置 deny 列表；可加白名单或放行 |
 | 输出上限 | agent/limits.ts | OutputBuffer 边产边截断，head/tail 两种模式，一个上限贯穿所有工具 |
 | 会话落盘 | session/log.ts | JSONL 逐行追加，崩溃可恢复；缓存上限默认 256MB，超出删最旧 |
 

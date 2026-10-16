@@ -27,7 +27,7 @@
 | 19 | src/agent/limits.ts、src/agent/tools.ts、src/agent/protocol.ts | 工具输出上限散落多处（shell 20000、fence 12000、列表 1000 行），且是事后 slice，内存不受控 | 新增统一的 OutputBuffer：边产边截断、head/tail 两种模式、明确标注省略量；一个上限贯穿 shell、grep、list_files、结果封装，可用 FASTCODE_TOOL_OUTPUT_LIMIT 调整 |
 | 20 | src/session/log.ts、src/app.ts、src/cli.ts | 会话只在内存，崩溃即全丢 | JSONL 逐行追加落盘到 ~/.fastcode/sessions，新增 fastcode sessions/resume 与 TUI 恢复；缓存上限默认 256MB，可用 FASTCODE_SESSION_CACHE_MB 调整，超出先删最旧 |
 | 21 | src/config/trust.ts、src/ui/TrustGate.ts、src/cli.ts | 在陌生目录直接启用 agent 工具，无确认 | 项目信任机制：首次进入目录弹出确认，信任列表存 ~/.fastcode/trusted.json，新增 fastcode trust/untrust/trusted，FASTCODE_TRUST_ALL=1 可跳过 |
-| 22 | src/agent/guards.ts、src/agent/tools.ts | shell 工具可执行任意破坏性命令 | 移植 HKUDS/FastCode nanobot 的危险命令 deny 列表（rm -rf / del /f / rmdir /s / format|mkfs|diskpart / dd if= / 写 /dev/sd / shutdown|reboot|poweroff / fork bomb），执行前拦截；支持 allowlist、追加规则与 FASTCODE_ALLOW_DANGEROUS 放行 |
+| 22 | src/agent/guards.ts、src/agent/tools.ts | shell 工具可执行任意破坏性命令 | 内置危险命令 deny 列表（rm -rf / del /f / rmdir /s / format|mkfs|diskpart / dd if= / 写 /dev/sd / shutdown|reboot|poweroff / fork bomb），执行前拦截；支持 allowlist、追加规则与 FASTCODE_ALLOW_DANGEROUS 放行 |
 | 23 | package/scripts/build.mjs、esbuild、package/dist/cli.js | `git clone` 后直接运行报 ERR_MODULE_NOT_FOUND（依赖未安装） | 用 esbuild 把全部依赖打包成自包含单文件 dist/cli.js 并**提交进 Git**；bin/fastcode.mjs 优先加载它，缺依赖时给友好指引；`git clone` 后免 npm install |
 | 24 | package/scripts/esbuild-plugins.mjs | 打包后启动时的大字横幅（ink-big-text）消失 | cfonts 用动态 require 读字体，打包后失败而静默返回 false；构建时把 cfonts/fonts/*.json 内联成静态映射 |
 | 25 | package/scripts/esbuild-plugins.mjs | 打包后 CJS 依赖（supports-color）调用 require('os') 抛 "Dynamic require ... is not supported" | 注入 createRequire banner，为 ESM 产物提供真实 require |
@@ -68,7 +68,7 @@
 
 ## 尚未处理 / 已知限制
 
-- 上游源码已删除，但本仓库已逆向重建 TypeScript 源码树（package/src），dist 可随时用
+- 本仓库已逆向重建 TypeScript 源码树（package/src），dist 可随时用
   `cd package && npm run build`（tsc + esbuild）重新生成；改功能请改 src，不要再直接改 dist。
 - 旧 provider-only Key 只带服务商、不携带模型信息，无法自动判定归属，因此按 unbound 处理并提示重新绑定，不会自动迁移到当前模型。
 - 技能市场 skillshub.wtf 需要付费，属上游问题，未改。

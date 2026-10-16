@@ -1,9 +1,9 @@
 /**
  * Dangerous-command guard.
  *
- * Ported from HKUDS/FastCode nanobot (nanobot/agent/tools/shell.py): the
- * upstream deny list is kept, with the word-boundary escapes rewritten as
- * character classes so the intent is identical without boundary syntax.
+ * Blocks destructive shell patterns before execution. Word-boundary escapes
+ * are written as character classes so the intent is identical without
+ * boundary syntax.
  *
  * Overrides:
  *   FASTCODE_ALLOW_DANGEROUS=1        bypass the deny list (reported in output)

@@ -86,8 +86,8 @@
 
 ## 二之二、0.1.5 追加的缓解
 
-- **L-2 提示注入与破坏性命令**：已由 src/agent/guards.ts 的危险命令拦截缓解
-  （deny 列表移植自 HKUDS/FastCode nanobot）。默认拦截 rm -rf、dd、mkfs、fork bomb 等；
+- **L-2 提示注入与破坏性命令**：已由 src/agent/guards.ts 的危险命令拦截缓解。
+  默认拦截 rm -rf、dd、mkfs、fork bomb 等；
   可用 FASTCODE_ALLOW_DANGEROUS=1 放行，或 FASTCODE_SHELL_ALLOWLIST 收紧。
 - **项目信任**：src/config/trust.ts + src/ui/TrustGate.ts，未信任目录不会直接启用 agent 工具。
 - **输出上限**：src/agent/limits.ts 统一为边产边截断，避免超长输出撑爆内存。
