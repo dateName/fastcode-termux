@@ -315,7 +315,8 @@ gh release create v0.1.5 -t "FastCode 0.1.5" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | architecture, modules, data flow |
 | [docs/MODULES.md](docs/MODULES.md) | what every source file does |
 | [docs/AUDIT.md](docs/AUDIT.md) | security and robustness audit |
-| [PATCHES.md](PATCHES.md) | all 33 fixes up to 0.1.5 |
+| [CHANGELOG.md](CHANGELOG.md) | release notes (0.1.5) |
+| [PATCHES.md](PATCHES.md) | all 36 fixes up to 0.1.5 |
 
 ---
 

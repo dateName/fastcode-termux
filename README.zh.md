@@ -313,7 +313,8 @@ gh release create v0.1.5 -t "FastCode 0.1.5" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块、数据流 |
 | [docs/MODULES.md](docs/MODULES.md) | 每个文件干什么 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 安全审计结论 |
-| [PATCHES.md](PATCHES.md) | 到 0.1.5 为止的 33 项修复清单 |
+| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.5） |
+| [PATCHES.md](PATCHES.md) | 到 0.1.5 为止的 36 项修复清单 |
 
 ---
 
