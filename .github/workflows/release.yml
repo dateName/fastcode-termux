@@ -20,6 +20,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://registry.npmjs.org
 
       - name: Install deps & build bundle
         working-directory: package
@@ -41,3 +42,13 @@ jobs:
             release/simplelittledev-fastcode-*.tgz
             release/SHA256SUMS
           generate_release_notes: true
+
+      # Keeps npm in sync with the tag so `npm install -g` never serves a stale
+      # build. Skipped automatically when the NPM_TOKEN secret is not set.
+      - name: Publish to npm
+        if: ${{ env.NPM_TOKEN != '' }}
+        working-directory: package
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

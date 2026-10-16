@@ -82,6 +82,9 @@ Windows：
     npm install -g @simplelittledev/fastcode
     fastcode --version
 
+> 注意：npm registry 上的版本可能落后于本仓库。若安装后行为异常或版本不对，
+> 请改用方式 A（克隆）或方式 B（便携包）。
+
 ## 方式 D：本地 tarball / npx
 
 用本地 tarball 安装：
@@ -151,11 +154,14 @@ Windows：
 
 ## 更新
 
-    仓库： bash ~/fastcode/scripts/install.sh            # git pull + 重装（推荐）
+    cd ~/fastcode && git pull && bash scripts/install.sh   # 先 git pull 再软链（推荐）
     便携包：解压新版本目录，替换软链接指向
-    npm：  npm install -g @simplelittledev/fastcode@latest
-    本地： cd fastcode && git pull && npm install -g ./package --force
+    本地： cd fastcode && git pull && bash scripts/install.sh
+    npm：  npm install -g @simplelittledev/fastcode@latest  # registry 可能落后于仓库
     检查： fastcode update
+
+> 注意：`scripts/install.sh` 本身只做软链，**不会 git pull**；要更新必须先
+> `git pull` 再跑安装脚本。
 
 ## 卸载
 

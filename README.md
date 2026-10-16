@@ -110,13 +110,23 @@ cd fastcode-portable-0.1.4
 
 > No bundle uploaded yet? Build your own with `sh scripts/build-portable.sh`, or let GitHub Actions publish it — see [Maintainers](#-maintainers).
 
-### 3. Manual install
+### 3. From source (only if you want to modify or rebuild)
+
+You do **not** need this to use FastCode — the committed bundle already runs
+(see above). Use it when you change `package/src` or want a local rebuild:
 
 ```bash
 git clone https://github.com/dateName/fastcode-termux.git
 cd fastcode-termux/package
-npm install          # ⚠️ do not skip
+npm install          # needed only to rebuild / run the TypeScript source
+npm run build        # regenerates dist/ from src/
 npm link             # then `fastcode` / `fc` are global
+```
+
+To just run the committed bundle from a checkout, no install is required:
+
+```bash
+node package/dist/cli.js          # or: node package/bin/fastcode.mjs doctor
 ```
 
 ---
@@ -196,15 +206,16 @@ Inside the TUI: `/help` · `/model` · `/provider` · `/login` · `/agent` · `/
 
 | Symptom | Cause / fix |
 |---|---|
-| Slow install / hangs | switch mirror: `npm config set registry https://registry.npmmirror.com` |
+| `ERR_MODULE_NOT_FOUND` right after `git clone` | you're on an unpacked/old tree. Run `bash scripts/install.sh`; when `dist/cli.js` is present you can also just run `node package/dist/cli.js`. Only method 3 needs `npm install` |
+| Slow `npm install` / hangs (method 3 only) | switch mirror: `npm config set registry https://registry.npmmirror.com` |
 | Permission error / can't see phone files | run `termux-setup-storage`; make sure `~/storage/shared` exists |
 | Arch mismatch / native module error | use the **from-source** install (option 3) so deps rebuild locally |
 | Invalid API key | run `fastcode doctor`; check the env var name/value, or `/login` again |
-| How to update | repo install: `bash ~/fastcode/scripts/install.sh`; npm: `npm i -g @simplelittledev/fastcode@latest` |
+| How to update | `cd ~/fastcode && git pull && bash scripts/install.sh` (install.sh alone does not pull) |
+| npm install gives old/broken behavior | the npm registry can lag the repo — prefer the clone or the portable bundle for now; `fastcode update` compares versions |
 | "requires a TTY" | run in a real terminal; pipes and some remote tools trigger this |
 | One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.4) |
 | Command blocked | that's the safety guard; override with `FASTCODE_ALLOW_DANGEROUS=1` |
-| `ERR_MODULE_NOT_FOUND` right after `git clone` | you're on an unpacked/old tree. Run `bash scripts/install.sh`, or `cd package && npm install`; when `dist/cli.js` is present you can run `node package/dist/cli.js` |
 
 ---
 
@@ -258,6 +269,9 @@ SHA256SUMS                           checksums
 ```
 
 ### Publish to npm
+
+CI publishes to npm automatically on a `v*` tag when the repo secret
+`NPM_TOKEN` is set (see `.github/workflows/release.yml`). Manual fallback:
 
 ```bash
 cd package

@@ -108,13 +108,23 @@ cd fastcode-portable-0.1.4
 
 > 便携版尚未上传时，可用 `sh scripts/build-portable.sh` 自行构建，或用 GitHub Actions 自动发布（见 [开发者](#-开发者)）。
 
-### 方式三：手动安装
+### 方式三：从源码运行（仅在你要改源码 / 重新构建时）
+
+日常使用**不需要**这一步 —— 仓库里已含可运行的打包产物（见上文）。
+只有当你修改 `package/src` 或想本地重建时才用它：
 
 ```bash
 git clone https://github.com/dateName/fastcode-termux.git
 cd fastcode-termux/package
-npm install          # ⚠️ 这一步不能省略
+npm install          # 仅重建 / 跑 TypeScript 源码时需要
+npm run build        # 由 src/ 重新生成 dist/
 npm link             # 之后即可全局使用 fastcode / fc
+```
+
+只想直接跑已提交的产物，则完全不用安装：
+
+```bash
+node package/dist/cli.js          # 或：node package/bin/fastcode.mjs doctor
 ```
 
 ---
@@ -194,15 +204,16 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 
 | 现象 | 原因 / 解决 |
 |---|---|
-| 安装很慢 / 卡住 | 换 npm 镜像：`npm config set registry https://registry.npmmirror.com` |
+| `git clone` 后直接运行报 `ERR_MODULE_NOT_FOUND` | 说明你在用未打包的旧产物。跑 `bash scripts/install.sh`；仓库已含 `dist/cli.js` 时也可直接 `node package/dist/cli.js`。只有方式三才需要 `npm install` |
+| 安装很慢 / 卡住（仅方式三） | 换 npm 镜像：`npm config set registry https://registry.npmmirror.com` |
 | 权限错误 / 读不到手机文件 | 先跑 `termux-setup-storage`；确认 `~/storage/shared` 已生成 |
-| 架构不兼容 / 原生模块报错 | 改用**方式三：手动安装**（`npm install`），让依赖在本机重新拉取 |
+| 架构不兼容 / 原生模块报错 | 改用**方式三：从源码**（`npm install`），让依赖在本机重新拉取 |
 | API Key 无效 | 用 `fastcode doctor` 看缺哪个；检查环境变量名与值，或 `/login` 重新登录 |
-| 如何更新 | 仓库安装：`bash ~/fastcode/scripts/install.sh`；npm：`npm i -g @simplelittledev/fastcode@latest` |
+| 如何更新 | `cd ~/fastcode && git pull && bash scripts/install.sh`（单跑 install.sh 不会拉取） |
+| npm 安装后行为旧 / 报错 | npm registry 可能落后于仓库 —— 暂时优先用克隆或便携版；`fastcode update` 会比较版本 |
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
 | 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.4） |
 | 命令被拦截 | 那是危险命令保护；确认无误可临时 `export FASTCODE_ALLOW_DANGEROUS=1` |
-| `git clone` 后直接运行报 `ERR_MODULE_NOT_FOUND` | 说明你在用未打包的旧产物。跑 `bash scripts/install.sh`，或 `cd package && npm install`；仓库已含 `dist/cli.js` 时可直接 `node package/dist/cli.js` |
 
 ---
 
@@ -256,6 +267,9 @@ SHA256SUMS                           以上文件的校验和
 ```
 
 ### 发布 npm
+
+设置仓库 Secret `NPM_TOKEN` 后，CI 会在推送 `v*` tag 时自动 `npm publish`
+（见 `.github/workflows/release.yml`）。手动兜底：
 
 ```bash
 cd package
