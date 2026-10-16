@@ -4,20 +4,7 @@ export declare const anthropicProvider: {
     authEnv: string[];
     baseUrl: string;
     defaultModel: string;
-    listModels(): Promise<({
-        id: string;
-        label: string;
-        contextWindow: number;
-        pricing: {
-            inputUsdPerM: number;
-            outputUsdPerM: number;
-        };
-    } | {
-        id: string;
-        label: string;
-        contextWindow?: undefined;
-        pricing?: undefined;
-    })[]>;
+    listModels(apiKey: any): Promise<any>;
     stream(req: any, apiKey: any): AsyncGenerator<{
         delta: any;
         done: boolean;

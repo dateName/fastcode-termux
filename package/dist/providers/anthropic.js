@@ -16,7 +16,28 @@ export const anthropicProvider = {
     authEnv: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
     baseUrl: BASE,
     defaultModel: "claude-sonnet-5.5",
-    async listModels() {
+    async listModels(apiKey) {
+        // Query the live model list; fall back to the built-in list offline.
+        if (apiKey) {
+            try {
+                const res = await fetch(BASE + "/models", {
+                    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+                });
+                if (res.ok) {
+                    const json = await res.json();
+                    const ids = (json.data ?? [])
+                        .map((m) => m.id)
+                        .filter((id) => typeof id === "string" && id.length > 0);
+                    if (ids.length > 0) {
+                        const known = new Map(STATIC_MODELS.map((m) => [m.id, m]));
+                        return ids.map((id) => known.get(id) ?? { id });
+                    }
+                }
+            }
+            catch {
+                // network/auth issue → fall through to the static list
+            }
+        }
         return STATIC_MODELS;
     },
     async *stream(req, apiKey) {

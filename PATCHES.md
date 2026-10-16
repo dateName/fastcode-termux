@@ -39,6 +39,8 @@
 | 31 | src/commands/login.ts、logout.ts、whoami.ts、src/app.ts、src/ui/Prompt.ts | /login 无引导、不回显归属；logout 只能按服务商删 | /login 引导式流程：服务商 → 模型 → Key（输入掩码），无参数时逐步选择；保存后回显 服务商/模型/尾号/文件路径；logout 支持按作用域删除或 `--all`；whoami 列出作用域、legacy 与环境变量；发送前校验当前 provider+model 的 Key，缺失或 unbound 时拦截并给出精确命令 |
 | 32 | src/app.ts | 服务商鉴权失败 / 额度用完时报错笼统 | 401/403 提示重新检查或重存 Key；402/429 提示额度/限流并建议充值或切换模型；均带 provider·model 上下文 |
 | 33 | docs/CONFIGURATION.md、README.md、README.zh.md | 文档仍描述 provider 级 Key | 更新为「服务商 + 模型」作用域、legacy 迁移、引导式 /login、发送前校验与错误提示 |
+| 34 | package/src/providers/openaiCompatible.ts | `/models` 实时列表与内置清单合并时，会把「内置里有、服务商已下架」的模型继续显示，模型选择器长期保留旧模型（如 `deepseek-chat`） | 实时列表视为权威：只显示服务商当前返回的模型（用内置标签/价格补全已知项）；离线或请求失败时才回退内置清单 |
+| 35 | package/src/providers/deepseek.ts、package/src/providers/anthropic.ts | 服务商内置/默认模型陈旧（DeepSeek 官方实时只剩 `deepseek-flash`、`deepseek-v4-pro`；Anthropic 从不联网取列表） | DeepSeek 内置与默认更新为 `deepseek-v4-pro`/`deepseek-flash`；Anthropic 的 listModels 改为先查 `/v1/models` 实时列表、失败再回退内置 |
 
 ## 验证方式
 

@@ -94,13 +94,12 @@ export async function listModelsHttp(opts) {
             .filter((id) => typeof id === "string" && id.length > 0);
         if (ids.length === 0)
             return staticModels;
+        // The provider's live list is authoritative: show exactly what it
+        // returns (enriched with our labels/pricing where the id is known).
+        // Static models the provider no longer returns are dropped so delisted
+        // models don't linger in the picker.
         const known = new Map(staticModels.map((m) => [m.id, m]));
-        const merged = ids.map((id) => known.get(id) ?? { id });
-        for (const m of staticModels) {
-            if (!ids.includes(m.id))
-                merged.push(m);
-        }
-        return merged;
+        return ids.map((id) => known.get(id) ?? { id });
     }
     catch {
         return staticModels;
