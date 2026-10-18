@@ -21,4 +21,5 @@ export declare const zhipuProvider: {
         usage: any;
         reasoning?: undefined;
     }, void, unknown>;
+    supportsReasoning: () => boolean;
 };

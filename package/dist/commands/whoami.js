@@ -10,19 +10,20 @@ export const whoamiCommand = {
             lines.push("  " + describeLookup(current, resolveApiKey(current.id, state.model, current.authEnv)));
         const credentials = listCredentials();
         lines.push("");
-        lines.push(`Stored keys (${credentials.length}):`);
+        lines.push(`Stored keys (${credentials.length}, provider-wide):`);
         if (credentials.length === 0)
             lines.push("  (none) — add one with /login");
         for (const c of credentials) {
-            const marker = c.provider === state.providerId && c.model === state.model ? "● " : "  ";
-            lines.push(`${marker}${c.provider}::${c.model}   ${maskKey(c.key)}`);
+            const marker = c.provider === state.providerId ? "● " : "  ";
+            const origin = c.model ? `   (originally saved for ${c.model})` : "";
+            lines.push(`${marker}${c.provider}   ${maskKey(c.key)}${origin}`);
         }
         const legacy = listLegacy();
         if (legacy.length > 0) {
             lines.push("");
-            lines.push("Unbound legacy keys (NOT used — re-bind them to a model):");
+            lines.push("Legacy keys (could not be migrated — re-save with /login):");
             for (const l of legacy)
-                lines.push(`  ${l.provider}   ${maskKey(l.key)}   → /login ${l.provider} <model> <key>`);
+                lines.push(`  ${l.provider}   ${maskKey(l.key)}`);
         }
         const envLines = [];
         for (const p of PROVIDERS) {

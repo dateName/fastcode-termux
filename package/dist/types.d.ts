@@ -6,6 +6,7 @@
  * Providers can layer richer behavior on top in their own modules.
  */
 export type Role = "system" | "user" | "assistant";
+export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "max";
 export interface ChatMessage {
     role: Role;
     content: string;
@@ -19,6 +20,12 @@ export interface ChatRequest {
     temperature?: number;
     /** Soft cap for output tokens. */
     maxOutputTokens?: number;
+    /**
+     * Requested thinking depth. Providers that support it map this to their
+     * native parameter (`reasoning_effort`, `thinking.budget_tokens`, …);
+     * providers that don't should ignore it.
+     */
+    reasoningEffort?: ReasoningEffort;
     /** AbortSignal for cancellation (Esc / Ctrl+C). */
     signal?: AbortSignal;
 }
@@ -63,6 +70,25 @@ export interface Provider {
     listModels(apiKey: string | undefined): Promise<ProviderModel[]>;
     /** Stream a chat completion. */
     stream(req: ChatRequest, apiKey: string | undefined): ChatStream;
+    /** Whether this provider/model honors ChatRequest.reasoningEffort. */
+    supportsReasoning?(model: string): boolean;
+}
+export interface PickerItem {
+    value: string;
+    label: string;
+    hint?: string;
+}
+/**
+ * An interactive list a command can hand back to the app. The app renders it
+ * with arrow keys, number shortcuts, and Enter (Esc cancels).
+ */
+export interface PickerRequest {
+    title: string;
+    items: PickerItem[];
+    /** Currently selected value, highlighted on open. */
+    current?: string;
+    onSelect(value: string, item: PickerItem): void;
+    onCancel?(): void;
 }
 export interface SlashCommand {
     name: string;
@@ -81,6 +107,8 @@ export interface CommandResult {
     silent?: boolean;
     /** Quit the app after this command. */
     quit?: boolean;
+    /** Open an interactive picker after the command runs. */
+    picker?: PickerRequest;
 }
 export interface CommandContext {
     args: string[];
@@ -101,6 +129,7 @@ export interface AppStateSnapshot {
     enabledSkills: string[];
     enabledPlugins: string[];
     skillsRegistry: string;
+    reasoningEffort: ReasoningEffort;
 }
 export interface AppActions {
     setProvider(id: string): void;
@@ -109,6 +138,7 @@ export interface AppActions {
     setAgentMode(enabled: boolean): void;
     setSystemPrompt(prompt: string): void;
     setSkillsRegistry(url: string): void;
+    setReasoningEffort(effort: ReasoningEffort): void;
     enableSkill(name: string): void;
     disableSkill(name: string): void;
     enablePlugin(name: string): void;

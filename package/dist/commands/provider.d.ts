@@ -7,5 +7,18 @@ export declare const providerCommand: {
         state: any;
     }): {
         message: string;
+        picker: {
+            title: string;
+            current: any;
+            items: {
+                value: string;
+                label: string;
+                hint: string;
+            }[];
+            onSelect: (id: any) => void;
+        };
+    } | {
+        message: string;
+        picker?: undefined;
     };
 };

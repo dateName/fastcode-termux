@@ -1,6 +1,6 @@
 import { fetchJson, streamSSE } from "../lib/http.js";
 /** Build a chat-completions body in the classic or the newer (compat) dialect. */
-function buildBody(req, compat) {
+function buildBody(req, compat, opts, includeReasoning = true) {
     const messages = [];
     if (req.system)
         messages.push({ role: "system", content: req.system });
@@ -15,10 +15,18 @@ function buildBody(req, compat) {
     }
     if (req.temperature !== undefined && !compat)
         body.temperature = req.temperature;
+    if (includeReasoning && req.reasoningEffort && req.reasoningEffort !== "auto") {
+        const effort = req.reasoningEffort === "max" ? "high" : req.reasoningEffort;
+        if (opts.reasoning === "openai")
+            body.reasoning_effort = effort;
+        else if (opts.reasoning === "openrouter")
+            body.reasoning = { effort };
+    }
     return body;
 }
 export async function* streamChatCompletion(req, opts) {
-    const send = async (compat) => {
+    const hasReasoning = Boolean(req.reasoningEffort && req.reasoningEffort !== "auto" && opts.reasoning && opts.reasoning !== "none");
+    const send = async (compat, includeReasoning = hasReasoning) => {
         const headers = {
             "content-type": "application/json",
             accept: "text/event-stream",
@@ -29,21 +37,27 @@ export async function* streamChatCompletion(req, opts) {
         return await fetch(trim(opts.baseUrl) + "/chat/completions", {
             method: "POST",
             headers,
-            body: JSON.stringify(buildBody(req, compat)),
+            body: JSON.stringify(buildBody(req, compat, opts, includeReasoning)),
             signal: req.signal,
         });
     };
     let res = await send(false);
     if (!res.ok) {
-        const detail = await res.text().catch(() => "");
+        let detail = await res.text().catch(() => "");
+        // Some models reject the thinking parameter even though the provider
+        // as a whole accepts it. Drop it once, then keep the request alive.
+        if (res.status === 400 && hasReasoning && /reasoning|thinking|effort|unsupported|unrecognized|unknown parameter/i.test(detail)) {
+            res = await send(false, false);
+            detail = res.ok ? detail : await res.text().catch(() => "");
+        }
         // Newer OpenAI-style models reject max_tokens and temperature. Retry once
         // in the compatibility dialect before surfacing the real error.
-        if (res.status === 400 && /max_tokens|max_completion_tokens|temperature|unsupported|unrecognized|unknown parameter/i.test(detail)) {
-            res = await send(true);
+        if (!res.ok && res.status === 400 && /max_tokens|max_completion_tokens|temperature|unsupported|unrecognized|unknown parameter/i.test(detail)) {
+            res = await send(true, false);
+            detail = res.ok ? detail : await res.text().catch(() => "");
         }
         if (!res.ok) {
-            const body = await res.text().catch(() => "");
-            throw new Error(res.status + " " + res.statusText + ": " + body.slice(0, 500));
+            throw new Error(res.status + " " + res.statusText + ": " + detail.slice(0, 500));
         }
     }
     let usage;

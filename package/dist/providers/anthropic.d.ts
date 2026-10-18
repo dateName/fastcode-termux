@@ -4,6 +4,7 @@ export declare const anthropicProvider: {
     authEnv: string[];
     baseUrl: string;
     defaultModel: string;
+    supportsReasoning(): boolean;
     listModels(apiKey: any): Promise<any>;
     stream(req: any, apiKey: any): AsyncGenerator<{
         delta: any;

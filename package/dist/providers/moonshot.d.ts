@@ -21,4 +21,5 @@ export declare const moonshotProvider: {
         usage: any;
         reasoning?: undefined;
     }, void, unknown>;
+    supportsReasoning: () => boolean;
 };

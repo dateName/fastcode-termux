@@ -11,5 +11,6 @@ export const deepseekProvider = {
     baseUrl: BASE,
     defaultModel: "deepseek-v4-pro",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC }),
+    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC, reasoning: "openai" }),
+    supportsReasoning: () => true,
 };

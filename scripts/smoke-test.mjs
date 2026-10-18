@@ -43,6 +43,9 @@ const load = (rel) => import(pathToFileURL(join(distDir, rel)).href);
 
 console.log("FastCode smoke test");
 console.log("  package: " + pkgDir);
+// config/paths caches its root on first use, and the agent tools now import
+// the config store, so the sandbox home must be set before any module loads.
+process.env.FASTCODE_HOME = mkdtempSync(join(tmpdir(), "fastcode-home-"));
 
 const jsFiles = listJs(distDir);
 let syntaxBad = 0;
@@ -134,7 +137,6 @@ rmSync(tmp, { recursive: true, force: true });
 rmSync(outsideDir, { recursive: true, force: true });
 rmSync(extraDir, { recursive: true, force: true });
 
-process.env.FASTCODE_HOME = mkdtempSync(join(tmpdir(), "fastcode-home-"));
 const store = await load("config/store.js");
 const paths = await load("config/paths.js");
 const cfg = store.loadConfig();
@@ -142,18 +144,18 @@ store.saveConfig({ ...cfg, providerId: "deepseek", model: "deepseek-chat" });
 ok("saveConfig writes config.json", existsSync(paths.getPaths().config));
 ok("config and keys stay in separate files", !existsSync(paths.getPaths().auth));
 
-// API keys are scoped to provider + model and never leak across models.
+// API keys are provider-scoped: every model of a provider reuses one key.
 store.setCredential("deepseek", "deepseek-chat", "sk-1234567890abcd");
-ok("a scoped key resolves for its own provider+model", store.resolveApiKey("deepseek", "deepseek-chat", []).status === "ok");
-ok("a key does NOT resolve for another model", store.resolveApiKey("deepseek", "deepseek-reasoner", []).status === "missing");
+ok("a provider key resolves for its own model", store.resolveApiKey("deepseek", "deepseek-chat", []).status === "ok");
+ok("the same provider key resolves for another model", store.resolveApiKey("deepseek", "deepseek-reasoner", []).status === "ok");
 process.env.DEEPSEEK_API_KEY = "sk-fromenv";
 ok("env var is a provider-wide fallback", store.resolveApiKey("deepseek", "deepseek-reasoner", ["DEEPSEEK_API_KEY"]).status === "ok");
 delete process.env.DEEPSEEK_API_KEY;
 ok("maskKey hides the middle", store.maskKey("sk-1234567890abcd") === "sk-****abcd");
 writeFileSync(paths.getPaths().auth, JSON.stringify({ keys: { openai: "sk-legacy-0000wxyz" } }));
-ok("a legacy provider-only key is unbound, not used", store.resolveApiKey("openai", "gpt-4o", []).status === "unbound");
+ok("a legacy provider-only key migrates to a provider key", store.resolveApiKey("openai", "gpt-4o", []).status === "ok");
 store.setCredential("openai", "gpt-4o", "sk-new-1234efgh");
-ok("re-binding a scope clears the provider's legacy key", store.listLegacy().length === 0);
+ok("provider-scoped keys do not use the legacy field", store.listLegacy().length === 0);
 
 const slog = await load("session/log.js");
 const session = slog.createSessionLog({ providerId: "deepseek" });

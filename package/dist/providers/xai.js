@@ -14,5 +14,6 @@ export const xaiProvider = {
     baseUrl: BASE,
     defaultModel: "grok-4.7",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC }),
+    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC, reasoning: "openai" }),
+    supportsReasoning: () => true,
 };

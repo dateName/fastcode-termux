@@ -21,4 +21,5 @@ export declare const openaiProvider: {
         usage: any;
         reasoning?: undefined;
     }, void, unknown>;
+    supportsReasoning: (model: any) => boolean;
 };

@@ -8,11 +8,11 @@ export const logoutCommand = {
             const credentials = listCredentials();
             if (credentials.length === 0)
                 return { message: "No stored keys. Use /login to add one." };
-            const lines = ["Stored keys (provider :: model):"];
+            const lines = ["Stored keys (provider-wide):"];
             for (const c of credentials)
-                lines.push(`  ${c.provider}::${c.model}   ${maskKey(c.key)}`);
+                lines.push(`  ${c.provider}   ${maskKey(c.key)}`);
             lines.push("");
-            lines.push("Remove: /logout <provider> <model>");
+            lines.push("Remove: /logout <provider>");
             lines.push("        /logout <provider> --all");
             return { message: lines.join("\n") };
         }
@@ -29,25 +29,17 @@ export const logoutCommand = {
             };
         }
         if (args.length >= 2) {
-            const model = args[1];
-            const ok = removeCredential(provider.id, model);
+            const ok = removeCredential(provider.id);
             return {
                 message: ok
-                    ? `Removed stored key for ${provider.id}::${model}.`
-                    : `No stored key for ${provider.id}::${model}.`,
+                    ? `Removed the stored key for ${provider.id} (applies to all its models).`
+                    : `No stored key for ${provider.id}.`,
             };
         }
         const forProvider = listCredentials().filter((c) => c.provider === provider.id);
         if (forProvider.length === 0)
             return { message: `No stored key for ${provider.label}.` };
-        if (forProvider.length === 1) {
-            removeCredential(forProvider[0].provider, forProvider[0].model);
-            return { message: `Removed stored key for ${forProvider[0].provider}::${forProvider[0].model}.` };
-        }
-        const lines = [`${provider.label} has ${forProvider.length} stored keys — pick one to remove:`];
-        for (const c of forProvider)
-            lines.push(`  /logout ${c.provider} ${c.model}   (${maskKey(c.key)})`);
-        lines.push(`  /logout ${provider.id} --all   (remove all)`);
-        return { message: lines.join("\n") };
+        removeCredential(provider.id);
+        return { message: `Removed the stored key for ${provider.label} (all models).` };
     },
 };

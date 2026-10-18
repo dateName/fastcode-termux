@@ -7,5 +7,18 @@ export declare const modelCommand: {
         actions: any;
     }): Promise<{
         message: string;
+        picker?: undefined;
+    } | {
+        message: string;
+        picker: {
+            title: string;
+            current: any;
+            items: {
+                value: any;
+                label: any;
+                hint: string;
+            }[];
+            onSelect: (id: any) => void;
+        };
     }>;
 };

@@ -10,12 +10,16 @@ const STATIC_MODELS = [
     { id: "claude-haiku-4.5", label: "Claude Haiku 4.5" },
 ];
 const BASE = "https://api.anthropic.com/v1";
+const THINKING_BUDGETS = { low: 1024, medium: 4096, high: 8192, max: 16000 };
 export const anthropicProvider = {
     id: "anthropic",
     label: "Anthropic (Claude)",
     authEnv: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
     baseUrl: BASE,
     defaultModel: "claude-sonnet-5.5",
+    supportsReasoning() {
+        return true;
+    },
     async listModels(apiKey) {
         // Query the live model list; fall back to the built-in list offline.
         if (apiKey) {
@@ -45,7 +49,7 @@ export const anthropicProvider = {
             throw new Error("Missing ANTHROPIC_API_KEY. Bind one with /login anthropic <model> <key>, or set the env var.");
         }
         const messages = req.messages.map((m) => ({ role: m.role, content: m.content }));
-        const body = {
+        const body: any = {
             model: req.model,
             messages,
             ...(req.system ? { system: req.system } : {}),
@@ -53,6 +57,14 @@ export const anthropicProvider = {
             max_tokens: req.maxOutputTokens ?? 4096,
             ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
         };
+        if (req.reasoningEffort && req.reasoningEffort !== "auto") {
+            const budget = THINKING_BUDGETS[req.reasoningEffort] ?? THINKING_BUDGETS.medium;
+            body.thinking = { type: "enabled", budget_tokens: budget };
+            // max_tokens must exceed the thinking budget.
+            body.max_tokens = Math.max(body.max_tokens, budget + 1024);
+            // Extended thinking is incompatible with a custom temperature.
+            delete body.temperature;
+        }
         const res = await fetch(BASE + "/messages", {
             method: "POST",
             headers: {

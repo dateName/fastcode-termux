@@ -7,6 +7,7 @@ import { clearCommand } from "./clear.js";
 import { exitCommand } from "./exit.js";
 import { modelCommand } from "./model.js";
 import { providerCommand } from "./provider.js";
+import { effortCommand } from "./effort.js";
 import { loginCommand } from "./login.js";
 import { logoutCommand } from "./logout.js";
 import { skillsCommand } from "./skills.js";
@@ -27,6 +28,7 @@ export const COMMANDS = [
     exitCommand,
     modelCommand,
     providerCommand,
+    effortCommand,
     loginCommand,
     logoutCommand,
     skillsCommand,

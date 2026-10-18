@@ -16,5 +16,6 @@ export const groqProvider = {
     baseUrl: BASE,
     defaultModel: "llama-3.3-70b-versatile",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC }),
+    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC, reasoning: "openai" }),
+    supportsReasoning: () => true,
 };

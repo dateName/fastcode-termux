@@ -21,4 +21,5 @@ export declare const xaiProvider: {
         usage: any;
         reasoning?: undefined;
     }, void, unknown>;
+    supportsReasoning: () => boolean;
 };

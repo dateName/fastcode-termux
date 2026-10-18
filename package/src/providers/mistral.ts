@@ -15,5 +15,6 @@ export const mistralProvider = {
     baseUrl: BASE,
     defaultModel: "mistral-small-latest",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC }),
+    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC, reasoning: "openai" }),
+    supportsReasoning: () => true,
 };

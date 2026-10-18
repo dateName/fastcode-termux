@@ -21,13 +21,19 @@ const VERBS = [
 ];
 export const Spinner = ({ theme, label, stable = false }) => {
     const [tick, setTick] = useState(0);
+    // stable UI only lowers the redraw rate; it must still animate. A frozen
+    // frame made long waits look like a hang.
+    const configured = Number(process.env["FASTCODE_SPINNER_MS"]);
+    const interval = Number.isFinite(configured) && configured >= 60
+        ? configured
+        : stable
+            ? 120
+            : 80;
     useEffect(() => {
-        if (stable)
-            return;
-        const id = setInterval(() => setTick((t) => t + 1), 80);
+        const id = setInterval(() => setTick((t) => t + 1), interval);
         return () => clearInterval(id);
-    }, [stable]);
-    const frame = stable ? "⠋" : FRAMES[tick % FRAMES.length];
+    }, [interval]);
+    const frame = FRAMES[tick % FRAMES.length];
     const verb = label ?? VERBS[Math.floor(tick / 24) % VERBS.length];
     return (_jsxs(Text, { color: theme.accent, children: [frame, " ", _jsxs(Text, { color: theme.muted, children: [verb, "\u2026"] })] }));
 };

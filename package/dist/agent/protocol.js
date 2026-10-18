@@ -103,7 +103,8 @@ Available tools:
 - write_file: {"tool":"write_file","path":"path/to/file","content":"full file contents"}
 - append_file: {"tool":"append_file","path":"path/to/file","content":"text to append"}
 - apply_patch: {"tool":"apply_patch","patch":"*** Begin Patch\\n*** Update File: path\\n@@\\n-old\\n+new\\n*** End Patch\\n"}
-- list_files: {"tool":"list_files","path":"optional/path","maxDepth":2}
+- list_files: {"tool":"list_files","path":"optional/path","maxDepth":2,"detail":false}
+- read_file is capped (default 200KB); grep skips files over 1MB. .fastcodeignore is honored.
 - grep: {"tool":"grep","pattern":"text or regex","path":"optional/path"}
 - replace_in_file: {"tool":"replace_in_file","path":"path/to/file","find":"exact text","replace":"replacement"}
 - stat_path: {"tool":"stat_path","path":"path/to/file"}

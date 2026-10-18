@@ -16,7 +16,7 @@ export declare function collectDiagnostics(): {
     model: any;
     keyPresent: boolean;
     keyStatus: "ok" | "unbound" | "missing";
-    keyEnv: any;
+    keyEnv: string;
     skillsInstalled: number;
     pluginsInstalled: number;
     enabledSkills: any;
@@ -34,7 +34,7 @@ export declare function collectDiagnostics(): {
     providers: {
         id: string;
         label: string;
-        env: any[] | string[];
+        env: string[];
         keyPresent: boolean;
     }[];
 };
