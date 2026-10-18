@@ -1,6 +1,6 @@
 # FastCode 架构说明（Termux 优先）
 
-本文描述 FastCode 0.1.6 的整体架构、模块划分、数据流、扩展点与 Termux 适配位置。
+本文描述 FastCode 0.1.6-beta 的整体架构、模块划分、数据流、扩展点与 Termux 适配位置。
 目标是：任何人只看这一篇，就能知道改哪个文件、影响哪些模块。
 
 ## 1. 分层总览
@@ -21,16 +21,17 @@
 依赖方向：上层依赖下层，下层不反向依赖界面层。
 唯一例外：providers/ 被 cli、app、commands、lib/diagnostics 共享。
 
-## 2. 模块清单（src/ 58 个 TS 模块；dist 为编译产物，另有自包含打包产物 dist/cli.js）
+## 2. 模块清单（src/ 69 个 TS 模块；dist 为编译产物，另有自包含打包产物 dist/cli.js）
 
     bin/                    启动壳：优先 import dist/cli.js，回退 dist/index.js / src
     dist/cli.js             两个含义：esbuild 自包含单文件（运行产物）；也是逻辑上的 CLI 入口
     dist/index.js           tsc 编译入口（回退路径）：先跑 cli，再决定是否进入 TUI
     dist/app.js             TUI 主组件：状态、聊天循环、斜杠命令分发
-    dist/ui/                展示组件（Banner/Message/Prompt/Spinner/StatusBar）+ TrustGate（首次信任确认）
-    dist/commands/          19 个斜杠命令，单文件一个命令
+    dist/ui/                展示组件（Banner/Message/Prompt/Spinner/Picker/StatusBar）+ TrustGate（首次信任确认）
+    dist/commands/          21 个斜杠命令，单文件一个命令
     dist/providers/         13 个服务商 + 共享 OpenAI 兼容实现
-    dist/agent/             protocol（工具协议）、tools（工具执行）、limits（输出上限）、guards（危险命令拦截）
+    dist/agent/             protocol（工具协议）、tools（工具执行）、limits（输出上限）、guards（危险命令拦截）、
+                            stream（超时/重试）、context（上下文压缩）、ignore（.fastcodeignore）
     dist/skills/            SKILL.md 发现、解析、安装
     dist/plugins/           插件包发现与拼装
     dist/config/            paths（目录布局）、store（配置与密钥）、trust（项目信任列表）、themes
@@ -55,26 +56,34 @@
     4) 否则要求 stdout 是 TTY，动态 import ink/react/app.js
     5) app.js 读取 config -> 生成欢迎语 -> 渲染界面
 
-### 3.2 一次聊天（agentMode 打开，最多 8 轮工具调用）
+### 3.2 一次聊天（agentMode 打开，最多 maxAgentTurns=24 轮工具调用）
 
     用户输入
       -> app.js handleSubmit
+      -> compactHistory：超过 contextBudgetChars(默认 400k 字符) 时压缩中段，
+         保留首条请求 + 最近 6 条消息，插入 [context compacted] 标记
       -> 组装 system = systemPrompt + skills 提示 + plugins 提示 + agent 提示
-      -> provider.stream({model, messages, system})
+      -> runStream(provider.stream, {model, messages, system, reasoningEffort})
+           - 空闲超时 requestIdleTimeoutMs(默认 60s)，每个 chunk 重置
+           - 本轮尚未产出文本时重试 1 次（401/402/403/404 不重试）
+           - 未收到 done chunk 时返回 incomplete
       -> 流式增量写入界面
       -> 模型输出中若含 <fastcode_tool>{...}</fastcode_tool>
            -> parseToolCalls 解析
            -> runAgentTool 在 cwd 沙箱内执行（shell / 读写文件 / grep ...）
            -> formatToolResults 回填为一条 user 消息
-           -> 回到 provider.stream 继续下一轮
+           -> 回到 runStream 继续下一轮
       -> 无工具调用时结束，把最终文本写入记录
+      -> 达到 24 轮或断流：保留历史并提示“输入 继续”，不丢弃上下文
 
 ### 3.3 配置与密钥的读取顺序
 
-    auth.json 中作用域匹配的 Key(provider+model)  ->  服务商环境变量  ->  legacy 键(不使用，提示重绑)
+    auth.json 中 provider 级 Key  ->  服务商环境变量  ->  legacy 键(仅在迁移失败时提示)
 
-Key 绑定到「服务商 + 模型」作用域：provider 或 model 任一不匹配即视为「当前模型未配置」。
+Key 绑定到「服务商」：同一 provider 的所有模型共用一把 Key。
 config.json 与 auth.json 是两个独立文件；改模型只动 config.json，不会碰到 Key。
+auth.json 当前为 version 3；v1(provider 字符串) / v2(provider::model) 首次读取时自动迁移，
+原文件备份为 auth.json.v2.bak。同一 provider 多条旧记录保留 addedAt 最新的一条。
 
 ### 3.4 分发与打包（clone 即可跑）
 
@@ -101,6 +110,8 @@ config.json 与 auth.json 是两个独立文件；改模型只动 config.json，
     1) 在 dist/commands/ 新建 <name>.js，导出 { name, description, run({args, raw, state, actions}) }
     2) 在 dist/commands/index.js 的 COMMANDS 数组里注册
     3) run() 返回 { message } 输出文本，返回 { quit: true } 退出
+    4) 需要交互列表时返回 { picker: { title, items, current?, onSelect } }，
+       App 会渲染 ui/Picker 并处理 ↑/↓、1-9、Enter、Esc
 
 ### 4.3 新增一个 agent 工具
 
@@ -118,7 +129,7 @@ config.json 与 auth.json 是两个独立文件；改模型只动 config.json，
 | 关注点 | 位置 | 行为 |
 |---|---|---|
 | 平台识别 | lib/platform.js | 认 TERMUX_VERSION 或 PREFIX 含 com.termux |
-| 界面防闪烁 | lib/uiMode.js | Termux 自动开启稳定 UI（关闭动画） |
+| 界面防闪烁 | lib/uiMode.js | Termux 自动开启稳定 UI（降低重绘频率；spinner 仍按 120ms 转动） |
 | 目录布局 | config/paths.js | 默认 ~/.fastcode，可用 FASTCODE_HOME 覆盖 |
 | 密钥权限 | config/paths.js lockdown() | auth.json 设为 0600（Termux 生效） |
 | 软链接 | agent/tools.js walk() | 悬空链接跳过；越出沙箱的软链接不深入；防环 |
@@ -133,6 +144,10 @@ config.json 与 auth.json 是两个独立文件；改模型只动 config.json，
 | 危险命令拦截 | agent/guards.ts | 执行前匹配内置 deny 列表；可加白名单或放行 |
 | 输出上限 | agent/limits.ts | OutputBuffer 边产边截断，head/tail 两种模式，一个上限贯穿所有工具 |
 | 会话落盘 | session/log.ts | JSONL 逐行追加，崩溃可恢复；缓存上限默认 256MB，超出删最旧 |
+| 请求超时/重试 | agent/stream.ts | 空闲 60s 超时；零输出时重试 1 次；识别断流 |
+| 上下文压缩 | agent/context.ts | 超预算时压缩中段，保留首条与最近 6 条，插入显式标记 |
+| 读取/搜索上限 | agent/tools.ts + agent/ignore.ts | read_file 200KB、grep 1MB；.fastcodeignore + 目录摘要 |
+| 共享目录 | agent/tools.ts + config.store | config.sharedDirs（相对/`~`/绝对）与环境变量合并 |
 
 数据流补充：App 初始化时按 resume 决定 createSessionLog 还是 openSessionLog；
 每条 user/system/assistant 消息立即 append；退出时写 session_end 并剪枝。

@@ -3,6 +3,10 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
+> 当前仓库状态：**0.1.6-beta（测试版）**。尚未生成 0.1.6-beta 的 Release 便携包；
+> 方式 B 里的 `fastcode-portable-0.1.6.*` 仍指上一个正式版。测试版请用方式 A，
+> 或方式 C 从源码构建。
+
 ## 0. 先确认 Node 与 git
 
     node -v      # 需要 v18.17.0 或更高

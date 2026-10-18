@@ -29,6 +29,11 @@
 | enabledPlugins | 启用的插件名数组 | [] |
 | skillsRegistry | 技能市场地址 | https://skillshub.wtf |
 | lifetimeCostUsd | 累计花费（展示用） | 0 |
+| sharedDirs | 额外允许读写的目录（相对项目根、`~/`、绝对路径） | [] |
+| maxAgentTurns | 单次请求最多工具轮次 | 24 |
+| requestIdleTimeoutMs | 流式空闲超时（毫秒） | 60000 |
+| contextBudgetChars | 历史压缩阈值（字符，约 4 字符≈1 token） | 400000 |
+| reasoningEffort | 思考强度 auto/low/medium/high/max | auto |
 
 最小改法（只写想改的字段即可，其余用默认值）：
 
@@ -37,56 +42,74 @@
       "model": "deepseek-chat"
     }
 
-## 3. auth.json：Key 绑定到「服务商 + 模型」
+## 3. auth.json：Key 绑定到「服务商」
 
-Key 不是一个全局字符串，而是绑定到具体的 **provider + model** 作用域。
-文件结构（version 2）：
+同一 provider 的所有模型共用一把 Key。当前格式为 **version 3**：
 
     {
-      "version": 2,
+      "version": 3,
       "keys": {
-        "deepseek::deepseek-chat": {
+        "deepseek": {
           "provider": "deepseek",
-          "model": "deepseek-chat",
+          "model": "deepseek-v4-pro",
           "key": "sk-...",
-          "addedAt": "2026-01-01T00:00:00.000Z"
+          "addedAt": "2026-10-18T00:00:00.000Z"
         }
       }
     }
 
-- 作用域键名是 `<provider>::<model>`。
-- 取用时 **provider 与 model 必须同时匹配** 才使用；不匹配就当成「当前模型未配置」。
+- `keys` 的键是 provider id；`model` 只记录“最初从哪个模型保存”，**不参与匹配**。
 - 写入时把文件权限收紧到 0600（Termux/Linux/macOS 生效）。
 - 界面与命令只回显尾号（如 `sk-****abcd`），不回显明文。
 
-### 旧 Key（legacy）与迁移
+### 旧格式迁移（自动）
 
-旧版本的 provider-only 键 `"deepseek": "sk-..."` 会被识别为 **legacy**：
+读取时兼容 v1 / v2，并自动重写为 v3：
 
-    { "legacy": { "deepseek": "sk-..." } }
+    // v1
+    { "deepseek": "sk-..." }
 
-legacy 键**不会被静默使用**——它没写明属于哪个模型，所以不能默认归属当前模型。
-在当前模型下会被视为「未配置」：`fastcode doctor` 显示 `UNBOUND`，发送消息会被拦住并提示。
-恢复方式：重新绑定（`/login <provider> <model> <key>`，或在 `/login` 向导弹出
-“type keep” 时输入 `keep` 复用该键），或 `/logout <provider>` 丢弃。
+    // v2
+    {
+      "version": 2,
+      "keys": {
+        "deepseek::deepseek-chat": {
+          "provider": "deepseek", "model": "deepseek-chat",
+          "key": "sk-...", "addedAt": "..."
+        }
+      },
+      "legacy": { "anthropic": "sk-..." }
+    }
+
+- 同一 provider 有多条旧记录时，保留 `addedAt` **最新**的一条；
+  没有时间戳时保留先读到的一条。
+- 迁移写盘前会备份原文件：`~/.fastcode/auth.json.v2.bak`。
+- 迁移只发生一次；`legacy`/provider-only 键会直接变成可用的 provider 级 Key。
+- 只读目录导致迁移无法写盘时，本次运行仍按迁移后的内存视图工作。
 
 ### 交互式绑定（推荐）
 
-    /login                      # 向导：先选服务商 → 再选模型 → 再输入 Key（掩码输入）
-    /login deepseek             # 跳过服务商，直接进入选模型
-    /login deepseek deepseek-chat               # 直接进入输入 Key
+    /login                      # 向导：服务商 → 模型（仅记录来源）→ Key（掩码输入）
+    /login deepseek             # 跳过服务商
+    /login deepseek deepseek-chat               # 直接进入 Key 输入
     /login deepseek deepseek-chat sk-xxxx       # 一行完成
 
-保存成功后必回显：服务商、模型、Key 尾号、保存位置。输入 Key 时终端以 `*` 掩码显示。
+保存成功后回显：服务商、作用域（该 provider 的全部模型）、Key 尾号、保存位置。
+Key 输入时终端以 `*` 掩码显示。
 
-发送消息前会校验当前 provider + model 是否有可用 Key；没有（或只有 legacy 键）就拦截并提示。
-服务商返回 401/403（鉴权失败）或 402/429（额度用完 / 限流）时，界面会给出明确提示而不是笼统报错。
+发送消息前会校验当前 provider 是否有可用 Key；没有就拦截并提示。
+服务商返回 401/403（鉴权失败）或 402/429（额度/限流）时，界面会给出明确提示。
+
+删除 Key：
+
+    /logout deepseek        # 删除该 provider 的唯一 Key
+    /logout deepseek --all  # 同上，兼容旧写法
 
 ## 4. 环境变量
 
-取值优先级：**作用域匹配的 auth.json Key** > **服务商环境变量** > legacy 键（不使用）。
-环境变量是「服务商级」的（对该服务商所有模型通用，如 `DEEPSEEK_API_KEY` 对 deepseek 的全部模型生效）；
-auth.json 里的 Key 是「服务商 + 模型级」的，换到别的模型就不会被复用。
+取值优先级：**auth.json 的 provider 级 Key** > **服务商环境变量** > legacy 键（仅迁移失败时提示）。
+环境变量与 auth.json 都是「服务商级」的，对同一 provider 的所有模型通用；
+切换模型不会要求重新输入 Key。
 
 | 服务商 | 环境变量 |
 |---|---|
@@ -123,6 +146,9 @@ auth.json 里的 Key 是「服务商 + 模型级」的，换到别的模型就�
 | FASTCODE_SHELL_ALLOWLIST | 只允许匹配这些正则的命令，分号分隔 |
 | FASTCODE_SHELL_DENY_EXTRA | 追加的危险命令正则，分号分隔 |
 | FASTCODE_RESTRICT_TO_WORKSPACE | 设为 1 额外拒绝 ../ 路径穿越 |
+| FASTCODE_READ_MAX_BYTES | read_file/read_many 单文件上限，默认 200000 |
+| FASTCODE_GREP_MAX_BYTES | grep 单文件上限，默认 1000000 |
+| FASTCODE_SPINNER_MS | spinner 帧间隔（毫秒，≥60）；默认 stable 120 / 普通 80 |
 
 ### 沙箱与共享存储
 
@@ -132,11 +158,14 @@ auth.json 里的 Key 是「服务商 + 模型级」的，换到别的模型就�
     # 再增加允许的根目录（多个用冒号分隔）
     export FASTCODE_ALLOW_PATHS=/sdcard/projects:/sdcard/Download
 
+    # 或写入 config.json（持久化，支持相对路径与 ~）
+    # "sharedDirs": ["/sdcard/fastcode", "~/shared/projects"]
+
     # 关闭共享存储放行（更严格）
     export FASTCODE_ALLOW_SHARED_STORAGE=0
 
 判定以**真实路径**为准：软链接只要最终落在允许的根目录内就放行，
-指向其它位置一律拒绝。
+指向其它位置一律拒绝。`sharedDirs` 是显式扩权，交接/部署时需告知用户。
 
 ### 项目信任与危险命令（安全底线）
 
@@ -174,3 +203,44 @@ shutdown/reboot/poweroff、fork bomb 会被直接拒绝；正文会给出命中�
     fastcode config         # 打印两个文件路径与 config 内容
     fastcode config path    # 只打印 config.json 路径
     fastcode doctor         # 环境 + 缺哪个 Key
+
+## 6. 交互选择器与思考强度（0.1.6-beta）
+
+### 6.1 /model 与 /provider
+
+无参数调用会打开交互列表：
+
+    /model        # 方向键 ↑/↓、1-9 数字直选、Enter 确认、Esc 取消
+    /provider
+
+- 列表来自 `provider.listModels()` 与本地静态表的合并去重。
+- 打开时会用 `probeProvider()` 探测 `/models`；失败则标注 `(offline)`。
+- 旧写法仍然有效：`/model <id>`、`/provider <id>`。
+
+### 6.2 /effort
+
+    /effort              # 打开选择器：auto / low / medium / high / max
+    /effort high         # 直接设置
+
+| Provider | 发送的参数 |
+|---|---|
+| OpenAI / DeepSeek / Groq / Mistral / xAI / Moonshot / 智谱 / Qwen | `reasoning_effort`（`max` → `high`） |
+| OpenRouter | `reasoning: { effort }` |
+| Anthropic | `thinking: { type: "enabled", budget_tokens }`，low 1024 / medium 4096 / high 8192 / max 16000 |
+| Google / Ollama / Custom | 不发送；保存档位并提示忽略 |
+
+- 默认 `auto`：不发送任何思考参数，保持旧行为。
+- 状态栏非 auto 时显示 `effort:high`。
+- 若模型返回 400 且错误提到 reasoning/thinking/unsupported，
+  客户端会去掉该参数重试一次。
+
+## 7. 长任务相关配置（0.1.6-beta）
+
+| 字段 | 作用 | 默认 |
+|---|---|---|
+| maxAgentTurns | 单次请求最多工具轮次；到上限提示“输入 继续” | 24 |
+| requestIdleTimeoutMs | 流式空闲超时；每次收到 chunk 重置 | 60000 |
+| contextBudgetChars | 历史压缩阈值（约 4 字符≈1 token） | 400000 |
+
+达到轮次上限或断流时历史不会丢：直接输入 `继续` 即可接着做。
+历史压缩会保留首条请求与最近 6 条消息，并在对话中插入 `[context compacted …]` 标记。

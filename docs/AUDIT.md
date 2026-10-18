@@ -1,4 +1,4 @@
-# 安全与健壮性审计报告 — FastCode 0.1.6
+# 安全与健壮性审计报告 — FastCode 0.1.6-beta
 
 审计对象：src/（58 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
@@ -45,6 +45,32 @@
 - 问题：/login <provider> <key> 会把 Key 原样写进对话记录。
 - 修复：对 login 参数打码为 ********。
 
+### H-2 apply_patch 路径逃逸（高危，0.1.6-beta 已修复）
+
+- 位置：src/agent/tools.ts 的 applyPatch()
+- 问题：`*** Update File:` 的目标直接 `resolve(cwd, relative)`，没有经过
+  `sandboxPath()`；模型可用 `../` 读写工作区外文件，绕过 H-1 的真实路径校验。
+- 复现：`apply_patch` 指向 `../escape.txt`，修复前会在沙箱外写入。
+- 修复：每个补丁目标改走 `sandboxPath()`；同时新增 `config.sharedDirs`
+  作为显式的额外允许目录（相对项目根 / `~/` / 绝对路径）。
+- 回归：smoke-test + 行为校验覆盖 `../` 拒绝、外部文件不落盘、
+  sharedDirs 配置前后读写差异。
+
+### L-3 无请求超时（低，0.1.6-beta 已修复）
+
+- 位置：新增 src/agent/stream.ts，app.ts 改用它
+- 修复：空闲超时 `requestIdleTimeoutMs`（默认 60s，每个 chunk 重置）；
+  零输出时重试 1 次；识别未收到 done chunk 的断流。
+- 回归：模拟 200ms 无数据流，2s 内触发超时。
+
+### L-1 grep 无单文件大小上限（低，0.1.6-beta 已缓解）
+
+- 位置：src/agent/tools.ts 的 grepFiles()
+- 修复：默认跳过 > `FASTCODE_GREP_MAX_BYTES`（1MB）的文件与二进制扩展名；
+  `read_file/read_many` 默认 200KB 截断；`walk()` 支持 `.fastcodeignore`。
+- 仍未解决：正则仍由模型输入直接构造，极端模式仍有 ReDoS 可能；
+  建议后续限制 pattern 长度/复杂度或在子进程执行。
+
 ## 二、待办（已定位，尚未修改）
 
 ### M-3 密钥文件在忽略权限的文件系统上静默降级（中危，待办）
@@ -60,12 +86,6 @@
 - 现状：支持 https 直链与 owner/repo，下载的 SKILL.md 会整体注入系统提示。
 - 建议：安装前展示来源与正文摘要并要求确认，或限制白名单域名。
 
-### L-1 grep 无单文件大小上限，正则来自用户输入（低，待办）
-
-- 位置：src/agent/tools.ts 的 grepFiles()
-- 现状：逐文件整体读入内存；pattern 直接构造 RegExp，极端模式可能 ReDoS。
-- 建议：跳过超过若干 MB 的文件；限制 pattern 长度与复杂度。
-
 ### L-2 提示注入与破坏性命令（低，设计如此）
 
 - 位置：src/agent/protocol.ts 的 AGENT_SYSTEM_PROMPT
@@ -73,24 +93,22 @@
   不是内核级隔离；沙箱边界由本工具自身保证。
 - 建议：对破坏性操作增加确认或 dry-run；在 README 明确告知用户。
 
-### L-3 无请求超时（低，待办）
-
-- 位置：src/providers/openaiCompatible.ts
-- 现状：仅靠用户按 Esc 触发的 AbortController，网络挂起时无自动超时。
-- 建议：加可配置超时。
-
 ### L-4 依赖面（低，待办）
 
 - 现状：生产依赖 18 个直接包（ink、react、marked、meow 等）。
 - 建议：定期 npm audit，保留 lockfile。
 
-## 二之二、0.1.6 追加的缓解
+## 二之二、0.1.6 / 0.1.6-beta 追加的缓解
 
 - **L-2 提示注入与破坏性命令**：已由 src/agent/guards.ts 的危险命令拦截缓解。
   默认拦截 rm -rf、dd、mkfs、fork bomb 等；
   可用 FASTCODE_ALLOW_DANGEROUS=1 放行，或 FASTCODE_SHELL_ALLOWLIST 收紧。
 - **项目信任**：src/config/trust.ts + src/ui/TrustGate.ts，未信任目录不会直接启用 agent 工具。
 - **输出上限**：src/agent/limits.ts 统一为边产边截断，避免超长输出撑爆内存。
+- **文件工具沙箱**：全部走 `sandboxPath()`（含 apply_patch）；`sharedDirs` 是显式扩权。
+- **请求韧性**：agent/stream.ts 空闲超时 + 零输出重试 + 断流识别。
+- **上下文压缩**：agent/context.ts 超预算时保留首条与最近消息，避免 400 直接终止。
+- **密钥迁移**：auth v3 自动迁移并保留 `auth.json.v2.bak`，降低数据丢失风险。
 - **分发模型（自包含打包）**：dist/cli.js 由 esbuild 把依赖与 cfonts 字体内联后提交进 Git，
   用户 `git clone` 后免 `npm install` 运行——不执行任何安装期脚本（npm install scripts），
   依赖版本锁定在提交产物中。代价：需信任所提交的 dist/cli.js；构建可复现
@@ -108,9 +126,11 @@
 
 | 级别 | 已修复 | 待办 |
 |---|---|---|
-| 高 | 1 | 0 |
+| 高 | 2 | 0 |
 | 中 | 2 | 2 |
-| 低 | 0 | 4 |
+| 低 | 2 | 2 |
+
+> L-1 的“单文件大小上限”已修复，但正则 ReDoS 部分仍待办。
 
 ## 四、如何复现与回归
 
@@ -118,4 +138,5 @@
     node scripts/smoke-test.mjs
 
 smoke-test 覆盖：dist 语法、服务商注册表、SSE 的 CRLF/LF 分帧、
-悬空软链接容错、软链接越界读写拦截、词法越界拦截、config 与 auth 的分离。
+悬空软链接容错、软链接越界读写拦截、词法越界拦截、config 与 auth 的分离、
+provider 级 Key 复用、v1/v2 迁移。

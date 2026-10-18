@@ -4,7 +4,7 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.6** |
+| 版本 | **0.1.6-beta**（测试版） |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
@@ -34,6 +34,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 🛠️ 本地编码代理 | 读写文件、grep、打补丁、运行 shell 命令（默认开启） |
 | 🔎 代码导航 | 搜索项目、按结构定位、批量读取文件 |
 | 🧩 Agent Skills | 安装 `SKILL.md` 技能以扩展行为 |
+| 🧠 思考强度 | `/effort` 切换 auto/low/medium/high/max，状态栏显示当前档位 |
 | 🎨 主题 | `/theme` 切换配色 |
 | 💰 用量统计 | 状态栏显示 token 与成本 |
 | 🤖 模型支持 | **DeepSeek / OpenAI / Anthropic**，以及 Gemini、通义千问、GLM、Kimi、Grok、OpenRouter、Ollama 等 |
@@ -52,6 +53,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 能力 | 行为 | 覆盖方式 |
 |---|---|---|
 | 🔒 项目信任 | 首次在未知文件夹运行时，会在代理工具加载前询问 | `fastcode trust` / `untrust` / `trusted`；`FASTCODE_TRUST_ALL=1` |
+| 🧱 文件沙箱 | 文件工具限制在项目内；`../` 与软链接逃逸都会被拒绝 | `config.sharedDirs`、`FASTCODE_ALLOW_PATHS` |
 | 🚫 危险命令拦截 | `rm -rf`、`dd`、`mkfs`、fork bomb 等在**执行前**被拒绝 | `FASTCODE_ALLOW_DANGEROUS=1` |
 | ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
@@ -179,7 +181,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 
 每次保存都会回显 **服务商 · 模型 · Key 尾号（`sk-****abcd`）· 保存位置**，所以你始终知道这把 Key 属于哪个模型。
 
-> 🔐 Key 存在 `~/.fastcode/auth.json`，按 `<provider>::<model>` 作用域分开保存，与 `config.json` 分离。只有当**当前服务商与模型都匹配**时才会使用这把 Key，因此换模型不会误用别的模型的 Key。旧的 provider-only Key 会被视为**未绑定（unbound）**、不再被静默使用，需重新绑定或丢弃——详见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。环境变量（`DEEPSEEK_API_KEY` 等）是服务商级的，对该服务商的所有模型通用。
+> 🔐 Key 存在 `~/.fastcode/auth.json`，**每个 provider 一把**，与 `config.json` 分离。同一服务商内切换模型会复用同一把 Key。v1/v2 旧文件首次读取时自动迁移，并备份为 `auth.json.v2.bak`——详见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。环境变量（`DEEPSEEK_API_KEY` 等）同样是服务商级的。
 
 ---
 
@@ -197,7 +199,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | `fastcode update` | 检查新版本 |
 | `fastcode --help` | 查看全部命令 |
 
-界面内常用：`/help` · `/model` · `/provider` · `/login` · `/agent` · `/theme` · `/clear` · `/exit`
+界面内常用：`/help` · `/model` · `/provider` · `/effort` · `/login` · `/agent` · `/theme` · `/clear` · `/exit`
 
 ---
 
@@ -313,6 +315,8 @@ gh release create v0.1.6 -t "FastCode 0.1.6" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块、数据流 |
 | [docs/MODULES.md](docs/MODULES.md) | 每个文件干什么 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 安全审计结论 |
+| [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.6-beta 改动日志、迁移、风险与回滚 |
+| [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta 交接报告 |
 | [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.6） |
 | [PATCHES.md](PATCHES.md) | 到 0.1.6 为止的 36 项修复清单 |
 

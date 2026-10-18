@@ -43,6 +43,23 @@
 | 35 | package/src/providers/deepseek.ts、package/src/providers/anthropic.ts | 服务商内置/默认模型陈旧（DeepSeek 官方实时只剩 `deepseek-flash`、`deepseek-v4-pro`；Anthropic 从不联网取列表） | DeepSeek 内置与默认更新为 `deepseek-v4-pro`/`deepseek-flash`；Anthropic 的 listModels 改为先查 `/v1/models` 实时列表、失败再回退内置 |
 | 36 | package/src/agent/protocol.ts、scripts/smoke-test.mjs | 本地代理只认 `<fastcode_tool>`；DeepSeek 等模型会改用原生 DSML 标记（`<｜DSML｜invoke …>`），导致工具调用被当成普通文本显示、根本不执行 | parseToolCalls/stripToolCalls 增加 DSML 方言：先把 fullwidth/ASCII 竖线标记归一化为普通标签，再解析 calls→invoke→parameter；兼容 `<calls>`/`<tool_calls>`/`<function_calls>`、含不含外层块；smoke 增加 3 项回归 |
 
+## 0.1.6-beta 追加（未发布，测试版）
+
+> 详细交接说明见 `docs/DEVLOG.md` 与 `LOCALIZATION_REPORT.md`。
+> 本组改动相互交叉（`store.ts` / `app.ts` 同时涉及多项），因此合并为一个提交 `0980f2e`。
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 37 | package/src/agent/tools.ts、src/config/store.ts | `apply_patch` 的 `*** Update File:` 直接 `resolve()`，`../` 可越界写文件；额外目录只能靠环境变量 | 补丁目标改走 `sandboxPath()`；新增 `config.sharedDirs`（相对/`~/`/绝对），与 `FASTCODE_ALLOW_PATHS` 合并 |
+| 38 | package/src/config/store.ts、commands/login.ts、logout.ts、whoami.ts、app.ts | auth v2 按 `provider::model` 存 Key，换模型需要重输 | auth v3 按 provider 存；v1/v2 自动迁移，保留 `auth.json.v2.bak`；同 provider 多条保留 `addedAt` 最新 |
+| 39 | package/src/agent/stream.ts、context.ts、app.ts、config/store.ts | 硬编码 8 轮、无空闲超时、断流当完成、历史无限增长导致 400 截断 | `maxAgentTurns=24`；60s 空闲超时 + 零输出重试；断流标记与“继续”；超 400k 字符压缩中段 |
+| 40 | package/src/ui/Spinner.ts、app.ts | stable UI 下 spinner 直接 return，长等待像卡死 | 120ms 低频定时器（`FASTCODE_SPINNER_MS` 可调）；Thinking/Streaming/Waiting for tool 三态 |
+| 41 | package/src/agent/ignore.ts、tools.ts | 只硬编码忽略 3 个目录；list_files 全量、grep 全量读；read_file 不截断 | `.fastcodeignore` + 默认忽略；目录摘要 + 符号；read 200KB / grep 1MB 上限；二进制识别 |
+| 42 | package/src/ui/Picker.ts、commands/model.ts、provider.ts、providers/index.ts | `/model` 只能打印文本并手输 id；离线/在线无区分 | 交互选择器（↑/↓、1-9、Enter、Esc）；`probeProvider()` 标注离线；旧 `/model <id>` 保留 |
+| 43 | package/src/commands/effort.ts、providers/*、types.ts、ui/StatusBar.ts | 请求层完全没有 reasoning/thinking 参数 | `/effort auto|low|medium|high|max`；OpenAI 系 `reasoning_effort`、OpenRouter `reasoning.effort`、Anthropic `thinking.budget_tokens`；状态栏显示 |
+| 44 | scripts/smoke-test.mjs | 测试在模块加载后才设置 `FASTCODE_HOME`，`paths` 已缓存真实目录，污染 `~/.fastcode` | 在任何 import 前设置临时 HOME；密钥用例改为 provider 级语义 |
+| 45 | docs/*、README.md、README.zh.md、LOCALIZATION_REPORT.md | 文档仍描述旧 Key 作用域、8 轮上限、stable 关闭动画 | 新增 `docs/DEVLOG.md`；更新架构、配置、模块、审计与两份 README |
+
 ## 验证方式
 
 - 语法：package/dist 下全部 JS 通过 node --check（无语法错误）。
@@ -73,6 +90,8 @@
 
 - 本仓库已逆向重建 TypeScript 源码树（package/src），dist 可随时用
   `cd package && npm run build`（tsc + esbuild）重新生成；改功能请改 src，不要再直接改 dist。
-- 旧 provider-only Key 只带服务商、不携带模型信息，无法自动判定归属，因此按 unbound 处理并提示重新绑定，不会自动迁移到当前模型。
+- 0.1.6-beta 起旧 provider-only / v2（`provider::model`）Key 会自动迁移为 provider 级 Key，
+  原文件备份为 `auth.json.v2.bak`；同一 provider 多把不同 Key 只保留 `addedAt` 最新的一把。
+  （0.1.6 当时按 unbound 处理，不自动迁移。）
 - 技能市场 skillshub.wtf 需要付费，属上游问题，未改。
 - 未做真实 Termux 设备上的交互测试（本环境无法运行 Android/Termux）。

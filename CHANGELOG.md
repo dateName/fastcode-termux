@@ -2,6 +2,38 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
+## 0.1.6-beta（测试版，未发布）
+
+> 状态：测试版；`package.json` 暂保持 `0.1.6`，未打 tag / 未发布 npm。
+> 改动明细、迁移与回滚见 [docs/DEVLOG.md](docs/DEVLOG.md) 与 [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md)。
+
+### 新增
+- **思考强度 `/effort`**：`auto / low / medium / high / max`。OpenAI 兼容系发 `reasoning_effort`，OpenRouter 发 `reasoning.effort`，Anthropic 发 `thinking.budget_tokens`；不支持的服务商会明确提示忽略。状态栏显示当前档位。
+- **交互式 `/model`、`/provider`**：方向键、数字直选、Enter 确认、Esc 取消；联网拉取与本地清单合并去重，离线时标注 `(offline)`。旧用法 `/model <id>` 保留。
+- **`config.sharedDirs`**：在 `config.json` 中持久配置额外可读写目录（相对路径、`~/`、绝对路径）。
+- **`.fastcodeignore`**：目录遍历与 grep 支持忽略规则；默认忽略 `node_modules`、`.git`、`dist`、`build` 等。
+- **读取/搜索上限**：`read_file` 默认 200KB 截断；`grep` 跳过 >1MB 与二进制文件；`list_files` 默认输出目录摘要 + 符号，`detail:true` 可回退全量。
+
+### 变更
+- **auth.json v3**：Key 改为**按 provider 保存**，同一服务商切换模型不再重复输入。v1/v2 首次读取自动迁移，原文件备份为 `auth.json.v2.bak`。
+- **agent 循环**：工具轮次上限 8 → 24（`maxAgentTurns`）；新增 60s 空闲超时（`requestIdleTimeoutMs`）与零输出重试；断流或到上限时保留历史并提示“输入 继续”。
+- **上下文压缩**：超过 `contextBudgetChars`（默认 400k 字符）时压缩中段，保留首条请求与最近 6 条消息，并插入 `[context compacted]` 标记。
+- **stable UI**：spinner 不再冻结，改为 120ms 低频转动；文案区分思考中 / 返回中 / 等待工具。
+
+### 修复
+- **`apply_patch` 路径逃逸**：补丁目标未走沙箱校验，`*** Update File: ../x` 可越界写文件。已改为与其它文件工具一致的 `sandboxPath()`。
+- **长对话截断**：硬编码 8 轮、无超时、断流当完成、历史无压缩导致对话被截断。
+- **smoke test 污染真实目录**：测试在模块加载后才设置 `FASTCODE_HOME`，会写入真实的 `~/.fastcode`；已改为启动前隔离。
+
+### 验证
+- `npm run typecheck`、`npm run build` 通过；`dist/cli.js` 2.55 MB。
+- `node scripts/smoke-test.mjs` **31/31**；额外 28 项行为校验通过（沙箱逃逸、迁移、压缩、推理参数、空闲超时、选择器）。
+
+### 已知限制
+- `shell` 工具仍可执行真实命令并访问沙箱外路径（原设计）；文件工具才受沙箱限制。
+- 同一 provider 多把不同旧 Key 时，迁移只保留 `addedAt` 最新的一把（有备份）。
+- `lockdown()` 失败仍静默（审计 M-3）；技能安装仍缺来源确认（审计 M-4）。
+
 ## 0.1.6
 
 发布时间口径：GitHub Release `v0.1.6`；npm 包 `@datename/fastcode-termux@0.1.6`（**首个发布到 npm 的版本**）。

@@ -21,12 +21,13 @@
 
 | 文件 | 职责 | 依赖 |
 |---|---|---|
-| dist/app.js | TUI 主组件：配置状态、聊天循环、工具执行、斜杠命令分发、Ctrl+C/Esc 处理 | 见下方各层 |
+| dist/app.js | TUI 主组件：配置状态、聊天循环（runStream + 压缩）、工具执行、斜杠命令/选择器分发、Ctrl+C/Esc 处理 | 见下方各层 |
 | dist/ui/Banner.js | 启动大字横幅（稳定 UI 下不动画） | 无 |
 | dist/ui/Message.js | 单条消息气泡，Markdown 渲染 | lib/markdown |
 | dist/ui/Prompt.js | 底部输入框与斜杠自动补全 | commands/index |
-| dist/ui/Spinner.js | 思考动画（稳定 UI 下静止） | 无 |
-| dist/ui/StatusBar.js | 状态栏：服务商/模型/用量/平台 | lib/platform |
+| dist/ui/Spinner.js | 思考动画（stable 模式 120ms 低频，仍转动） | 无 |
+| dist/ui/Picker.js | 交互列表：窗口化、编号、当前项高亮（/model、/provider、/effort 复用） | 无 |
+| dist/ui/StatusBar.js | 状态栏：服务商/模型/用量/effort/平台 | lib/platform |
 
 ## 领域层：服务商
 
@@ -55,7 +56,10 @@
 | dist/agent/protocol.js | 工具调用标记的解析/剥离/回填；AGENT_SYSTEM_PROMPT | 无 |
 | dist/agent/limits.js | 统一的工具输出上限（边产边截断的 OutputBuffer） | 无 |
 | dist/agent/guards.js | 危险命令拦截（deny/allow/工作区限制） | 无 |
-| dist/agent/tools.js | 本地工具执行与沙箱校验；容错遍历 walk() | 无 |
+| dist/agent/tools.js | 本地工具执行与沙箱校验；目录摘要、读取/搜索上限；容错遍历 walk() | config/store, ignore |
+| dist/agent/stream.js | 流式请求：空闲超时、零输出重试、断流识别 | types |
+| dist/agent/context.js | 历史压缩：保留首条+最近消息，摘要中段 | types |
+| dist/agent/ignore.js | 默认忽略项 + .fastcodeignore 规则、二进制识别 | 无 |
 
 ## 领域层：命令
 
@@ -64,7 +68,9 @@
 | dist/commands/index.js | 命令注册表 COMMANDS、findCommand、parseSlash |
 | about / cwd / clear / exit / help | 基本信息与退出 |
 | agent / tools | agent 模式与工具说明 |
-| model / provider / login / logout / whoami | 模型与服务商；引导式 Key 绑定（服务商 → 模型 → Key，掩码输入）与按作用域登出 |
+| model / provider | 交互选择器（联网合并 + 离线标注）；保留 /model <id> 直接切换 |
+| effort | 思考强度选择器（auto/low/medium/high/max） |
+| login / logout / whoami | 引导式 Key 绑定（服务商 → 模型 → Key，掩码输入）与 provider 级登出 |
 | skills / plugin | 技能与插件管理 |
 | theme / system / config / reset / cost | 外观、系统提示、配置、用量 |
 
@@ -81,7 +87,7 @@
 | 文件 | 职责 | 依赖 |
 |---|---|---|
 | dist/config/paths.js | 目录布局、目录创建、密钥文件 0600 | lib/platform |
-| dist/config/store.js | config.json / auth.json 读写；**按 `<provider>::<model>` 作用域**保存/解析 Key；legacy 键识别；maskKey；原子写入 | paths, themes |
+| dist/config/store.js | config.json / auth.json 读写；**按 provider 保存/解析 Key**（v3）；v1/v2 自动迁移并备份；maskKey；原子写入 | paths, themes |
 | dist/config/themes.js | 内置配色主题 | 无 |
 | dist/config/trust.js | 项目信任列表（trusted.json 读写） | config/paths |
 | dist/session/log.js | JSONL 会话落盘、恢复、缓存上限剪枝 | config/paths |
@@ -104,5 +110,5 @@
 | scripts/install-termux.sh | install.sh 的兼容薄封装 | install.sh |
 | scripts/build-portable.sh | 生成 release/ 便携包 tar.gz/zip + npm pack .tgz + SHA256SUMS | 无 |
 | scripts/update-termux.sh | 更新脚本（目录 / git / npm） | 无 |
-| scripts/smoke-test.mjs | 自检（键作用域、沙箱越界、SSE 换行、配置与密钥分离等） | 无 |
+| scripts/smoke-test.mjs | 自检（provider 级 Key、迁移、沙箱越界、SSE 换行、配置与密钥分离等） | 无 |
 | .github/workflows/release.yml | 打 v* tag 时自动构建并上传 GitHub Release | 无 |

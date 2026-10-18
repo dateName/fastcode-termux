@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| Version | **0.1.6** |
+| Version | **0.1.6-beta** (test build) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
@@ -36,6 +36,7 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 🛠️ Local coding agent | read/write files, grep, patch, run shell commands (on by default) |
 | 🔎 Code navigation | search a project, locate by structure, batch-read files |
 | 🧩 Agent Skills | install `SKILL.md` skills to extend behaviour |
+| 🧠 Thinking effort | `/effort auto/low/medium/high/max`, shown in the status bar |
 | 🎨 Themes | `/theme` |
 | 💰 Usage | token and cost readout in the status bar |
 | 🤖 Model support | **DeepSeek / OpenAI / Anthropic**, plus Gemini, Qwen, GLM, Kimi, Grok, OpenRouter, Ollama |
@@ -54,6 +55,7 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | Capability | Behaviour | Override |
 |---|---|---|
 | 🔒 Project trust | first run in an unknown folder asks before agent tools load | `fastcode trust` / `untrust` / `trusted`; `FASTCODE_TRUST_ALL=1` |
+| 🧱 File sandbox | file tools stay inside the project; `../` and symlink escapes are rejected | `config.sharedDirs`, `FASTCODE_ALLOW_PATHS` |
 | 🚫 Dangerous-command guard | `rm -rf`, `dd`, `mkfs`, fork bombs are refused **before** execution | `FASTCODE_ALLOW_DANGEROUS=1` |
 | ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
@@ -172,16 +174,16 @@ Pick **one** provider and export its key:
 echo 'export DEEPSEEK_API_KEY=sk-your-key' >> ~/.bashrc
 ```
 
-**Or** bind a key from the TUI. It is scoped to a specific provider + model, and the input is masked:
+**Or** bind a key from the TUI. Keys are scoped to the provider, so every model of that provider reuses it; the input is masked:
 
 ```text
 /login                                      # guided: provider → model → key (masked)
 /login deepseek deepseek-chat sk-your-key   # or on one line
 ```
 
-Every save echoes **provider · model · key tail (`sk-****abcd`) · file**, so you always know which model a key belongs to.
+Every save echoes **provider · scope (all its models) · key tail (`sk-****abcd`) · file**.
 
-> 🔐 Keys live in `~/.fastcode/auth.json`, keyed by `<provider>::<model>`, separate from `config.json`. A key is used only when the current provider **and** model match its scope, so switching models never borrows another model's key. Old provider-only keys are treated as *unbound* (never used silently) until you re-bind or discard them — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Env vars (`DEEPSEEK_API_KEY`, …) are provider-wide and apply to every model of that provider.
+> 🔐 Keys live in `~/.fastcode/auth.json`, **one key per provider**, separate from `config.json`. Switching models inside a provider reuses the same key. v1/v2 files are migrated automatically on first read and backed up as `auth.json.v2.bak` — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Env vars (`DEEPSEEK_API_KEY`, …) are also provider-wide.
 
 ---
 
@@ -199,7 +201,7 @@ Every save echoes **provider · model · key tail (`sk-****abcd`) · file**, so 
 | `fastcode update` | check for a newer release |
 | `fastcode --help` | all commands |
 
-Inside the TUI: `/help` · `/model` · `/provider` · `/login` · `/agent` · `/theme` · `/clear` · `/exit`
+Inside the TUI: `/help` · `/model` · `/provider` · `/effort` · `/login` · `/agent` · `/theme` · `/clear` · `/exit`
 
 ---
 
@@ -315,6 +317,8 @@ gh release create v0.1.6 -t "FastCode 0.1.6" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | architecture, modules, data flow |
 | [docs/MODULES.md](docs/MODULES.md) | what every source file does |
 | [docs/AUDIT.md](docs/AUDIT.md) | security and robustness audit |
+| [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.6-beta change log: data migrations, risks, rollback |
+| [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta handover report |
 | [CHANGELOG.md](CHANGELOG.md) | release notes (0.1.6) |
 | [PATCHES.md](PATCHES.md) | all 36 fixes up to 0.1.6 |
 

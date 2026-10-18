@@ -1,287 +1,354 @@
-# FastCode-Termux 问题定位报告
+# FastCode-Termux 0.1.6-beta 交接报告
 
-> 基线：`dateName/fastcode-termux` @ `43c8835`（v0.1.6），源码 `package/src`。
-> 本报告只做定位，逐条给出：现象、涉及文件、当前数据结构、根因、建议改动、风险、验收。
-> 结论基于实际源码阅读，不是按需求文档推测。
+> **版本标识**：0.1.6-beta（测试版）
+> **基线**：`43c8835`（0.1.6）
+> **本次提交**：`0980f2e`（2026-10-18）
+> **源码**：`package/src`（69 个 TS 模块）
+> **运行产物**：`package/dist/cli.js`（esbuild 自包含，已重新构建并提交）
+> **状态**：P0 / P1 / P2 全部完成，构建与自动化测试通过；Termux 真机长任务验证待下一手完成。
+
+配套文档：
+
+- `docs/DEVLOG.md` — 本次改动的逐项开发日志（数据结构、迁移、风险、回滚）
+- `docs/ARCHITECTURE.md` — 架构与数据流
+- `docs/CONFIGURATION.md` — 配置、密钥、环境变量
+- `docs/MODULES.md` — 模块职责表
+- `docs/AUDIT.md` — 安全审计
 
 ---
 
-## P0-1 文件工具路径逃逸 / sharedDirs
+## 1. 结论摘要
 
-**现象**：文件读写可能越出工作目录；配置里没有 `sharedDirs`。
+| 编号 | 问题 | 状态 | 关键落点 |
+|---|---|---|---|
+| P0-1 | 文件工具路径逃逸；无 `sharedDirs` | ✅ 已修复 | `agent/tools.ts` `sandboxPath` / `applyPatch`；`config.sharedDirs` |
+| P0-2 | Key 按 `provider::model` 存，换模型要重输 | ✅ 已修复 | `config/store.ts` auth v3 + v1/v2 迁移 |
+| P0-3 | 长等待 / 多次工具调用后截断 | ✅ 已修复 | `agent/stream.ts`、`agent/context.ts`、`app.ts` |
+| P1-1 | stable UI 下 spinner 冻结 | ✅ 已修复 | `ui/Spinner.ts` 120ms 定时器 + 三态文案 |
+| P1-2 | 递归读目录 token 过高 | ✅ 已修复 | `agent/ignore.ts`、目录摘要、读取/搜索上限 |
+| P2-1 | `/model` 只能手输 id | ✅ 已实现 | `ui/Picker.ts`、`commands/model.ts`、`commands/provider.ts` |
+| P2-2 | 没有思考强度参数 | ✅ 已实现 | `/effort`、provider 参数映射、状态栏 |
 
-**涉及文件**
-- `package/src/agent/tools.ts`
-  - `sandboxPath()` L282-L299：`resolve` + `realpath` 包含性校验（已存在）
-  - `allowedRoots()` L249-L266：仅读取 `FASTCODE_ALLOW_PATHS`；Termux 默认放行 `~/storage/shared`
-  - `applyPatch()` L336-L377：**直接 `resolve(cwd, relative)`，未经过 `sandboxPath`**
-- `package/src/config/store.ts`：`DEFAULT_CONFIG`
-- `package/src/config/paths.ts`：`~/.fastcode/`
+验证证据：
 
-**当前数据结构**
-```ts
-DEFAULT_CONFIG = { providerId, model, theme, agentMode, systemPrompt,
-                   enabledSkills, enabledPlugins, skillsRegistry, lifetimeCostUsd }
 ```
-无 `sharedDirs`。
-
-**根因**
-1. `apply_patch` 的文件名来自补丁文本，`*** Update File: ../../x` 会被 `resolve` 接受，绕过沙箱；这是真实逃逸点。
-2. 额外可写目录只能靠环境变量配置，没有落盘到 `config.json`，重启/新终端后丢失。
-3. `resolvePath` 之外的 `copy_file` / `move_path` 已走 `sandboxPath`，无问题。
-
-**建议改动**
-1. `DEFAULT_CONFIG.sharedDirs: string[] = []`；`allowedRoots(cwd, config.sharedDirs)` 合并 env + 配置。
-2. `applyPatch` 内 `const file = sandboxPath(cwd, relative)`。
-3. 错误信息统一为 `path outside sandbox: <raw>`，并补充测试。
-
-**风险**：低。`sandboxPath` 已处理符号链接真实路径；新增配置需要读 `loadConfig()`，注意不要形成循环依赖（`store.ts` 不依赖 `tools.ts`，安全）。
-
-**验收**：`read_file ../../etc/passwd`、`apply_patch` 指向 `../x`、软链接指向外部均被拒绝；`sharedDirs` 内正常读写。
-
----
-
-## P0-2 auth.json 按模型存 key
-
-**现象**：同 provider 切换模型需要重新输入 key。
-
-**涉及文件**
-- `package/src/config/store.ts` L33-L226：`AuthStore`、`scopeId()`、`resolveApiKey()`
-- `package/src/commands/login.ts` / `app.ts` L399-L450（向导）
-- `package/src/app.ts` L269-L281（发送前取 key）
-
-**当前数据结构**
-```ts
-AuthStore = {
-  version: 2,
-  keys: { "provider::model": { provider, model, key, addedAt } },
-  legacy: { provider: key }   // 旧 provider-only，只提示不复用
-}
+npm run typecheck                 # 0 error
+npm run build                     # dist/cli.js 2.55 MB
+node scripts/smoke-test.mjs       # 31/31 PASS
+28 项行为校验（沙箱/迁移/压缩/参数/超时/选择器）  # ALL PASS
+Ink 渲染冒烟（主界面 + Picker）    # 正常
 ```
 
-**根因**：设计上就是 model-scoped；`resolveApiKey(provider, model)` 精确匹配 `provider::model`，所以同 provider 不同模型必然 miss。
+---
 
-**建议改动**
-1. `AuthStore.version = 3`，`keys` 改为 `{ [provider]: { provider, key, addedAt } }`。
-2. `loadAuth()` 兼容读取 v1（provider 字符串）、v2（`provider::model`）；迁移规则：每个 provider 保留 `addedAt` 最新的一条，写入 v3；记录 `migratedFrom`/日志。
-3. `resolveApiKey(providerId, _model, envVars)` 只按 provider 查；保留签名避免改 UI。
-4. `saveAuth` 仍写 `version: 3`；旧文件读取后自动落盘迁移一次。
+## 2. 项目速览（交接先看这里）
 
-**风险**：同一 provider 多把不同 key 时只能保留一把（按最新）；需在迁移日志里明确提示。`/logout provider model` 语义要兼容，按 provider 删除。
+### 2.1 分层
 
-**验收**：同一 provider 切 3 个模型只输一次 key；旧 v2 文件自动迁移；`/whoami` 显示 provider 级 key。
+```
+bin/fastcode.mjs
+  └─ dist/cli.js（esbuild 自包含；也是 CLI 入口）
+       ├─ 非 TUI 子命令：provider/model/config/skills/doctor/...
+       └─ TTY 下动态加载 dist/app.js（Ink + React）
+            ├─ ui/                  Banner / Message / Prompt / Spinner / Picker / StatusBar
+            ├─ commands/            21 个斜杠命令
+            ├─ providers/           13 个服务商 + OpenAI 兼容共享层
+            ├─ agent/               protocol / tools / guards / limits / stream / context / ignore
+            ├─ config/              paths / store / trust / themes
+            ├─ skills/ plugins/     技能与插件
+            └─ session/ lib/        会话落盘、HTTP、平台、诊断
+```
+
+依赖方向：界面 → 领域 → 基础；`providers/` 被 cli、app、commands、diagnostics 共享。
+**唯一事实来源是 `package/src`；`dist` 是构建产物，不要手改。**
+
+### 2.2 一次 agent 请求（0.1.6-beta）
+
+```
+用户输入
+  → app.ts handleSubmit
+  → compactHistory()（超过 contextBudgetChars 时压缩中段）
+  → runStream(provider, { messages, system, reasoningEffort })
+       ├─ 空闲超时 requestIdleTimeoutMs（默认 60s）
+       ├─ 零输出时重试 1 次
+       └─ 返回 { text, usage, incomplete }
+  → parseToolCalls() → runAgentTool()（沙箱 + 忽略规则 + 输出上限）
+  → formatToolResults() 回填为 user 消息
+  → 下一轮；maxAgentTurns（默认 24）后提示「输入 继续」
+```
+
+### 2.3 构建与自检
+
+```bash
+cd package
+npm install
+npm run typecheck
+npm run build                 # tsc + esbuild
+cd ..
+node scripts/smoke-test.mjs
+```
 
 ---
 
-## P0-3 长等待 / 多次工具调用后对话截断
+## 3. 逐项说明
 
-**现象**：多轮工具调用或等待 >2 分钟后停止/截断。
+### P0-1 沙箱路径逃逸与 `sharedDirs`
 
-**涉及文件**
-- `package/src/app.ts` L292-L348（agent loop）
-- `package/src/lib/http.ts`（无超时/心跳）
-- `package/src/agent/limits.ts`（工具输出 30k 字符上限）
-- `package/src/providers/*`（`fetch` 只带 `signal`，无超时）
+**根因**：`apply_patch()` 的目标路径直接 `resolve(cwd, relative)`，没有走
+`sandboxPath()`，`*** Update File: ../x` 可越界；额外目录只能靠环境变量。
+
+**改动**
+- `DEFAULT_CONFIG.sharedDirs: string[]`：相对项目根，`~/` 展开到主目录。
+- `allowedRoots()` = cwd + `FASTCODE_ALLOW_PATHS` + `sharedDirs` + Termux 默认共享存储。
+- `applyPatch()` 每个目标文件改走 `sandboxPath()`（真实路径校验，防软链接）。
+
+**验收**：`read_file ../../../etc/passwd`、`apply_patch ../escape.txt` 均被拒绝；
+配置 `sharedDirs` 后共享目录读写正常。
+
+**风险**：`shell` 命令仍可访问沙箱外（原设计，非文件工具）；`sharedDirs` 是显式扩权。
+
+---
+
+### P0-2 auth.json 改为 provider 级
+
+**根因**：v2 作用域是 `<provider>::<model>`，`resolveApiKey()` 精确匹配，换模型必 miss。
+
+**改动**
+- `AUTH_VERSION = 3`，`keys[provider] = { provider, model?, key, addedAt }`。
+- 读取时兼容 v1（provider 字符串）、v2（`provider::model`）与 `legacy`，自动迁移。
+- 同一 provider 多条旧记录保留 `addedAt` 最新的一条。
+- 迁移前备份为 `~/.fastcode/auth.json.v2.bak`。
+- `/login`、`/logout`、`/whoami` 文案改为 provider-wide；`resolveApiKey` 签名不变。
+
+**验收**：同一 provider 切 3 个模型只输一次 Key；旧文件自动变 v3；备份存在。
+
+**风险**：同一 provider 多把不同 Key 时只保留最新一把（有备份）。
+`model` 字段仅用于展示来源，不再参与匹配。
+
+---
+
+### P0-3 长对话 / 多轮工具稳定性
 
 **根因**
-1. **硬编码 8 轮**：`for (let turn = 0; turn < 8; turn += 1)`；到上限直接写 “Stopped after …”，没有“继续”机制。
-2. **无请求/空闲超时**：`fetch` 只受 Esc 的 AbortSignal 控制；SSE 卡住会无限等待。
-3. **流式提前结束未识别**：`streamSSE` 在 `reader.read()` done 时直接结束；若服务端断流且没有 `[DONE]`，上层把半截文本当成最终回答。
-4. **无上下文压缩**：`workingHistory` 无限增长，工具输出（最多 30k 字符/次）原样进历史，接近上下文上限时 provider 报 400，被当作普通错误终止。
-5. 工具输出上限是 30000 字符（`DEFAULT_TOOL_OUTPUT_LIMIT`），不是根因但会放大问题。
+1. 硬编码 8 轮，到上限直接停止并丢弃后续。
+2. 请求无空闲超时，SSE 挂起会无限等待。
+3. 断流未识别，半截文本被当成最终答案。
+4. 历史无限增长，接近上下文上限时 provider 400 直接终止。
 
-**建议改动**
-1. 轮次上限配置化：`maxAgentTurns`（默认 24，env `FASTCODE_MAX_AGENT_TURNS`）。
-2. 请求超时 + 重连：`requestTimeoutMs`（默认 180s）；无任何 chunk 超过 60s 视为 idle 超时；对“未产出任何文本”的网络错误重试 1 次（指数退避）。
-3. 流结束检测：若未收到 `done` 事件，标记 `incomplete` 并在历史里保留（提示“连接中断，可输入继续”）。
-4. 上下文压缩：新增 `agent/context.ts`，按字符估算 token；超过阈值（默认 120k）时：
-   - 保留 system + 最近 6 条消息；
-   - 中间工具结果压缩为首/尾各 20 行 + “已压缩”标记；
-   - 插入一条 system 说明，避免静默丢上下文。
-5. 达到轮次上限时保留历史并提示“输入 继续 接着做”，而不是丢弃。
+**改动**
+- `agent/stream.ts`
+  - `requestIdleTimeoutMs`（默认 60s），每个 chunk 重置；
+  - 零输出时重试 1 次（401/402/403/404 不重试）；
+  - 返回 `incomplete`，上层不再把断流当完成。
+- `agent/context.ts`
+  - 超过 `contextBudgetChars`（默认 400k 字符）时压缩中段；
+  - 保留首条用户请求 + 最近 6 条；
+  - 工具结果保留首尾并标注，插入 `[context compacted …]` 标记。
+- `app.ts`
+  - `maxAgentTurns` 默认 24；
+  - 断流 / 到轮次上限都保留历史并提示「输入 继续」。
 
-**风险**：重试可能重复计费；只在“零输出”时重试。压缩是有损的，必须保留最近工具结果。
+**验收**：10+ 次工具调用不中断；断流有明确提示；超长历史自动压缩且最近结果仍在。
 
-**验收**：10+ 次工具调用、单次等待 >2 分钟仍能收尾；断流后出现明确提示；超长历史自动压缩且关键文件内容仍在。
-
----
-
-## P1-1 stable UI 下 spinner 卡住
-
-**现象**：stable UI（Termux / `FASTCODE_STABLE_UI=1`）等待时 `⠋ Streaming…` 不转。
-
-**涉及文件**
-- `package/src/ui/Spinner.ts` L22-L32
-- `package/src/lib/uiMode.ts`
-- `package/src/ui/Prompt.ts`（stable 时 `showCursor: false`）
-- `package/src/app.ts` L476（`stable={stableUi && !agentActivity}`）
-
-**根因**：`Spinner` 在 `stable` 时直接 `return`，不启动定时器；帧固定 `⠋`，文案固定为 `label`。`app.ts` 在 `agentActivity` 存在时又把 stable 置 false，状态切换也不稳定。
-
-**建议改动**
-1. stable 也启动独立定时器，间隔 120ms（非 stable 保持 80ms）。
-2. 文案按状态：`Thinking` / `Streaming` / `Waiting for tool`（`agentActivity` 时用工具名）。
-3. 仅 `busy` 时渲染（已满足）；空闲停止。
-4. 保持 `Prompt` 的 `showCursor: false` 不变，避免光标闪烁。
-
-**风险**：stable 模式每秒 8 次重绘仍可能闪烁；120ms 是折中，可用 `FASTCODE_SPINNER_MS` 覆盖。
-
-**验收**：`FASTCODE_STABLE_UI=1` 等待 30s，spinner 持续转动，文案在思考/返回/工具间正确切换。
+**风险**：压缩有损；已输出一半后断流不会自动重放。
 
 ---
 
-## P1-2 工具递归读目录 token 过高
+### P1-1 stable UI spinner
 
-**现象**：分析项目时递归读取大量目录，token 消耗高。
+**根因**：`Spinner` 在 `stable=true` 时直接 `return`，不启动定时器。
 
-**涉及文件**
-- `package/src/agent/tools.ts`：`listFiles()` L138-L145、`grepFiles()` L146-L166、`walk()` L185-L239、`readFile/readMany` L16-L19/L130-L137
-- `package/src/agent/limits.ts`
+**改动**：stable 模式改为 120ms 定时器（非 stable 80ms），
+`FASTCODE_SPINNER_MS` 可覆盖；`app.ts` 增加
+`thinking / streaming / tool` 三态文案。
 
-**根因**
-1. `walk()` 只硬编码跳过 `node_modules`、`.git`、`dist`，没有用户忽略规则。
-2. `list_files` 逐条输出所有文件，没有目录摘要/符号摘要。
-3. `grep` 对每个文件 `readFile(..., 'utf8')` 全量读入，无大小上限（大文件/二进制会浪费内存与 token）。
-4. `read_file` / `read_many` 无文件大小截断，直接整文件进上下文。
+**验收**：`FASTCODE_STABLE_UI=1` 等待 30s，spinner 持续转动。
 
-**建议改动**
-1. 新增 `agent/ignore.ts`：读取项目根 `.fastcodeignore`（gitignore 风格）+ 默认忽略 `node_modules/.git/dist/build/.next/coverage/*.lock`、二进制扩展名。
-2. `walk()` 与 `grepFiles()` 使用忽略规则；`grep` 先 `stat`，超过 `FASTCODE_GREP_MAX_BYTES`（默认 1MB）跳过并计数。
-3. `list_files` 默认“摘要模式”：目录树 + 每目录文件数 + 代码文件符号签名（正则提取 `function/class/const ... =`，最多 N 个）。
-4. `read_file` 超过 `FASTCODE_READ_MAX_BYTES`（默认 200KB）时截断并附加提示；`read_many` 总预算控制。
-5. 保留 `maxDepth`、`maxVisited` 现有保护。
-
-**风险**：符号提取是启发式，可能漏掉；摘要模式需保留 `detail: true` 全量回退。
-
-**验收**：同一项目分析任务 token 明显下降；关键文件仍可按需读取；`.fastcodeignore` 生效。
+**风险**：stable 模式重绘频率提高到约 8 次/秒；终端仍闪烁时可调大到 250ms。
 
 ---
 
-## P2-1 /model 交互改造
+### P1-2 目录读取 token 与内存
 
-**现象**：`/model` 只打印文本列表，必须手输完整 id；离线/在线没有区分。
+**根因**：只忽略 3 个目录；`list_files` 全量列出；`grep` 全量读文件；
+`read_file` 不截断。
 
-**涉及文件**
-- `package/src/commands/model.ts`
-- `package/src/commands/provider.ts`
-- `package/src/app.ts`（`useInput`、`pendingLogin` 状态机）
-- `package/src/ui/Prompt.ts`
+**改动**
+- `agent/ignore.ts`：默认忽略依赖/构建目录；支持 `.fastcodeignore`
+  （`#`、`/` 锚定、`**`、`?`、`!`、目录尾 `/`）；识别二进制扩展名。
+- `list_files` 默认目录摘要（数量 + 文件名 + 大小 + 代码文件前 8 个符号），
+  `detail: true` 恢复旧列表。
+- `read_file/read_many` 默认 200KB 截断 + 二进制占位。
+- `grep` 跳过忽略项、>1MB 文件、二进制文件。
+- 新增 `FASTCODE_READ_MAX_BYTES`、`FASTCODE_GREP_MAX_BYTES`。
 
-**当前数据结构**：`CommandResult = { message?, silent?, quit? }`，没有“打开选择器”这类交互返回值。
+**验收**：同一项目分析 token 下降；`.fastcodeignore` 生效；关键文件仍可读。
 
-**根因**：命令层只返回字符串；没有可复用的 Ink 列表状态机；`listModels()` 的在线/离线结果没有元信息（失败时静默回退静态表）。
-
-**建议改动**
-1. `CommandResult` 增加 `picker?: PickerRequest`；`AppActions` 增加 `openPicker`。
-2. 新增 `ui/Picker.ts`：编号列表 + `↑/↓` + 数字直选 + Enter 确认 + Esc 取消，`stable` 模式下不高频重绘。
-3. `App` 增加 `pendingPicker` 状态，拦截 `useInput`；确认后调用 `picker.onSelect(value)`。
-4. `/model`：本地配置 + `provider.listModels()` 合并去重；`listModels` 返回 `{ models, offline }`（新增可选 `listModelsMeta`，旧方法保持兼容）。
-5. `/provider` 也可复用同一选择器。
-6. `/effort` 复用 Picker（见 P2-2）。
-
-**风险**：Ink 的 `useInput` 与 `TextInput` 同时监听会冲突；选择器打开时必须禁用 Prompt。
-
-**验收**：联网显示远端+本地合并列表；离线显示本地并标注；方向键、数字键、Enter 均可选择。
+**风险**：符号提取是正则启发式；`detail:true` 可回退。
 
 ---
 
-## P2-2 思考强度 /effort
+### P2-1 `/model`、`/provider` 交互选择
 
-**现象**：模型请求层没有 reasoning/thinking 参数，状态栏也没有档位显示。
+**根因**：命令只返回字符串，没有可复用的选择器状态机；离线/在线无区分。
 
-**涉及文件**
-- `package/src/types.ts`：`ChatRequest` 无 reasoning 字段
-- `package/src/providers/openaiCompatible.ts`：`buildBody()` 无 `reasoning_effort`
-- `package/src/providers/anthropic.ts`：无 `thinking`
-- `package/src/config/store.ts`：`DEFAULT_CONFIG` 无 `reasoningEffort`
-- `package/src/commands/*`、`package/src/ui/StatusBar.ts`
+**改动**
+- 新增 `ui/Picker.ts`（10 行窗口、当前项高亮、编号）。
+- `app.ts` 新增 `pendingPicker`，拦截键盘：`↑/↓`、`1-9`、`Enter`、`Esc`。
+- `CommandResult.picker` 让任意命令复用该选择器。
+- `/model`：`listModels()` 去重 + `probeProvider()` 在线探测 + 离线标注。
+- `/provider`：同样改为选择器，选择后设置 provider 与默认模型。
+- 旧用法 `/model <id>`、`/provider <id>` 保留。
 
-**根因**：能力从未实现；`ChatRequest` 也没有承载字段，provider 无法透传。
+**验收**：方向键/数字/回车/Esc 均可用；离线显示内置列表；旧用法不回归。
 
-**建议改动**
-1. `ChatRequest.reasoningEffort?: "low"|"medium"|"high"|"max"`；`ChatRequest.thinkingBudgetTokens?: number`。
-2. `DEFAULT_CONFIG.reasoningEffort = "auto"`（默认不发参数，保持现状）；可选 `low/medium/high/max`。
-3. Provider 映射：
-   - OpenAI 兼容（openai/groq/xai/openrouter/deepseek）：`reasoning_effort`，`max → high`（OpenAI 最高档）。
-   - Anthropic：`thinking: { type: "enabled", budget_tokens }`，low 1024 / medium 4096 / high 8192 / max 16000；`max_tokens` 必须大于 budget。
-   - Google/自定义/Ollama：暂不支持，忽略并提示。
-4. 新增 `commands/effort.ts`：`/effort` 打开 Picker（low/medium/high/max/auto），选择后写配置并立即生效。
-5. `StatusBar` 显示 `effort: high`（`auto` 不显示）。
-6. 请求前校验模型能力：不支持时在首轮提示一次，不反复弹。
-
-**风险**：部分模型收到未知参数会 400；`buildBody` 需保留“去掉未知参数重试”的既有逻辑，并在重试时丢弃 reasoning 参数。
-
-**验收**：`/effort high` 后请求体出现对应参数（Anthropic 为 `thinking`）；状态栏显示档位；不支持模型有友好提示且请求不失败。
+**风险**：`probeProvider` 多一次请求（4s 上限），弱网时打开选择器最多多等 4s。
 
 ---
 
-## 建议提交顺序
+### P2-2 思考强度 `/effort`
 
-1. `fix(security): safe path resolution + sharedDirs`（含 apply_patch 漏洞）
-2. `fix(auth): provider-scoped keys + migration`
-3. `fix(agent): timeout retry + tool loop limit + context compaction`
-4. `fix(ui): stable-mode spinner timer`
-5. `perf(tools): fastcodeignore + directory summary`
-6. `feat(model): interactive model picker + online merge`
-7. `feat(effort): reasoning effort setting and /effort command`
+**根因**：`ChatRequest` 没有 reasoning 字段，provider 无法透传，状态栏无档位。
 
-每条改完：`npm run typecheck` → `npm run build` → `node ../scripts/smoke-test.mjs` → 给出 Termux 自测步骤。
+**改动**
+- `ReasoningEffort = auto | low | medium | high | max`；
+  `DEFAULT_CONFIG.reasoningEffort = "auto"`（默认不发送，保持旧行为）。
+- `/effort` 打开选择器；`/effort high` 直接设置；不支持时明确提示忽略。
+- 参数映射：
 
----
-
-## 实施状态（本次已落地）
-
-> 构建：`npm run build` 通过；`node scripts/smoke-test.mjs` 31/31；新增 28 项行为校验全部通过。
-> `package/dist/cli.js` 已重新打包（2.55 MB）。
-
-| 编号 | 状态 | 关键改动 |
+| Provider | 参数 | 说明 |
 |---|---|---|
-| P0-1 | ✅ | `DEFAULT_CONFIG.sharedDirs` + `allowedRoots()` 读取；`apply_patch` 改走 `sandboxPath()` |
-| P0-2 | ✅ | auth v3 按 provider 存；v1/v2 自动迁移，保留 `auth.json.v2.bak` |
-| P0-3 | ✅ | `runStream()` 空闲超时 + 安全重试；轮次上限 24（可配）；`compactHistory()` 压缩；断流提示“继续” |
-| P1-1 | ✅ | stable 模式 120ms 独立定时器；Thinking/Streaming/Waiting for tool 三态 |
-| P1-2 | ✅ | `.fastcodeignore`、默认忽略、`read_file` 200KB 上限、`grep` 1MB 跳过、目录摘要+符号 |
-| P2-1 | ✅ | `/model`、`/provider` 选择器（↑/↓、1-9、Enter、Esc）；`probeProvider()` 标注离线 |
-| P2-2 | ✅ | `/effort auto|low|medium|high|max`；OpenAI 系 `reasoning_effort`、OpenRouter `reasoning.effort`、Anthropic `thinking.budget_tokens`；状态栏显示档位 |
+| OpenAI / DeepSeek / Groq / Mistral / xAI / Moonshot / 智谱 / Qwen | `reasoning_effort` | `max` → `high` |
+| OpenRouter | `reasoning: { effort }` | — |
+| Anthropic | `thinking: { type: "enabled", budget_tokens }` | 1024 / 4096 / 8192 / 16000；自动抬高 `max_tokens`，移除 `temperature` |
+| Google / Ollama / Custom | 不发送 | 保存档位但提示忽略 |
 
-### 新增配置项（`~/.fastcode/config.json`）
+- `openaiCompatible.ts`：400 且提示 reasoning/unsupported 时去参数重试一次。
+- `StatusBar`：非 `auto` 显示 `effort:high`（compact 模式也显示）。
 
-```json
+**验收**：捕获请求体字段正确；Anthropic budget 与 max_tokens 关系正确；
+`/effort` 五档可选；不支持模型不报错。
+
+**风险**：能力判断是静态启发式，未知模型可能 400，已有重试兜底。
+
+---
+
+## 4. 数据结构与配置变更（升级对照）
+
+### 4.1 `~/.fastcode/config.json`
+
+```jsonc
 {
-  "sharedDirs": [],
-  "maxAgentTurns": 24,
-  "requestIdleTimeoutMs": 60000,
-  "contextBudgetChars": 400000,
-  "reasoningEffort": "auto"
+  "sharedDirs": [],              // 新增：额外可读写目录
+  "maxAgentTurns": 24,           // 新增：agent 工具轮次上限
+  "requestIdleTimeoutMs": 60000, // 新增：流空闲超时
+  "contextBudgetChars": 400000,  // 新增：历史压缩阈值
+  "reasoningEffort": "auto"      // 新增：auto/low/medium/high/max
 }
 ```
 
-环境变量覆盖：`FASTCODE_READ_MAX_BYTES`、`FASTCODE_GREP_MAX_BYTES`、`FASTCODE_SPINNER_MS`。
+旧文件不需要改：`loadConfig()` 会与默认值合并。
 
-### Termux 真机自测步骤
+### 4.2 `~/.fastcode/auth.json`
+
+| 版本 | 结构 | 状态 |
+|---|---|---|
+| v1 | `{ "deepseek": "sk-..." }` | 读取并迁移 |
+| v2 | `{ version: 2, keys: { "p::m": {...} }, legacy: {...} }` | 读取并迁移 |
+| v3 | `{ version: 3, keys: { "p": { provider, model?, key, addedAt } } }` | 当前格式 |
+
+迁移备份：`~/.fastcode/auth.json.v2.bak`。
+
+### 4.3 新增环境变量
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `FASTCODE_READ_MAX_BYTES` | `read_file` 上限 | 200000 |
+| `FASTCODE_GREP_MAX_BYTES` | `grep` 单文件上限 | 1000000 |
+| `FASTCODE_SPINNER_MS` | spinner 帧间隔 | stable 120 / 普通 80 |
+
+---
+
+## 5. 测试与验证
+
+### 5.1 自动化
+
+```bash
+cd package && npm run typecheck && npm run build
+cd .. && node scripts/smoke-test.mjs        # 31/31
+```
+
+本次额外做的 28 项行为校验（临时脚本，未入库）：
+
+- `read_file` 的 `..` 越界、`apply_patch` 的 `../` 越界；
+- `sharedDirs` 未配置/已配置的读写差异；
+- v2 → v3 迁移、最新时间戳优先、legacy 迁移、备份写入；
+- 历史压缩触发、首条/最新保留、体积下降、压缩标记；
+- OpenAI 兼容 `reasoning_effort`、OpenRouter `reasoning.effort`、
+  Anthropic `thinking.budget_tokens`、无 reasoning style 时不发送；
+- 流空闲超时触发时间；
+- `/effort` 选择器数量与回写。
+
+### 5.2 Termux 真机（下一手必做）
 
 ```bash
 cd ~/fastcode && git pull && npm install && npm run build
+
 # P0-1
-fastcode   # 让 agent read ../../etc/passwd → 应报 path outside sandbox
+# 让 agent read ../../etc/passwd -> 应报 path outside sandbox
+# 在 config.json 加 sharedDirs: ["/sdcard/fastcode"]，再读写该目录
+
 # P0-2
 /login deepseek deepseek-v4-pro <key>
 /model deepseek-flash          # 不应再次索要 key
-cat ~/.fastcode/auth.json      # version 3，keys 下按 provider
+cat ~/.fastcode/auth.json      # version 3
+
 # P0-3
-# 连续让它跑 10+ 次工具调用；或用 /agent 开 agent 模式分析大仓库
+# 连续 10+ 次工具调用；中途断网 2 分钟再恢复；输入“继续”应能接上
 # P1-1
-FASTCODE_STABLE_UI=1 fastcode  # 等待 30s，spinner 应持续转动
+FASTCODE_STABLE_UI=1 fastcode  # 等 30s，spinner 持续转动
 # P1-2
 printf 'node_modules/\n*.log\n' > .fastcodeignore
-# 让 agent list_files → 输出应为“目录摘要+符号”
+# 让 agent list_files -> 应输出目录摘要 + 符号
 # P2-1 / P2-2
-/model        # 方向键/数字/回车
-/effort high # 状态栏出现 effort:high
+/model
+/effort high                   # 状态栏出现 effort:high
 ```
 
-### 回滚
+---
 
-- 代码：`git revert <commit>` 或 `git checkout -- package/src package/dist scripts`
-- 配置：删除新增字段即可；旧 `auth.json` 备份在 `~/.fastcode/auth.json.v2.bak`
+## 6. 已知限制（交接必读）
 
+1. **shell 不受文件沙箱限制**：`shell` 执行真实命令；只有文件工具走 `sandboxPath()`。
+2. **压缩有损**：早期工具结果只保留首尾，必要时让模型重读文件。
+3. **auth 迁移有损**：同一 provider 多把 Key 只保留最新，靠 `.v2.bak` 找回。
+4. **`/model` 在线探测多一次请求**：弱网最多多等 4s。
+5. **`app.ts` / `tools.ts` 仍偏大**：建议后续拆出 `agent/loop.ts` 与工具注册表。
+6. **AUDIT M-3 未解决**：`lockdown()` 失败静默，`FASTCODE_HOME` 在 FAT/exFAT 时
+   `auth.json` 可能不是 0600。
+7. **AUDIT M-4 未解决**：任意 URL 的 `SKILL.md` 会注入系统提示，缺来源确认。
+8. **版本号**：文档标记 0.1.6-beta，`package.json` 仍为 `0.1.6`，未打 tag。
+
+---
+
+## 7. 下一步建议
+
+1. Termux 真机完成 P0-3 长任务、断流与「继续」恢复验证。
+2. `lockdown()` 返回状态，`doctor` 对权限降级告警（M-3）。
+3. 技能安装增加来源确认/域名白名单（M-4）。
+4. 拆分 `app.ts` 的 agent loop 与 `tools.ts` 的工具注册表。
+5. 正式发布前：版本号改为 `0.1.6-beta.1`（或按发布策略）、更新 `CHANGELOG.md`、
+   重新构建并核对 `dist/cli.js` diff。
+
+---
+
+## 8. 交接检查表
+
+- [x] `npm run typecheck` 通过
+- [x] `npm run build` 通过，`dist/cli.js` 已提交
+- [x] `node scripts/smoke-test.mjs` 31/31
+- [x] 28 项行为校验通过
+- [x] 配置/密钥迁移有备份
+- [x] 文档已更新（DEVLOG / ARCHITECTURE / CONFIGURATION / MODULES / AUDIT）
+- [ ] Termux 真机长任务与断流验证
+- [ ] 正式版本号与 CHANGELOG

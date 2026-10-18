@@ -108,7 +108,7 @@ export OPENAI_API_KEY="sk-..."
 export OPENROUTER_API_KEY="sk-or-..."
 ```
 
-Or bind a key from inside FastCode — scoped to a specific provider + model (input is masked):
+Or bind a key from inside FastCode — one key per provider, reused by all its models (input is masked):
 
 ```text
 /login                                        # guided: provider → model → key
@@ -246,10 +246,11 @@ Installed plugins live under:
 | `/tools` | Show available coding tools |
 | `/cwd` | Show agent sandbox root |
 | `/plugin ...` | Import and manage always-active plugin packs |
-| `/provider [id]` | List or switch provider |
-| `/model [id]` | List or switch model |
-| `/login [provider] [model] [key]` | Bind an API key to a provider + model (guided when omitted) |
-| `/logout <provider> [model]` | Remove a scoped key (`--all` for the whole provider) |
+| `/provider [id]` | Pick or switch provider (interactive when omitted) |
+| `/model [id]` | Pick or switch model (interactive when omitted) |
+| `/effort [level]` | Thinking effort: auto / low / medium / high / max |
+| `/login [provider] [model] [key]` | Bind a provider-wide API key (guided when omitted) |
+| `/logout <provider>` | Remove the provider's key (`--all` accepted for compatibility) |
 | `/skills ...` | Search, install, enable, disable, list skills |
 | `/theme [id]` | Switch theme |
 | `/cost` | Show token and cost usage |
