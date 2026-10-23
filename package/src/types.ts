@@ -156,6 +156,7 @@ export interface AppStateSnapshot {
     reasoningEffort: ReasoningEffort;
     expanded: boolean;
     busy: boolean;
+    draft: string;
 }
 export interface AppActions {
     setProvider(id: string): void;
@@ -174,6 +175,7 @@ export interface AppActions {
     cancelRun(): void;
     steer(text: string): void;
     setExpanded(value: boolean): void;
+    setInput(text: string): void;
     pushSystemMessage(text: string): void;
     /** Begin the guided API-key flow (choose provider → model → key). */
     startLogin(options: { provider?: string; model?: string }): void;

@@ -314,6 +314,7 @@ export const App = ({ initialPrompt, resume }) => {
             steerQueueRef.current.push(text);
         },
         setExpanded: (value) => setExpanded(value),
+        setInput: (value) => setInput(value),
         pushSystemMessage: pushSystem,
         startLogin: ({ provider, model }) => {
             setPendingLogin({
@@ -360,6 +361,7 @@ export const App = ({ initialPrompt, resume }) => {
                     reasoningEffort: config.reasoningEffort,
                     expanded,
                     busy,
+                    draft: input,
                 },
                 actions,
             });

@@ -27,6 +27,7 @@ import { compactCommand } from "./compact.js";
 import { expandCommand } from "./expand.js";
 import { attachCommand } from "./attach.js";
 import { bgCommand } from "./bg.js";
+import { editCommand } from "./edit.js";
 export const COMMANDS = [
     helpCommand,
     agentCommand,
@@ -57,6 +58,7 @@ export const COMMANDS = [
     expandCommand,
     attachCommand,
     bgCommand,
+    editCommand,
 ];
 export function findCommand(name) {
     const lower = name.toLowerCase();
