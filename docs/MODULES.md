@@ -17,7 +17,7 @@
 |---|---|---|
 | src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发、checkpoint/事实流落盘 | runner, session, commands, ui |
 | src/ui/Banner.ts | 启动横幅（稳定 UI 下不动画） | 无 |
-| src/ui/Message.ts | 消息气泡；Markdown 缓存 + React.memo | lib/markdown |
+| src/ui/Message.ts | 消息气泡；Markdown 渲染缓存（不 memo，避免终端 resize 后宽度不更新） | lib/markdown |
 | src/ui/Prompt.ts | 输入框与斜杠自动补全；`showCursor` 常开 | ink-text-input, commands/index |
 | src/ui/Spinner.ts | 思考动画（stable 模式低频） | 无 |
 | src/ui/Picker.ts | 模型/服务商/effort 选择器 | 无 |

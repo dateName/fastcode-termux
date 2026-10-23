@@ -20,7 +20,8 @@
 - **测试**：PC smoke 115；Termux 120/120；真实 DeepSeek Flash 文本与工具轮次通过。
 
 ### 已知限制（0.1.6-beta）
-- Ink 5.x IME 组合错位（`abcdef` → `bcdefa`）；`/edit` 可绕行，彻底修需 Ink ≥6.7。
+- Ink 5.x IME 光标定位未根治；Termux pty 尺寸异常时会出现 `abcdef` → `bcdefa`/右侧裁切，
+  修正 pty 后基本输入通过。`/edit` 可绕行，彻底修需 Ink ≥6.7。
 - string-width 仍有 4.2.3 / 5.1.2 / 7.2.0 三份。
 - approval pending UI/resolver 未实现（fail closed）。
 - 原生 tools 仅覆盖 OpenAI 兼容 provider。

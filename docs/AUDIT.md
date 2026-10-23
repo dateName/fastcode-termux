@@ -156,7 +156,7 @@ provider 级 Key 复用、v1/v2 迁移。
 
 仍未关闭：
 
-- **IME 组合错位**（Ink 5.x）：`abcdef` → `bcdefa`；`/edit` 只是绕行。
+- **IME 光标定位**（Ink 5.x）：pty 尺寸异常时会 `abcdef` → `bcdefa`/裁切；修正 pty 后基本输入通过，`/edit` 是绕行。
 - **approval pending UI/resolver**：review 命中 pending 时 fail closed，用户无法在 TUI 内批准。
 - **string-width 三版本**：歧义宽度可能导致边框/光标列宽不一致。
 - 原生 tools 只覆盖 OpenAI 兼容 provider。

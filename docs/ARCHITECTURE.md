@@ -179,7 +179,8 @@
 
 已知限制：
 
-- Ink 5.x 的 IME 组合问题未根治（`abcdef` → `bcdefa`）；`/edit` 是可用绕行，彻底修需 Ink ≥6.7 + useCursor。
+- Ink 5.x 的 IME 光标定位未根治；实测 Termux pty 尺寸异常（129×129）时会出现 `abcdef` → `bcdefa` 和右侧裁切，
+  修正 pty（`stty cols/rows`）后基本输入通过。`/edit` 仍是绕行，彻底修需 Ink ≥6.7 + useCursor。
 - 进程内仍有 string-width 4.2.3 / 5.1.2 / 7.2.0 三份；未做强制 overrides（CJS/ESM 风险）。
 - approval pending 的数字选择 UI/resolver 尚未实现，命中 pending 时 fail closed。
 - 原生 tools 仅覆盖 OpenAI 兼容 provider；Anthropic/Google/未知 provider 走伪协议。
@@ -188,6 +189,7 @@
 
 **可以按文件维护**：入口、命令、界面、编排、领域、基础分层清晰；provider/command/tool 均单文件注册。
 `agent/runner.ts` 与 `ui` 解耦后，可在无 React 环境下跑回归（smoke #32–35）。
+消息 Markdown 只做内容缓存；不使用 memo，避免 Termux resize 后宽度/换行被旧 props 锁死。
 
 当前较大的文件：`app.ts`（事件消费/输入/命令，~32KB）、`agent/runner.ts`（~20KB）、
 `agent/shell-session.ts`（~15KB）、`patch/plan.ts`（~12KB）。后续可把 app 的 transcript/输入/

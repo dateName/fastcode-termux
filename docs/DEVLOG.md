@@ -428,8 +428,8 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
 
 ### 已知限制（本轮新增）
 
-1. **Ink 5.x IME 组合缺陷**：TUI 中 `abcdef` 可能变 `bcdefa`；`showCursor` + `/edit` 只缓解，
-   彻底修需 Ink ≥6.7 + `useCursor`（或换 `@inkjs/ui`）。
+1. **Ink 5.x IME 光标定位**：Termux pty 尺寸异常时 TUI 可能裁切/乱序（`abcdef` → `bcdefa`）；
+   修正 pty（`stty cols/rows`）后基本输入通过。`showCursor` + `/edit` 为缓解，彻底修需 Ink ≥6.7 + `useCursor`。
 2. **string-width 三版本**：4.2.3 / 5.1.2 / 7.2.0；未做强制 overrides（CJS/ESM 风险）。
 3. **approval pending UI/resolver 未实现**：敏感/大 diff 仍 fail closed（零落盘）。
 4. 原生 tools 仅覆盖 OpenAI 兼容 provider；Anthropic/Google/未知 provider 走伪协议。

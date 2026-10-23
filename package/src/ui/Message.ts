@@ -1,5 +1,4 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { memo } from "react";
 import { Box, Text } from "ink";
 import { renderMarkdown } from "../lib/markdown.js";
 const SIGIL = {
@@ -18,8 +17,8 @@ function cachedMarkdown(md) {
     markdownCache.set(md, rendered);
     return rendered;
 }
-export const MessageBubble = memo(function MessageBubble({ theme, role, content, streaming, markdown }: any) {
+export const MessageBubble = ({ theme, role, content, streaming, markdown }: any) => {
     const color = role === "user" ? theme.user : role === "assistant" ? theme.assistant : theme.system;
     const display = markdown ? cachedMarkdown(content) : content;
     return (_jsxs(Box, { flexDirection: "column", marginY: 0, children: [_jsxs(Text, { color: color, bold: true, children: [SIGIL[role], streaming ? _jsx(Text, { color: theme.muted, children: "  (streaming)" }) : null] }), _jsx(Box, { marginLeft: 2, flexDirection: "column", children: _jsx(Text, { color: color, children: display || (streaming ? "…" : "") }) })] }));
-});
+};

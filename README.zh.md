@@ -68,7 +68,8 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 
 ### 已知限制（0.1.6-beta）
 
-- Ink 5.x 的 IME 组合可能让字符乱序（`abcdef` → `bcdefa`）；请用 `/edit`，或等 Ink ≥6.7 升级。
+- Ink 5.x 的 IME 光标定位未彻底修复；Termux pty 尺寸异常时可能裁切/乱序（`abcdef` → `bcdefa`）。
+  用 `stty` 修正 pty，或用 `/edit`；彻底修需 Ink ≥6.7。
 - 进程内有 3 个 `string-width` 版本，歧义宽度字符可能列宽不一致。
 - 原生 tools 只覆盖 OpenAI 兼容服务商，其余走伪协议。
 - approval pending 没有 TUI resolver，命中时零落盘拒绝。

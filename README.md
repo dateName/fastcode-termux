@@ -70,7 +70,8 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 
 ### Known limitations (0.1.6-beta)
 
-- Ink 5.x IME composition can reorder text (`abcdef` → `bcdefa`); use `/edit` or wait for an Ink ≥6.7 upgrade.
+- Ink 5.x IME cursor placement is not fully fixed; a stale Termux pty size can clip/reorder text (`abcdef` → `bcdefa`).
+  Correct the pty with `stty`, or use `/edit`; a full fix needs Ink ≥6.7.
 - Three `string-width` versions may disagree on ambiguous-width characters.
 - Native tools cover OpenAI-compatible providers only; others use the pseudo protocol.
 - Approval pending has no TUI resolver yet, so those operations are denied.
