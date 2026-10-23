@@ -4,9 +4,9 @@
 
 ## 0.1.6-beta（测试版）
 
-> 状态：`package.json` = `0.1.6-beta`；GitHub Release `v0.1.6-beta` 已创建；
-> npm 发布待有效 `NPM_TOKEN`。改动明细、迁移与回滚见 [docs/DEVLOG.md](docs/DEVLOG.md)
-> 与 [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md)。
+> 状态：`package.json` = `0.1.6-beta`；GitHub Release `v0.1.6-beta`（prerelease）
+> 与 npm `@datename/fastcode-termux@0.1.6-beta`（dist-tag `beta`）已发布。
+> 改动明细、迁移与回滚见 [docs/DEVLOG.md](docs/DEVLOG.md) 与 [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md)。
 
 ### 工程改造（2026-10-23）
 - **runner 拆分**：`agent/runner.ts` 纯 async generator；app 只消费事件。

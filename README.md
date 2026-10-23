@@ -101,6 +101,8 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
+From npm (beta): `npm install -g @datename/fastcode-termux@0.1.6-beta` (dist-tag `beta`).
+
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
 ### 1. One-line script (recommended)

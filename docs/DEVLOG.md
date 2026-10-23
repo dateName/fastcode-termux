@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前版本标识：**0.1.6-beta（测试版）** — `package.json` 已为 `0.1.6-beta`；tag `v0.1.6-beta` / GitHub Release 已创建，npm 待有效 token
+> 当前版本标识：**0.1.6-beta（测试版）** — `package.json` 已为 `0.1.6-beta`；tag `v0.1.6-beta` / GitHub Release / npm（beta tag）均已发布
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -434,7 +434,7 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
 3. **approval pending UI/resolver 未实现**：敏感/大 diff 仍 fail closed（零落盘）。
 4. 原生 tools 仅覆盖 OpenAI 兼容 provider；Anthropic/Google/未知 provider 走伪协议。
 5. Termux:API 通知未接；仅 doctor 提示 wake-lock/TMPDIR。
-6. npm 发布待有效 `NPM_TOKEN`；GitHub tag 更新在网络恢复后重推。
+6. npm beta 已通过 GitHub Actions（Trusted Publishing/OIDC）发布；GitHub tag 已更新到最终代码。
 
 ### 回退
 

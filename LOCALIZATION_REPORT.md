@@ -334,7 +334,7 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
    `auth.json` 可能不是 0600。
 7. **AUDIT M-4 未解决**：任意 URL 的 `SKILL.md` 会注入系统提示，缺来源确认。
 8. **版本号（历史）**：当时 `package.json` 仍为 `0.1.6`；后续已 bump 为 `0.1.6-beta`，
-   已构建 tag/Release，npm 待 token。
+   已构建 tag/Release，并发布 npm `0.1.6-beta`（beta tag）。
 
 ---
 

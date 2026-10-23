@@ -99,6 +99,8 @@ termux-setup-storage     # 让 agent 能访问 ~/storage/shared（手机项目/�
 
 按推荐优先级排列。仓库内已提交 **自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等依赖全部打进单文件），因此克隆后**无需 `npm install`** 即可运行。
 
+从 npm 安装测试版：`npm install -g @datename/fastcode-termux@0.1.6-beta`（dist-tag `beta`）。
+
 > ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 
 ### 方式一：一键脚本（推荐）

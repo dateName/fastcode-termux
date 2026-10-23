@@ -66,7 +66,7 @@
 
 验证：PC smoke 115；Termux 120/120；真实 DeepSeek Flash 文本与工具轮次通过；kill -9、/sdcard fsync、进程组 kill 通过。
 
-## 0.1.6-beta 追加（测试版，GitHub Release 已创建）
+## 0.1.6-beta 追加（测试版，GitHub Release + npm 已发布）
 
 > 详细交接说明见 `docs/DEVLOG.md` 与 `LOCALIZATION_REPORT.md`。
 > 本组改动相互交叉（`store.ts` / `app.ts` 同时涉及多项），因此合并为一个提交 `0980f2e`。

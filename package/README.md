@@ -16,7 +16,7 @@
 </p>
 
 ```bash
-npm install -g @datename/fastcode-termux
+npm install -g @datename/fastcode-termux@0.1.6-beta
 fastcode
 ```
 
@@ -26,8 +26,9 @@ Short alias included:
 fc
 ```
 
-This tree is **0.1.6-beta**. When the beta is published to npm, install it with
-`npm install -g @datename/fastcode-termux@0.1.6-beta`; until then use the repo/portable build.
+This tree is **0.1.6-beta**. Install the beta from npm with
+`npm install -g @datename/fastcode-termux@0.1.6-beta` (dist-tag `beta`),
+or use the repo/portable build.
 
 ---
 
@@ -83,7 +84,7 @@ npm link
 ### Global install
 
 ```bash
-npm install -g @datename/fastcode-termux
+npm install -g @datename/fastcode-termux@0.1.6-beta
 fastcode
 ```
 
@@ -308,7 +309,7 @@ Install Node.js first:
 
 ```bash
 pkg install nodejs
-npm install -g @datename/fastcode-termux
+npm install -g @datename/fastcode-termux@0.1.6-beta
 fastcode
 ```
 

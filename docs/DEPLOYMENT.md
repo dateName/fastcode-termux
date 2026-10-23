@@ -5,7 +5,7 @@
 
 > 当前仓库状态：**0.1.6-beta（测试版）**。`release/` 已生成 0.1.6-beta 的便携包、
 > npm tarball 与 SHA256SUMS；GitHub Release `v0.1.6-beta` 已创建。
-> npm 发布仍需有效的 `NPM_TOKEN`（详见 RUNBOOK）。
+> npm 已发布 `@datename/fastcode-termux@0.1.6-beta`，dist-tag 为 `beta`。
 
 ## 0. 先确认 Node 与 git
 
