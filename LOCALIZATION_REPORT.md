@@ -328,11 +328,13 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
 2. **压缩有损**：早期工具结果只保留首尾，必要时让模型重读文件。
 3. **auth 迁移有损**：同一 provider 多把 Key 只保留最新，靠 `.v2.bak` 找回。
 4. **`/model` 在线探测多一次请求**：弱网最多多等 4s。
-5. **`app.ts` / `tools.ts` 仍偏大**：建议后续拆出 `agent/loop.ts` 与工具注册表。
+5. **`app.ts` / `tools.ts` 仍偏大**：已在后续 harness 改造中拆出 `agent/runner.ts`、
+   `agent/registry.ts` 与 `agent/tools/*`；`app.ts` 仍可继续拆 hooks。
 6. **AUDIT M-3 未解决**：`lockdown()` 失败静默，`FASTCODE_HOME` 在 FAT/exFAT 时
    `auth.json` 可能不是 0600。
 7. **AUDIT M-4 未解决**：任意 URL 的 `SKILL.md` 会注入系统提示，缺来源确认。
-8. **版本号**：文档标记 0.1.6-beta，`package.json` 仍为 `0.1.6`，未打 tag。
+8. **版本号（历史）**：当时 `package.json` 仍为 `0.1.6`；后续已 bump 为 `0.1.6-beta`，
+   已构建 tag/Release，npm 待 token。
 
 ---
 
