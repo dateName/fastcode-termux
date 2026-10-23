@@ -46,6 +46,7 @@ jobs:
             release/datename-fastcode-termux-*.tgz
             release/SHA256SUMS
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'beta') }}
 
       # Publishes to npm on a v* tag OR a manual run.
       #  - Preferred: Trusted Publishing (OIDC) — no long-lived secret. Configure the
@@ -59,7 +60,9 @@ jobs:
         run: |
           npm install -g npm@latest
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "No NPM_TOKEN set — using npm Trusted Publishing (OIDC)."
+            echo "No NPM_TOKEN set - using npm Trusted Publishing (OIDC)."
             npm config delete //registry.npmjs.org/:_authToken || true
           fi
-          npm publish --access public
+          TAG=latest
+          case "$GITHUB_REF_NAME" in *-*) TAG=beta ;; esac
+          npm publish --access public --tag "$TAG"
