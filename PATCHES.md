@@ -43,7 +43,30 @@
 | 35 | package/src/providers/deepseek.ts、package/src/providers/anthropic.ts | 服务商内置/默认模型陈旧（DeepSeek 官方实时只剩 `deepseek-flash`、`deepseek-v4-pro`；Anthropic 从不联网取列表） | DeepSeek 内置与默认更新为 `deepseek-v4-pro`/`deepseek-flash`；Anthropic 的 listModels 改为先查 `/v1/models` 实时列表、失败再回退内置 |
 | 36 | package/src/agent/protocol.ts、scripts/smoke-test.mjs | 本地代理只认 `<fastcode_tool>`；DeepSeek 等模型会改用原生 DSML 标记（`<｜DSML｜invoke …>`），导致工具调用被当成普通文本显示、根本不执行 | parseToolCalls/stripToolCalls 增加 DSML 方言：先把 fullwidth/ASCII 竖线标记归一化为普通标签，再解析 calls→invoke→parameter；兼容 `<calls>`/`<tool_calls>`/`<function_calls>`、含不含外层块；smoke 增加 3 项回归 |
 
-## 0.1.6-beta 追加（未发布，测试版）
+## 0.1.6-beta harness 改造（2026-10-23）
+
+> 详细设计与回滚见 `docs/ARCHITECTURE.md`、`docs/DEVLOG.md`；回归见 `docs/RUNBOOK`（外层）与 smoke。
+> 提交：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`、`d64ad0c`、`eb97e22`。
+
+| 主题 | 落点 | 变化 |
+|---|---|---|
+| runner | `agent/runner.ts` | 无 React async generator；预算/循环/abort/checkpoint 事件 |
+| registry | `agent/registry.ts`、`agent/tools/*` | 15 工具单文件；stateScope/revalidate 启动断言 |
+| trust | `config/trust.ts` | v1 paths(realpath) + tools；旧 `trusted[]` 迁移；mtime memo |
+| approval | `agent/approval.ts`、`registry.approve()` | 三态类型；敏感/大 diff pending；无 resolver 时 fail closed |
+| 中断 | `agent/process-tree.ts`、`shell-session.ts` | POSIX 进程组、Windows taskkill /T |
+| SSE/retry | `lib/http.ts`、`lib/net.ts` | 25s idle（`FASTCODE_SSE_IDLE_MS`）、前缀去重、QuotaError |
+| 恢复 | `session/log.ts`、`session/projection.ts` | checkpoint、事实流、projection fingerprint、未配对 tool_call |
+| 压缩 | `agent/compaction.ts` | token/heap 阈值、summary-*.md、server-aware 互斥 |
+| 补丁 | `patch/{parse,plan,apply}.ts` | 全量 plan、模糊匹配、CRLF/mode、符号链接、move 不覆盖、diff |
+| 后台 shell | `agent/shell-session.ts` | 2s 后台、常驻池、增量轮询、/jobs /kill |
+| 双轨协议 | `protocol-mode.ts`、`tool-schemas.ts`、`lib/native-tools.ts` | tool_calls index 归并、400 降级、capabilities |
+| 手机 UI | `commands/*`、`app.ts`、`lib/diagnostics.ts` | /cancel /steer /attach /compact /expand /edit；折叠；doctor |
+| TUI 修复 | `app.ts`、`ui/Prompt.ts`、`ui/Message.ts` | 60ms 节流、流式限高、Markdown 缓存、可见光标、resize 不吃 memo |
+
+验证：PC smoke 115；Termux 120/120；真实 DeepSeek Flash 文本与工具轮次通过；kill -9、/sdcard fsync、进程组 kill 通过。
+
+## 0.1.6-beta 追加（测试版，GitHub Release 已创建）
 
 > 详细交接说明见 `docs/DEVLOG.md` 与 `LOCALIZATION_REPORT.md`。
 > 本组改动相互交叉（`store.ts` / `app.ts` 同时涉及多项），因此合并为一个提交 `0980f2e`。
@@ -94,4 +117,5 @@
   原文件备份为 `auth.json.v2.bak`；同一 provider 多把不同 Key 只保留 `addedAt` 最新的一把。
   （0.1.6 当时按 unbound 处理，不自动迁移。）
 - 技能市场 skillshub.wtf 需要付费，属上游问题，未改。
-- 未做真实 Termux 设备上的交互测试（本环境无法运行 Android/Termux）。
+- Termux 真机已验证（LG V409N / Android 12 / Termux 0.118.2）；剩余限制：Ink 5.x IME 光标定位、
+  3 个 string-width 版本、approval pending UI 未实现。详见 `docs/DEVLOG.md`。

@@ -114,11 +114,11 @@ fastcode          # 直接可用（短别名 fc）
 
 ### 方式二：便携版（无需 npm）
 
-到 Releases 页面下载最新 `fastcode-portable-0.1.6.tar.gz`（校验见 `SHA256SUMS`），解压即用：
+到 Releases 页面下载最新 `fastcode-portable-0.1.6-beta.tar.gz`（校验见 `SHA256SUMS`），解压即用：
 
 ```bash
-tar -xzf fastcode-portable-0.1.6.tar.gz
-cd fastcode-portable-0.1.6
+tar -xzf fastcode-portable-0.1.6-beta.tar.gz
+cd fastcode-portable-0.1.6-beta
 ./fastcode
 ```
 
@@ -231,7 +231,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | 如何更新 | `cd ~/fastcode && git pull && bash scripts/install.sh`（单跑 install.sh 不会拉取） |
 | npm 安装后行为旧 / 报错 | npm registry 可能落后于仓库 —— 暂时优先用克隆或便携版；`fastcode update` 会比较版本 |
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
-| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.6） |
+| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.6-beta） |
 | 命令被拦截 | 那是危险命令保护；确认无误可临时 `export FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -279,9 +279,9 @@ sh scripts/build-portable.sh
 产物在 `release/`：
 
 ```text
-fastcode-portable-0.1.6.tar.gz       免安装便携包（自包含单文件）
-fastcode-portable-0.1.6.zip          同上（需系统有 zip）
-datename-fastcode-termux-0.1.6.tgz   npm 包（npm pack）
+fastcode-portable-0.1.6-beta.tar.gz       免安装便携包（自包含单文件）
+fastcode-portable-0.1.6-beta.zip          同上（需系统有 zip）
+datename-fastcode-termux-0.1.6-beta.tgz   npm 包（npm pack）
 SHA256SUMS                           以上文件的校验和
 ```
 
@@ -292,7 +292,7 @@ SHA256SUMS                           以上文件的校验和
 
 ```bash
 cd package
-npm publish --access public
+npm publish --access public --tag beta
 ```
 
 ### GitHub Releases
@@ -300,16 +300,16 @@ npm publish --access public
 推荐用 CI 自动发布（`.github/workflows/release.yml`）：打 tag 即可
 
 ```bash
-git tag v0.1.6
-git push origin v0.1.6        # 触发 Actions：构建 + 打包 + 上传 Release
+git tag v0.1.6-beta
+git push origin v0.1.6-beta        # 触发 Actions：构建 + 打包 + 上传 Release
 ```
 
 也可手动：
 
 ```bash
-gh release create v0.1.6 -t "FastCode 0.1.6" \
-  release/fastcode-portable-0.1.6.tar.gz \
-  release/datename-fastcode-termux-0.1.6.tgz \
+gh release create v0.1.6-beta -t "FastCode 0.1.6-beta" \
+  release/fastcode-portable-0.1.6-beta.tar.gz \
+  release/datename-fastcode-termux-0.1.6-beta.tgz \
   release/SHA256SUMS
 ```
 
@@ -333,8 +333,8 @@ gh release create v0.1.6 -t "FastCode 0.1.6" \
 | [docs/AUDIT.md](docs/AUDIT.md) | 安全审计结论 |
 | [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.6-beta 改动日志、迁移、风险与回滚 |
 | [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta 交接报告 |
-| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.6） |
-| [PATCHES.md](PATCHES.md) | 到 0.1.6 为止的 36 项修复清单 |
+| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.6-beta） |
+| [PATCHES.md](PATCHES.md) | 36 项上游修复 + 0.1.6-beta harness 改造 |
 
 ---
 
@@ -357,4 +357,4 @@ gh release create v0.1.6 -t "FastCode 0.1.6" \
 
 原始作者署名与上游项目名称、版权归各自所有；本仓库仅做修复与 Termux 适配。
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.6</sub>
+<sub>Made for Termux 🐧📱 · FastCode 0.1.6-beta</sub>

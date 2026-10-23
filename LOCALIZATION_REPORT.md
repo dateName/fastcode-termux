@@ -5,7 +5,12 @@
 > **本次提交**：`0980f2e`（2026-10-18）
 > **源码**：`package/src`（69 个 TS 模块）
 > **运行产物**：`package/dist/cli.js`（esbuild 自包含，已重新构建并提交）
-> **状态**：P0 / P1 / P2 全部完成，构建与自动化测试通过；Termux 真机长任务验证待下一手完成。
+> **状态**：P0 / P1 / P2 全部完成，构建与自动化测试通过；Termux 真机验证已补做。
+>
+> **历史快照说明**：本报告对应 `0980f2e`（2026-10-18）。之后的 0.1.6-beta harness 改造
+> （runner/registry/投影/压缩/patch/shell/双轨协议/手机命令）见 `docs/ARCHITECTURE.md`、
+> `docs/DEVLOG.md` 与 `CHANGELOG.md`。当前源码为 **114 个 TS 模块**，PC smoke 115、
+> Termux smoke 120。
 
 配套文档：
 
