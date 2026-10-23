@@ -1,6 +1,6 @@
 # 安全与健壮性审计报告 — FastCode 0.1.6-beta
 
-审计对象：src/（58 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
+审计对象：src/（114 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
 
 ## 级别定义
@@ -140,3 +140,25 @@
 smoke-test 覆盖：dist 语法、服务商注册表、SSE 的 CRLF/LF 分帧、
 悬空软链接容错、软链接越界读写拦截、词法越界拦截、config 与 auth 的分离、
 provider 级 Key 复用、v1/v2 迁移。
+
+## 五、0.1.6-beta 工程改造补记（2026-10-23）
+
+新增/加强的保护（详见 ARCHITECTURE §5.1）：
+
+- **工具契约**：registry 启动断言 `requiresTrust ⇒ revalidate:["trust"]`；prepare 拒绝零副作用。
+- **process-tree**：POSIX 杀进程组，Windows `taskkill /T`；/kill 与 abort 共用。
+- **patch**：parse→plan→apply 全量内存规划后才落盘；O_NOFOLLOW；rename 前 lstat；
+  符号链接拒绝；CRLF/mode 保持；move 不覆盖；多文件失败回滚。
+- **trust v1**：`paths` 用 realpath；旧 `trusted[]` 迁移；每次 approve 重读（mtime memo）。
+- **facts/projection**：append-only 事实流；projection <20KB + fingerprint；未配对 tool_call 按幂等性补全。
+- **SSE/retry**：25s idle（可调）；公共前缀去重；429 到上限抛 QuotaError。
+- **后台 shell**：默认 2s 转后台；`/jobs` `/attach` `/kill`；`FASTCODE_MAX_SPAWN_PER_TURN`。
+
+仍未关闭：
+
+- **IME 组合错位**（Ink 5.x）：`abcdef` → `bcdefa`；`/edit` 只是绕行。
+- **approval pending UI/resolver**：review 命中 pending 时 fail closed，用户无法在 TUI 内批准。
+- **string-width 三版本**：歧义宽度可能导致边框/光标列宽不一致。
+- 原生 tools 只覆盖 OpenAI 兼容 provider。
+
+回归：PC 115 项；Termux 120/120（含 #50/#51/#54、kill -9、/sdcard fsync、进程组 kill）。

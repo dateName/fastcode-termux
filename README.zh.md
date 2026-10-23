@@ -38,6 +38,11 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 🎨 主题 | `/theme` 切换配色 |
 | 💰 用量统计 | 状态栏显示 token 与成本 |
 | 🤖 模型支持 | **DeepSeek / OpenAI / Anthropic**，以及 Gemini、通义千问、GLM、Kimi、Grok、OpenRouter、Ollama 等 |
+| 💾 恢复 | 事实流 + `*.projection.json`；resume 恢复 cwd/provider/model 与未配对 tool_call |
+| 🧠 上下文 | `/context`、`/compact`；token/heap 触发本地压缩并落盘 `summary-*.md` |
+| 🖥️ 后台 shell | 长命令返回 session id；`/jobs` `/attach` `/kill`；POSIX 常驻 `sh -s` 池 |
+| 🧰 双轨协议 | 伪协议 `<fastcode_tool>` 或原生 `tool_calls`；`FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
+| 📱 手机命令 | `/cancel` `/steer` `/expand` `/edit`（外部编辑器绕开 IME 问题） |
 
 **快捷键**
 
@@ -57,6 +62,16 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 🚫 危险命令拦截 | `rm -rf`、`dd`、`mkfs`、fork bomb 等在**执行前**被拒绝 | `FASTCODE_ALLOW_DANGEROUS=1` |
 | ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
+| 🧾 补丁事务 | parse → plan → apply；保持 CRLF/mode；拒绝符号链接；move 不覆盖 | `/expand` 查看完整 diff |
+| 🛑 进程树 | abort/`/kill` 杀子进程与孙进程 | POSIX 进程组；Windows `taskkill /T` |
+| 🔐 审批钩子 | 敏感/大补丁需要审批；无 resolver 时 **拒绝**（fail closed） | pending UI 尚未实现 |
+
+### 已知限制（0.1.6-beta）
+
+- Ink 5.x 的 IME 组合可能让字符乱序（`abcdef` → `bcdefa`）；请用 `/edit`，或等 Ink ≥6.7 升级。
+- 进程内有 3 个 `string-width` 版本，歧义宽度字符可能列宽不一致。
+- 原生 tools 只覆盖 OpenAI 兼容服务商，其余走伪协议。
+- approval pending 没有 TUI resolver，命中时零落盘拒绝。
 
 ---
 

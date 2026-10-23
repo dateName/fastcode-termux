@@ -1,9 +1,9 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前版本标识：**0.1.6-beta（测试版）** — `package.json` 仍写 `0.1.6`，尚未打 tag / 发布 npm
+> 当前版本标识：**0.1.6-beta（测试版）** — `package.json` 已为 `0.1.6-beta`；tag `v0.1.6-beta` / GitHub Release 已创建，npm 待有效 token
 > 基线提交：`43c8835`（0.1.6 交接基线）
-> 本次改动提交：`0980f2e`（2026-10-18）
+> 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
 
 本文件记录**每一次可交接的改动**：为什么改、改了哪里、数据结构怎么变、怎么验证、怎么回滚。
@@ -400,3 +400,44 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
 - [x] `dist/cli.js` 已重新生成并提交
 - [ ] Termux 真机长任务 / 断流验证（下一手）
 - [ ] 版本号与 CHANGELOG 正式更新（发布前）
+
+---
+
+## 2026-10-23 工程改造（0.1.6-beta）
+
+本轮把单体 TUI 升级为可审计、可恢复的 agent harness。按阶段 0–8 落地：
+
+| 阶段 | 内容 | 主要文件 |
+|---|---|---|
+| 0 | 无 React runner；预算/循环终止；model-meta/estTokens | `agent/runner.ts`、`lib/model-meta.ts`、`guards.ts` |
+| 1 | 工具 registry + 单文件工具；stateScope/revalidate；trust v1；approval 类型；进程树 kill | `agent/registry.ts`、`agent/tools/*`、`config/trust.ts`、`process-tree.ts` |
+| 2a/2b/2c | SSE idle；checkpoint/未闭合/fsync；retryRequest/retryStream 前缀去重 | `lib/http.ts`、`lib/net.ts`、`session/log.ts` |
+| 3 | 事实流 + projection/fingerprint + resume + 未配对 tool_call 补全 | `session/projection.ts` |
+| 4 | 本地压缩（token/heap/server-aware）+ `/context` | `agent/compaction.ts`、`commands/context.ts` |
+| 5 | patch parse/plan/apply、模糊匹配、CRLF/mode、符号链接、move 不覆盖、per-file diff | `patch/*`、`agent/tools/apply_patch.ts` |
+| 6 | 后台 shell + 常驻池 + 增量轮询 + `/jobs` `/kill` | `agent/shell-session.ts` |
+| 7 | 原生 tool_calls + 400 降级 + capabilities 缓存 | `protocol-mode.ts`、`tool-schemas.ts`、`lib/native-tools.ts` |
+| 8 | `/cancel` `/steer` `/attach` `/compact` `/expand` `/edit` 等；折叠输出；doctor 扩展 | `commands/*`、`lib/diagnostics.ts` |
+
+### 验证
+
+- PC：`npm run typecheck` / `lint` / `build` 通过；smoke **115** 项。
+- Termux（LG V409N / Android 12 / arm64 / Termux 0.118.2）：smoke **120/120**；
+  kill -9 恢复、`/sdcard` fsync、进程组 kill、`/context`、真实 DeepSeek Flash 文本与工具轮次通过。
+- 产物：`release/fastcode-portable-0.1.6-beta.tar.gz|zip`、`datename-fastcode-termux-0.1.6-beta.tgz`、`SHA256SUMS`。
+
+### 已知限制（本轮新增）
+
+1. **Ink 5.x IME 组合缺陷**：TUI 中 `abcdef` 可能变 `bcdefa`；`showCursor` + `/edit` 只缓解，
+   彻底修需 Ink ≥6.7 + `useCursor`（或换 `@inkjs/ui`）。
+2. **string-width 三版本**：4.2.3 / 5.1.2 / 7.2.0；未做强制 overrides（CJS/ESM 风险）。
+3. **approval pending UI/resolver 未实现**：敏感/大 diff 仍 fail closed（零落盘）。
+4. 原生 tools 仅覆盖 OpenAI 兼容 provider；Anthropic/Google/未知 provider 走伪协议。
+5. Termux:API 通知未接；仅 doctor 提示 wake-lock/TMPDIR。
+6. npm 发布待有效 `NPM_TOKEN`；GitHub tag 更新在网络恢复后重推。
+
+### 回退
+
+- 运行时：`FASTCODE_TOOL_PROTOCOL=legacy`（默认）、`FASTCODE_COMPACTION=0`、
+  `FASTCODE_SESSION_LOG=0`、`FASTCODE_SSE_IDLE_MS` 调整。
+- 安装：保留 `~/opt/fastcode-termux.old-*`；数据备份 `~/.fastcode.bak-*`。

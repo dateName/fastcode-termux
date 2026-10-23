@@ -2,10 +2,28 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.6-beta（测试版，未发布）
+## 0.1.6-beta（测试版）
 
-> 状态：测试版；`package.json` 暂保持 `0.1.6`，未打 tag / 未发布 npm。
-> 改动明细、迁移与回滚见 [docs/DEVLOG.md](docs/DEVLOG.md) 与 [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md)。
+> 状态：`package.json` = `0.1.6-beta`；GitHub Release `v0.1.6-beta` 已创建；
+> npm 发布待有效 `NPM_TOKEN`。改动明细、迁移与回滚见 [docs/DEVLOG.md](docs/DEVLOG.md)
+> 与 [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md)。
+
+### 工程改造（2026-10-23）
+- **runner 拆分**：`agent/runner.ts` 纯 async generator；app 只消费事件。
+- **工具契约**：registry + 15 个单文件工具；`stateScope`/`revalidate` 启动断言；trust v1。
+- **恢复**：checkpoint、事实流、`projection.json`、resume 恢复 cwd/provider/model、未配对 tool_call 补全。
+- **可靠性**：SSE idle、前缀去重重试、`QuotaError`、本地压缩（token/heap）、`/context`。
+- **补丁**：parse→plan→apply、三级模糊匹配、CRLF/mode 保持、符号链接拒绝、per-file diff。
+- **后台 shell**：2s 后返回 session、POSIX 常驻池、增量轮询、`/jobs` `/kill`。
+- **双轨协议**：原生 tool_calls + 400 降级伪协议 + `capabilities.toolCalling`。
+- **手机交互**：`/cancel` `/steer` `/attach` `/compact` `/expand` `/edit`，工具输出折叠，doctor 扩展。
+- **测试**：PC smoke 115；Termux 120/120；真实 DeepSeek Flash 文本与工具轮次通过。
+
+### 已知限制（0.1.6-beta）
+- Ink 5.x IME 组合错位（`abcdef` → `bcdefa`）；`/edit` 可绕行，彻底修需 Ink ≥6.7。
+- string-width 仍有 4.2.3 / 5.1.2 / 7.2.0 三份。
+- approval pending UI/resolver 未实现（fail closed）。
+- 原生 tools 仅覆盖 OpenAI 兼容 provider。
 
 ### 新增
 - **思考强度 `/effort`**：`auto / low / medium / high / max`。OpenAI 兼容系发 `reasoning_effort`，OpenRouter 发 `reasoning.effort`，Anthropic 发 `thinking.budget_tokens`；不支持的服务商会明确提示忽略。状态栏显示当前档位。

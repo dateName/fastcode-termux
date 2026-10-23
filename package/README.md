@@ -26,6 +26,9 @@ Short alias included:
 fc
 ```
 
+This tree is **0.1.6-beta**. When the beta is published to npm, install it with
+`npm install -g @datename/fastcode-termux@0.1.6-beta`; until then use the repo/portable build.
+
 ---
 
 ## 🌈 What Is FastCode?
@@ -260,6 +263,14 @@ Installed plugins live under:
 | `/clear` | Clear conversation |
 | `/reset` | Reset config |
 | `/about` | Show version and platform |
+| `/context` | Token estimate, compaction threshold, heap |
+| `/compact` | Force local context compaction |
+| `/cancel` | Abort the active run (mobile alternative to Esc) |
+| `/steer <text>` | Guide the next request of an active run |
+| `/jobs` / `/attach <id>` / `/kill <id>` | Background shell sessions |
+| `/expand` | Toggle full/collapsed tool output |
+| `/edit` | Edit the prompt in `$EDITOR` (works around Ink IME bugs) |
+| `/bg` | Explain background shell behaviour |
 | `/exit` | Quit |
 
 Keyboard controls:
@@ -382,7 +393,7 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits (0.1.6)
+## Safety, sessions and limits (0.1.6-beta)
 
 | Feature | Behaviour | Override |
 | --- | --- | --- |
@@ -390,6 +401,12 @@ npm publish --access public
 | Dangerous-command guard | rm -rf, del /f, rmdir /s, format / mkfs / diskpart, dd if=, writes to /dev/sd, shutdown / reboot / poweroff and fork bombs are refused before execution | FASTCODE_ALLOW_DANGEROUS=1, FASTCODE_SHELL_ALLOWLIST, FASTCODE_SHELL_DENY_EXTRA |
 | Unified tool-output cap | Output is truncated while it is produced, not sliced afterwards (default 30000 characters) | FASTCODE_TOOL_OUTPUT_LIMIT |
 | Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash (cache cap 256MB by default) | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
+| Checkpoints/projection | `*.projection.json` (<20KB) with tool/model/cwd fingerprint; unpaired tool calls are completed on resume | FASTCODE_FSYNC, FASTCODE_SESSION_LOG |
+| Patch transaction | parse → plan → apply; CRLF/mode kept; symlinks refused; move never overwrites | `/expand` for the full diff |
+| Process tree | abort or `/kill` kills children/grandchildren | POSIX process group, Windows `taskkill /T` |
+| Compaction | token threshold or heap pressure; summary written to `summary-*.md` | FASTCODE_COMPACTION=0, FASTCODE_HEAP_LIMIT_MB |
+| Background shell | Commands over ~2s return a session id; poll incrementally | `/jobs`, `/attach`, `/kill`, FASTCODE_MAX_SPAWN_PER_TURN |
+| Approval hook | Sensitive/large patches need approval; without a resolver they are denied (fail closed) | pending UI not implemented yet |
 
 ## 🙏 Credits
 

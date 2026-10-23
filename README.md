@@ -40,6 +40,11 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 🎨 Themes | `/theme` |
 | 💰 Usage | token and cost readout in the status bar |
 | 🤖 Model support | **DeepSeek / OpenAI / Anthropic**, plus Gemini, Qwen, GLM, Kimi, Grok, OpenRouter, Ollama |
+| 💾 Resume & facts | append-only facts + `*.projection.json`; resume restores cwd/provider/model and unpaired tool calls |
+| 🧠 Context control | `/context`, `/compact`, token/HEAP-triggered local compaction with `summary-*.md` |
+| 🖥️ Background shell | long commands return a session id; `/jobs` `/attach` `/kill`, resident `sh -s` pool |
+| 🧰 Dual tool protocol | pseudo `<fastcode_tool>` or native `tool_calls`; `FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
+| 📱 Mobile commands | `/cancel` `/steer` `/expand` `/edit` (external editor for IME issues) |
 
 **Key bindings**
 
@@ -59,6 +64,16 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 🚫 Dangerous-command guard | `rm -rf`, `dd`, `mkfs`, fork bombs are refused **before** execution | `FASTCODE_ALLOW_DANGEROUS=1` |
 | ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
+| 🧾 Patch transaction | parse → plan → apply; CRLF/mode preserved; symlinks refused; move never overwrites | `/expand` for full diff |
+| 🛑 Process tree | abort/`/kill` kills children and grandchildren | POSIX process group; Windows `taskkill /T` |
+| 🔐 Approval hook | sensitive/large patches require approval; no resolver = **deny** (fail closed) | pending UI is not implemented yet |
+
+### Known limitations (0.1.6-beta)
+
+- Ink 5.x IME composition can reorder text (`abcdef` → `bcdefa`); use `/edit` or wait for an Ink ≥6.7 upgrade.
+- Three `string-width` versions may disagree on ambiguous-width characters.
+- Native tools cover OpenAI-compatible providers only; others use the pseudo protocol.
+- Approval pending has no TUI resolver yet, so those operations are denied.
 
 ---
 
