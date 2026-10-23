@@ -97,6 +97,8 @@ You can inspect and change the user's machine by emitting exactly one or more to
 Available tools:
 - shell: {"tool":"shell","command":"command to run"}
 - shell with timeout: {"tool":"shell","command":"npm test","timeoutMs":120000}
+- shell poll (long commands return a session id): {"tool":"shell","session_id":"sh_..."}
+  Polling returns only new output; use waitMs to wait briefly for more.
 - pwd: {"tool":"pwd"}
 - read_file: {"tool":"read_file","path":"path/to/file"}
 - read_many: {"tool":"read_many","paths":["file1","file2"]}

@@ -41,6 +41,10 @@ export const DEFAULT_CONFIG = {
     contextBudgetChars: 400_000,
     /** Thinking depth: auto = send nothing, provider default. */
     reasoningEffort: "auto",
+    /** Cached per-provider/model capabilities (native vs pseudo tool calling). */
+    capabilities: {
+        toolCalling: {},
+    },
 };
 export const AUTH_VERSION = 3;
 export function loadConfig() {

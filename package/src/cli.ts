@@ -12,7 +12,9 @@ import { loadConfig, saveConfig, resolveProviderKey } from "./config/store.js";
 import { getPaths } from "./config/paths.js";
 import { PROVIDERS, getProvider } from "./providers/index.js";
 import { collectDiagnostics, formatDiagnostics } from "./lib/diagnostics.js";
-import { latestSessionFile, listSessions, readSession, resolveSessionFile } from "./session/log.js";
+import { existsSync } from "node:fs";
+import { latestSessionFile, listSessions, projectionPath, readSession, resolveSessionFile } from "./session/log.js";
+import { readProjection, sessionMetaFromFile } from "./session/projection.js";
 import { listTrusted, trustProject, untrustProject } from "./config/trust.js";
 const NL = String.fromCharCode(10);
 const HELP = [
@@ -156,12 +158,25 @@ export async function parseCli(): Promise<any> {
             return { done: true };
         }
         if (rest[0] === "show") {
-            const entries = readSession(rest[1] ?? all[0].id);
+            const idOrFile = rest[1] ?? all[0].id;
+            const entries = readSession(idOrFile);
             for (const entry of entries) {
                 if (entry.type === "message")
                     console.log("[" + entry.role + "] " + entry.content);
+                else if (entry.type === "user" || entry.type === "assistant_raw")
+                    console.log("[" + entry.type + "] " + String(entry.content ?? "").slice(0, 300));
                 else
                     console.log("[" + entry.type + "]");
+            }
+            const file = resolveSessionFile(idOrFile);
+            const projection = readProjection(file);
+            console.log("");
+            if (projection) {
+                console.log("[projection] " + projectionPath(file));
+                console.log("  messages: " + projection.messages.length + " · activeFiles: " + projection.activeFiles.length + " · lastFactSeq: " + projection.lastFactSeq);
+            }
+            else {
+                console.log("[projection] (none)");
             }
             return { done: true };
         }
@@ -177,10 +192,22 @@ export async function parseCli(): Promise<any> {
     if (first === "resume") {
         const target = rest[0];
         const file = !target || target === "latest" ? latestSessionFile() : resolveSessionFile(target);
-        if (!file) {
+        if (!file || !existsSync(file)) {
             console.error("No saved session to resume. Start one with: fastcode");
             process.exit(1);
         }
+        const meta = sessionMetaFromFile(file);
+        if (meta.cwd) {
+            if (existsSync(meta.cwd)) {
+                process.chdir(meta.cwd);
+                console.log("Working directory: " + meta.cwd);
+            }
+            else {
+                console.log("Session directory no longer exists: " + meta.cwd + " (staying in " + process.cwd() + ")");
+            }
+        }
+        if (meta.providerId)
+            console.log("Session model: " + meta.providerId + "::" + meta.model);
         console.log("Resuming " + file);
         return { done: false, resume: file };
     }

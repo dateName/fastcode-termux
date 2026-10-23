@@ -1,12 +1,34 @@
 import { fetchJson, streamSSE } from "../lib/http.js";
+import { finalizeToolCalls, mergeToolCallDelta, type ToolCallAccumulator } from "../lib/native-tools.js";
 /** Build a chat-completions body in the classic or the newer (compat) dialect. */
 function buildBody(req, compat, opts, includeReasoning = true) {
     const messages = [];
     if (req.system)
         messages.push({ role: "system", content: req.system });
-    for (const m of req.messages)
+    for (const m of req.messages) {
+        if (m.role === "tool") {
+            messages.push({ role: "tool", tool_call_id: m.toolCallId, content: m.content });
+            continue;
+        }
+        if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+            messages.push({
+                role: "assistant",
+                content: m.content || null,
+                tool_calls: m.toolCalls.map((call) => ({
+                    id: call.id,
+                    type: "function",
+                    function: { name: call.name, arguments: call.arguments },
+                })),
+            });
+            continue;
+        }
         messages.push({ role: m.role, content: m.content });
+    }
     const body: any = { model: req.model, messages, stream: true };
+    if (req.tools && req.tools.length > 0) {
+        body.tools = req.tools;
+        body.tool_choice = "auto";
+    }
     if (req.maxOutputTokens !== undefined) {
         if (compat)
             body.max_completion_tokens = req.maxOutputTokens;
@@ -34,6 +56,8 @@ export async function* streamChatCompletion(req, opts) {
         };
         if (opts.apiKey)
             headers["authorization"] = (opts.authHeader ?? "Bearer") + " " + opts.apiKey;
+        if (req.clientRequestId)
+            headers["idempotency-key"] = req.clientRequestId;
         return await fetch(trim(opts.baseUrl) + "/chat/completions", {
             method: "POST",
             headers,
@@ -61,6 +85,7 @@ export async function* streamChatCompletion(req, opts) {
         }
     }
     let usage;
+    const toolCalls: ToolCallAccumulator = new Map();
     for await (const ev of streamSSE(res)) {
         if (ev.data === "[DONE]")
             break;
@@ -75,6 +100,14 @@ export async function* streamChatCompletion(req, opts) {
         const choice = obj.choices?.[0];
         const raw = choice?.delta?.content ?? choice?.text;
         const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+        if (Array.isArray(choice?.delta?.tool_calls)) {
+            for (const delta of choice.delta.tool_calls)
+                mergeToolCallDelta(toolCalls, delta);
+        }
+        if (Array.isArray(choice?.message?.tool_calls)) {
+            for (const delta of choice.message.tool_calls)
+                mergeToolCallDelta(toolCalls, delta);
+        }
         if (obj.usage) {
             usage = {
                 inputTokens: obj.usage.prompt_tokens,
@@ -92,7 +125,8 @@ export async function* streamChatCompletion(req, opts) {
         else if (typeof reasoning === "string" && reasoning)
             yield { delta: "", done: false, reasoning };
     }
-    yield { delta: "", done: true, usage };
+    const calls = finalizeToolCalls(toolCalls);
+    yield calls.length > 0 ? { delta: "", done: true, usage, toolCalls: calls } : { delta: "", done: true, usage };
 }
 export async function listModelsHttp(opts) {
     const staticModels = opts.staticModels ?? [];

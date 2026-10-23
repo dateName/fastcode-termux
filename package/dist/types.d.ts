@@ -5,11 +5,26 @@
  * what the chat loop needs (streaming completions, model list, auth).
  * Providers can layer richer behavior on top in their own modules.
  */
-export type Role = "system" | "user" | "assistant";
+export type Role = "system" | "user" | "assistant" | "tool";
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "max";
+export interface NativeToolCall {
+    id: string;
+    name: string;
+    arguments: string;
+}
+export interface ToolSchema {
+    type: "function";
+    function: {
+        name: string;
+        description: string;
+        parameters: Record<string, any>;
+    };
+}
 export interface ChatMessage {
     role: Role;
     content: string;
+    toolCalls?: NativeToolCall[];
+    toolCallId?: string;
 }
 export interface ChatRequest {
     model: string;
@@ -28,12 +43,18 @@ export interface ChatRequest {
     reasoningEffort?: ReasoningEffort;
     /** AbortSignal for cancellation (Esc / Ctrl+C). */
     signal?: AbortSignal;
+    /** Stable idempotency key reused across retries of the same logical request. */
+    clientRequestId?: string;
+    /** Native function-calling schemas (auto mode only). */
+    tools?: ToolSchema[];
 }
 export interface ChatChunk {
     /** Token text appended to the response. */
     delta: string;
     /** True on the final chunk. */
     done: boolean;
+    /** Complete native tool calls (OpenAI-style) on the final chunk. */
+    toolCalls?: NativeToolCall[];
     /** Provider-specific usage info on the final chunk. */
     usage?: {
         inputTokens?: number;
@@ -130,6 +151,8 @@ export interface AppStateSnapshot {
     enabledPlugins: string[];
     skillsRegistry: string;
     reasoningEffort: ReasoningEffort;
+    expanded: boolean;
+    busy: boolean;
 }
 export interface AppActions {
     setProvider(id: string): void;
@@ -144,6 +167,10 @@ export interface AppActions {
     enablePlugin(name: string): void;
     disablePlugin(name: string): void;
     clearHistory(): void;
+    replaceHistory(messages: ChatMessage[]): void;
+    cancelRun(): void;
+    steer(text: string): void;
+    setExpanded(value: boolean): void;
     pushSystemMessage(text: string): void;
     /** Begin the guided API-key flow (choose provider → model → key). */
     startLogin(options: {

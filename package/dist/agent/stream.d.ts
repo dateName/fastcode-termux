@@ -1,11 +1,11 @@
 /**
- * Streaming request runner with an idle timeout and one safe retry.
+ * Streaming request runner with an idle timeout and prefix-safe retry.
  *
  * `provider.stream()` only exposes the caller's AbortSignal, so a connection
  * that stalls after the headers arrive can wait forever. This wrapper adds:
  *   • an idle timer reset on every chunk (default 60s),
- *   • a retry when the attempt failed before producing any text
- *     (retrying after partial output would duplicate tokens),
+ *   • retries routed through `retryStream`, which skips the already delivered
+ *     prefix instead of duplicating tokens,
  *   • `incomplete` detection so the chat loop can tell "server closed early"
  *     from a normal finish.
  */
@@ -15,11 +15,14 @@ export interface RunStreamOptions {
     idleTimeoutMs?: number;
     maxRetries?: number;
     onDelta?: (delta: string, text: string) => void;
+    onReset?: () => void;
+    clientRequestId?: string;
+    retryBackoffMs?: number[];
 }
 export interface RunStreamResult {
     text: string;
     usage?: ChatChunk["usage"];
-    /** True when the stream ended without a done chunk. */
+    toolCalls?: ChatChunk["toolCalls"];
     incomplete: boolean;
     retried: number;
 }

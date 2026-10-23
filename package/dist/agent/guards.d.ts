@@ -33,3 +33,11 @@ export declare function evaluateShellCommand(command: any): {
     bypassed?: undefined;
     pattern?: undefined;
 };
+export declare const READ_ONLY_TOOLS: Set<string>;
+export declare function splitCommandSegments(command: any): any[];
+export declare function isReadOnlyCommand(command: any): boolean;
+export declare function isReadOnlyToolCall(call: any): boolean;
+export declare function loopExemptTools(): Set<string>;
+export declare function isLoopExempt(tool: any): boolean;
+export declare function stableStringify(value: any): any;
+export declare function toolCallFingerprint(call: any, cwd?: string): string;

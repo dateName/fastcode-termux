@@ -22,6 +22,10 @@ export declare const DEFAULT_CONFIG: {
     contextBudgetChars: number;
     /** Thinking depth: auto = send nothing, provider default. */
     reasoningEffort: string;
+    /** Cached per-provider/model capabilities (native vs pseudo tool calling). */
+    capabilities: {
+        toolCalling: {};
+    };
 };
 export interface StoredCredential {
     provider: string;

@@ -18,6 +18,15 @@ import { systemCommand } from "./system.js";
 import { aboutCommand } from "./about.js";
 import { configCommand } from "./config.js";
 import { whoamiCommand } from "./whoami.js";
+import { contextCommand } from "./context.js";
+import { jobsCommand } from "./jobs.js";
+import { killCommand } from "./kill.js";
+import { cancelCommand } from "./cancel.js";
+import { steerCommand } from "./steer.js";
+import { compactCommand } from "./compact.js";
+import { expandCommand } from "./expand.js";
+import { attachCommand } from "./attach.js";
+import { bgCommand } from "./bg.js";
 export const COMMANDS = [
     helpCommand,
     agentCommand,
@@ -39,6 +48,15 @@ export const COMMANDS = [
     aboutCommand,
     configCommand,
     whoamiCommand,
+    contextCommand,
+    jobsCommand,
+    killCommand,
+    cancelCommand,
+    steerCommand,
+    compactCommand,
+    expandCommand,
+    attachCommand,
+    bgCommand,
 ];
 export function findCommand(name) {
     const lower = name.toLowerCase();
