@@ -56,6 +56,12 @@ function maskLoginEcho(args) {
 function positiveInt(value, fallback) {
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
+function streamingTail(text, maxLines = 6) {
+    const lines = String(text ?? "").split(/\r?\n/);
+    if (lines.length <= maxLines)
+        return String(text ?? "");
+    return "…\n" + lines.slice(-maxLines).join("\n");
+}
 function collapseToolOutput(output) {
     const text = String(output ?? "");
     const lines = text.split(/\r?\n/);
@@ -170,6 +176,7 @@ export const App = ({ initialPrompt, resume }) => {
     const idRef = useRef(startup.transcript.length);
     const abortRef = useRef(null);
     const sawDeltaRef = useRef(false);
+    const lastStreamFlushRef = useRef(0);
     const ctrlCRef = useRef(0);
     const initialPromptSubmittedRef = useRef(false);
     const theme = getTheme(config.theme);
@@ -431,6 +438,7 @@ export const App = ({ initialPrompt, resume }) => {
         setStreamingText("");
         setStreamPhase("thinking");
         steerQueueRef.current = [];
+        lastStreamFlushRef.current = 0;
         const ctrl = new AbortController();
         abortRef.current = ctrl;
         setBusy(true);
@@ -483,8 +491,13 @@ export const App = ({ initialPrompt, resume }) => {
                         sawDeltaRef.current = true;
                         setStreamPhase("streaming");
                     }
-                    if (liveStreamingUi)
-                        setStreamingText(stripToolCalls(full));
+                    if (!liveStreamingUi)
+                        return;
+                    const now = Date.now();
+                    if (now - lastStreamFlushRef.current < 60)
+                        return;
+                    lastStreamFlushRef.current = now;
+                    setStreamingText(stripToolCalls(full));
                 },
             })) {
                 switch (ev.type) {
@@ -689,5 +702,5 @@ export const App = ({ initialPrompt, resume }) => {
         };
         return _jsx(TrustGate, { theme: theme, cwd: process.cwd(), onDecision: decide });
     }
-    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingText, markdown: true, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamPhase === "streaming" ? "Streaming" : streamPhase === "tool" ? "Waiting for tool" : "Thinking"), stable: stableUi }) })) : null, picker ? _jsx(Picker, { theme: theme, title: picker.title, items: picker.items, index: pickerIndex, current: picker.current }) : _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: pendingLogin ? handleWizardSubmit : handleSubmit, disabled: false, stable: stableUi, placeholder: promptPlaceholder, mask: promptMask }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length, reasoningEffort: config.reasoningEffort }), _jsxs(Text, { color: theme.muted, children: [COMMANDS.length, " commands \u00B7 ", config.enabledSkills.length, " skill(s) active"] })] })] }));
+    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingTail(streamingText, 6), markdown: false, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamPhase === "streaming" ? "Streaming" : streamPhase === "tool" ? "Waiting for tool" : "Thinking"), stable: stableUi }) })) : null, picker ? _jsx(Picker, { theme: theme, title: picker.title, items: picker.items, index: pickerIndex, current: picker.current }) : _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: pendingLogin ? handleWizardSubmit : handleSubmit, disabled: false, placeholder: promptPlaceholder, mask: promptMask }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length, reasoningEffort: config.reasoningEffort }), _jsxs(Text, { color: theme.muted, children: [COMMANDS.length, " commands \u00B7 ", config.enabledSkills.length, " skill(s) active"] })] })] }));
 };
