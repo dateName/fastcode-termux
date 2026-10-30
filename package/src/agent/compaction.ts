@@ -176,7 +176,7 @@ export function buildSummary(messages: ChatMessage[], config: CompactionConfig, 
             continue;
         }
         if (message.role === "assistant") {
-            const calls = parseToolCalls(message.content);
+            const calls = parseToolCalls(message.content).calls;
             for (const call of calls)
                 actions.push(describeCall(call));
             const visible = stripToolCalls(message.content);

@@ -3,6 +3,8 @@
 审计对象：src/（114 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
 
+> 历史快照：本审计对象为 0.1.6-beta。0.1.7-beta 的 Guardrails/AST/审批变更见 CHANGELOG 0.1.7 与 ARCHITECTURE §5–6。
+
 ## 级别定义
 
 - 高：可导致密钥泄露、任意文件读写、越权执行
@@ -28,7 +30,7 @@
 - 设计权衡（0.1.6）：沙箱支持“允许根目录”。**Termux 上默认放行 ~/storage/shared**
   （手机项目/下载都在共享存储），可用 FASTCODE_ALLOW_SHARED_STORAGE=0 关闭，
   或用 FASTCODE_ALLOW_PATHS 增加根目录。判定以真实路径为准：
-  指向 C:\Windows 等非允许位置的软链接（包括嵌套在共享存储内部的）仍被拒绝，
+  指向 系统目录 等非允许位置的软链接（包括嵌套在共享存储内部的）仍被拒绝，
   已加入回归用例。
 
 ### M-1 悬空软链接拖垮 grep / list_files（中危，已修复）

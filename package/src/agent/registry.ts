@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { isTrusted } from "../config/trust.js";
-import type { ApprovalDecision } from "./approval.js";
+import {
+    DEFAULT_ALLOW_OPTIONS,
+    approvalRequestId,
+    type ApprovalDecision,
+    type ApprovalOption,
+    type ApprovalRequest,
+} from "./approval.js";
+import { approvalKey, isPreApproved, rememberApproval } from "./approval-store.js";
 import { evaluateShellCommand } from "./guards.js";
 import { TOOLS } from "./tools/index.js";
 import type { RevalidateKey, StateScope, Tool, ToolCall, ToolCtx, ToolResult } from "./tools/types.js";
@@ -42,10 +49,12 @@ export function toolCatalogHash(tools: Tool[] = TOOLS): string {
 
 export class ToolRegistry {
     private readonly tools = new Map<string, Tool>();
+    private readonly catalogHash: string;
     constructor(tools: Tool[] = TOOLS) {
         assertToolContract(tools);
         for (const tool of tools)
             this.tools.set(tool.name, tool);
+        this.catalogHash = toolCatalogHash(tools);
     }
     get(name: string): Tool | undefined {
         return this.tools.get(name);
@@ -59,6 +68,14 @@ export class ToolRegistry {
             return { kind: "deny", reason: `unknown tool: ${String(call.tool)}` };
         if (tool.name === "shell") {
             const verdict = evaluateShellCommand(call.command);
+            if (verdict.action === "hard_block")
+                return { kind: "deny", reason: verdict.output };
+            if (verdict.action === "soft_gate") {
+                const key = approvalKey(tool.name, call, ctx.cwd);
+                if (isPreApproved(key, this.catalogHash))
+                    return { kind: "allow", scope: "once" };
+                return { kind: "pending", request: shellApprovalRequest(call, verdict) };
+            }
             if (!verdict.allow)
                 return { kind: "deny", reason: verdict.output };
         }
@@ -74,16 +91,33 @@ export class ToolRegistry {
         const tool = this.get(call.tool);
         if (!tool)
             return { ok: false, output: `unknown tool: ${String(call.tool)}` };
-        const prepared = tool.prepare(call, ctx);
+        const toolCtx: ToolCtx = { ...ctx, catalogHash: this.catalogHash };
+        const prepared = tool.prepare(call, toolCtx);
         if (prepared.ok === false)
             return { ok: false, output: prepared.output };
-        const decision = this.approve(call, ctx);
+        const decision = this.approve(call, toolCtx);
         if (decision.kind === "deny")
             return { ok: false, output: decision.reason ?? "denied by approval policy" };
-        if (decision.kind === "pending")
-            return { ok: false, output: "approval required, but no approval resolver is registered (fail closed)" };
+        if (decision.kind === "pending") {
+            if (!ctx.requestApproval)
+                return { ok: false, output: "approval required, but no approval resolver is registered (fail closed)" };
+            let resolved: ApprovalDecision | undefined;
+            try {
+                resolved = await ctx.requestApproval(decision.request);
+            }
+            catch (err: any) {
+                return { ok: false, output: `approval failed (fail closed): ${err?.message ?? String(err)}` };
+            }
+            if (!resolved || resolved.kind === "pending")
+                return { ok: false, output: "approval unresolved; nothing was executed (fail closed)" };
+            if (resolved.kind !== "allow") {
+                const reason = resolved.kind === "deny" ? resolved.reason : resolved.kind === "feedback" ? resolved.text : `decision ${resolved.kind} requires a later batch`;
+                return { ok: false, output: `approval denied: ${reason ?? "no reason"}` };
+            }
+            rememberApproval(approvalKey(tool.name, call, ctx.cwd), this.catalogHash, resolved.scope);
+        }
         try {
-            return await tool.execute(call, ctx);
+            return await tool.execute(call, toolCtx);
         }
         catch (err: any) {
             return { ok: false, output: err?.message ?? String(err) };
@@ -91,8 +125,32 @@ export class ToolRegistry {
     }
 }
 
+function shellApprovalRequest(call: ToolCall, verdict: { code: string; target?: string; reason?: string; output?: string }): ApprovalRequest {
+    const options = DEFAULT_ALLOW_OPTIONS.map((option) => ({ ...option })) as ApprovalOption[];
+    const denyIndex = options.findIndex((option) => option.kind === "deny");
+    const target = verdict.target ?? "";
+    const prompt = `Shell command needs approval: ${verdict.code}${target ? ` (${target})` : ""}`;
+    return {
+        id: approvalRequestId(),
+        tool: "shell",
+        args: call,
+        reason: "destructive",
+        options,
+        tier: 2,
+        prompt,
+        source: "system",
+        defaultIndex: denyIndex >= 0 ? denyIndex : 0,
+        timeoutMs: 60_000,
+    };
+}
+
 export const registry = new ToolRegistry();
 
-export async function runAgentTool(call: ToolCall, cwd = process.cwd(), options: { signal?: AbortSignal; turn?: number } = {}): Promise<ToolResult> {
-    return registry.execute(call, { cwd, signal: options.signal, turn: options.turn });
+export async function runAgentTool(call: ToolCall, cwd = process.cwd(), options: { signal?: AbortSignal; turn?: number; requestApproval?: import("./approval.js").ApprovalResolver } = {}): Promise<ToolResult> {
+    return registry.execute(call, {
+        cwd,
+        signal: options.signal,
+        turn: options.turn,
+        requestApproval: options.requestApproval,
+    });
 }

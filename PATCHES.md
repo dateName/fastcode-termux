@@ -1,4 +1,4 @@
-# FastCode 0.1.3 → 0.1.6 修复清单
+# FastCode 0.1.3 → 0.1.7 修复清单
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
@@ -116,6 +116,16 @@
 - 0.1.6-beta 起旧 provider-only / v2（`provider::model`）Key 会自动迁移为 provider 级 Key，
   原文件备份为 `auth.json.v2.bak`；同一 provider 多把不同 Key 只保留 `addedAt` 最新的一把。
   （0.1.6 当时按 unbound 处理，不自动迁移。）
-- 技能市场 skillshub.wtf 需要付费，属上游问题，未改。
+- 不再内置技能市场 URL：默认 `skillsRegistry` 为空；用 `/skills registry <url>` 或
+  `FASTCODE_SKILLS_REGISTRY` 显式配置后才支持按名称/owner-repo 安装，直接 URL 安装不受影响。
 - Termux 真机已验证（LG V409N / Android 12 / Termux 0.118.2）；剩余限制：Ink 5.x IME 光标定位、
   3 个 string-width 版本、approval pending UI 未实现。详见 `docs/DEVLOG.md`。
+
+## 0.1.7-beta 追加（2026-10-30，未发布）
+
+- Guardrails 三态/Hard Block 优先级、AST 第二意见、printenv 与 .env 分级。
+- 审批 resolver（tty/native/plain/json）、once/session/always、catalogHash、trust --forget。
+- `/provider`、`/model`、`/login` 无参数统一模型配置 TUI；取消不提交、key 掩码。
+- 会话 projection manifest、剪枝后恢复、tool_call/result 配对修复。
+- 配置 stat 指纹缓存、技能目录 sha256、构建产物防 tsc 覆盖。
+- 验证：PC smoke 207/207；Termux 真机 smoke 212/212（0.1.6-beta 同源构建）。

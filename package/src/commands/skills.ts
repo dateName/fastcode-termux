@@ -1,4 +1,4 @@
-import { installSkill, uninstallSkill, listInstalledSkills, searchRegistry, getSkill, } from "../skills/manager.js";
+import { installSkill, uninstallSkill, listInstalledSkills, searchRegistry, getSkill, rebaselineSkills, resolveRegistry, } from "../skills/manager.js";
 export const skillsCommand = {
     name: "skills",
     description: "Manage Agent Skills (download from skills.sh and toggle).",
@@ -17,15 +17,20 @@ export const skillsCommand = {
                 const enabled = state.enabledSkills.includes(s.name) ? "● " : "  ";
                 lines.push(`${enabled}${s.name}  — ${truncate(s.description, 80)}`);
                 lines.push(`    source: ${s.source}`);
+                if (s.integrity !== "ok")
+                    lines.push(`    integrity: ${s.integrity === "drift" ? "DRIFT (disabled; run /skills verify " + s.name + " --confirm)" : "unverified (run /skills verify " + s.name + " --confirm)"}`);
             }
             lines.push("");
             lines.push("Toggle with `/skills enable <name>` or `/skills disable <name>`.");
             return { message: lines.join("\n") };
         }
         if (sub === "search") {
+            const registry = resolveRegistry(process.env["FASTCODE_SKILLS_REGISTRY"], state.skillsRegistry);
+            if (!registry)
+                return { message: "No skills registry configured. Set one with `/skills registry <url>` or FASTCODE_SKILLS_REGISTRY." };
             if (rest.length === 0)
                 return { message: "Usage: /skills search <query>" };
-            const hits = await searchRegistry(rest.join(" "), state.skillsRegistry);
+            const hits = await searchRegistry(rest.join(" "), registry);
             if (hits.length === 0) {
                 return { message: `No skills found for "${rest.join(" ")}".` };
             }
@@ -66,6 +71,10 @@ export const skillsCommand = {
             const skill = getSkill(rest[0]);
             if (!skill)
                 return { message: `Skill "${rest[0]}" is not installed.` };
+            if (skill.integrity !== "ok") {
+                const reason = skill.integrity === "drift" ? "content drift detected" : "no integrity baseline";
+                return { message: `Skill "${skill.name}" is disabled (${reason}). Run /skills verify ${skill.name} --confirm to re-baseline.` };
+            }
             actions.enableSkill(skill.name);
             return { message: `Enabled skill "${skill.name}".` };
         }
@@ -84,9 +93,30 @@ export const skillsCommand = {
             const head = `# ${skill.name}\n_${skill.description}_\n\nSource: ${skill.source}\n\n---\n\n`;
             return { message: head + skill.body };
         }
+        if (sub === "verify") {
+            const confirm = rest.includes("--confirm") || rest.includes("--yes");
+            const all = rest.includes("--all");
+            const names = rest.filter((entry) => !entry.startsWith("-"));
+            if (!all && names.length === 0)
+                return { message: "Usage: /skills verify <name> --confirm   (or /skills verify --all --confirm)" };
+            if (!confirm) {
+                return { message: `Re-baselining ${all ? "all skills" : names.join(", ")} trusts the current files as the new baseline. ` +
+                        "Re-run the same command with --confirm to proceed." };
+            }
+            const results = rebaselineSkills(all ? undefined : names);
+            if (results.length === 0)
+                return { message: "No matching installed skills to verify." };
+            const lines = ["Skill integrity re-baselined:"];
+            for (const result of results)
+                lines.push(result.ok ? `  • ${result.name}: locked` : `  • ${result.name}: FAILED — ${result.warning ?? "unknown error"}`);
+            return { message: lines.join("\n") };
+        }
         if (sub === "registry") {
             if (rest.length === 0) {
-                return { message: `Skills registry: ${state.skillsRegistry}` };
+                const registry = resolveRegistry(process.env["FASTCODE_SKILLS_REGISTRY"], state.skillsRegistry);
+                return { message: registry
+                        ? `Skills registry: ${registry}`
+                        : "No skills registry configured. Set one with `/skills registry <url>` or FASTCODE_SKILLS_REGISTRY." };
             }
             // Mutate via AppActions so the in-memory React state stays in sync —
             // direct saveConfig() would be silently overwritten by the next state
@@ -95,7 +125,7 @@ export const skillsCommand = {
             return { message: `Skills registry set to ${rest[0]}.` };
         }
         return {
-            message: "Unknown subcommand. Try: list, search, install, uninstall, enable, disable, info, registry.",
+            message: "Unknown subcommand. Try: list, search, install, uninstall, enable, disable, info, verify, registry.",
         };
     },
 };

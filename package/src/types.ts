@@ -178,7 +178,7 @@ export interface AppActions {
     setInput(text: string): void;
     pushSystemMessage(text: string): void;
     /** Begin the guided API-key flow (choose provider → model → key). */
-    startLogin(options: { provider?: string; model?: string }): void;
+    startLogin(options: { provider?: string; model?: string; flow?: "provider" | "model" | "login" }): void;
 }
 export interface SkillManifest {
     name: string;

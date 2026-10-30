@@ -7,7 +7,7 @@
  *
  * FASTCODE_TRUST_ALL=1 marks every directory trusted (scripts, CI).
  */
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDir, getPaths } from "./paths.js";
 
@@ -136,7 +136,20 @@ export function loadTrust(): TrustStore {
 function saveTrust(state: TrustStore): void {
     const paths = getPaths();
     ensureDir(paths.root);
-    writeFileSync(paths.trust, JSON.stringify(state, null, 2), "utf8");
+    const tmp = paths.trust + "." + process.pid + ".tmp";
+    try {
+        writeFileSync(tmp, JSON.stringify(state, null, 2), "utf8");
+        renameSync(tmp, paths.trust);
+    }
+    catch (err) {
+        try {
+            rmSync(tmp, { force: true });
+        }
+        catch {
+            // best effort
+        }
+        throw err;
+    }
     try {
         const info = statSync(paths.trust);
         cache = { file: paths.trust, key: `${info.mtimeMs}:${info.size}`, state };
@@ -180,4 +193,34 @@ export function untrustProject(dir: string): boolean {
 
 export function listTrusted(): Array<{ path: string; addedAt: string }> {
     return Object.entries(loadTrust().paths).map(([path, entry]) => ({ path, addedAt: entry.grantedAt }));
+}
+
+/** Check a tool/fingerprint approval bound to the current tool catalog. */
+export function isToolApproved(key: string, catalogHash: string): boolean {
+    const entry = loadTrust().tools[key];
+    return Boolean(entry && entry.catalogHash === catalogHash);
+}
+
+export function rememberToolApproval(key: string, catalogHash: string): void {
+    const state = loadTrust();
+    const at = new Date().toISOString();
+    state.tools[key] = { grantedAt: at, lastUsed: at, catalogHash };
+    saveTrust(state);
+}
+
+export function forgetToolApproval(key: string): boolean {
+    const state = loadTrust();
+    if (!state.tools[key])
+        return false;
+    delete state.tools[key];
+    saveTrust(state);
+    return true;
+}
+
+export function listToolApprovals(): Array<{ key: string; grantedAt: string; catalogHash: string }> {
+    return Object.entries(loadTrust().tools).map(([key, entry]) => ({
+        key,
+        grantedAt: entry.grantedAt,
+        catalogHash: entry.catalogHash,
+    }));
 }

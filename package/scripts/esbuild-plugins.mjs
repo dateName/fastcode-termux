@@ -38,6 +38,21 @@ export const stubOptionalDeps = {
 // esbuild can't follow that, so the require fails at runtime, GetFont() returns
 // false and the big "FastCode" banner silently disappears. Inline every font as
 // a static map so the banner renders from the bundle.
+// cli-highlight pulls the full highlight.js registry (~200 languages). Alias
+// the bare import to a generated subset so common languages stay highlighted
+// while cold languages fall back to plain text in renderMarkdown(). The subset
+// keeps a single source of truth in src/lib/highlight-subset.ts.
+export function trimHighlightLanguages(pkgRoot) {
+  return {
+    name: "trim-highlight-languages",
+    setup(build) {
+      build.onResolve({ filter: /^highlight\.js$/ }, () => ({
+        path: join(pkgRoot, "src", "lib", "highlight-subset.ts"),
+      }));
+    },
+  };
+}
+
 export function createInlineCfontsFonts(pkgRoot) {
   return {
     name: "inline-cfonts-fonts",

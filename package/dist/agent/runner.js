@@ -234,7 +234,7 @@ export async function* runAgent(options) {
                 yield { type: "tool_call", id, call, native: true };
                 const result = parseError
                     ? { ok: false, output: parseError }
-                    : await runAgentTool(call, cwd, { signal, turn: turn + 1 });
+                    : await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
                 trackSideEffects(activeFiles, result.sideEffects);
                 yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects };
                 history = [...history, { role: "tool", toolCallId: id, content: String(result.output ?? "") }];
@@ -246,9 +246,27 @@ export async function* runAgent(options) {
                 break;
             continue;
         }
-        const calls = options.allowTools === false ? [] : parseToolCalls(streamed.text);
+        const parsed = options.allowTools === false
+            ? { calls: [], consumedEnd: 0, errors: [] }
+            : parseToolCalls(streamed.text);
+        const calls = parsed.calls;
         yield { type: "assistant_raw", text: streamed.text };
         if (calls.length === 0) {
+            if (parsed.errors.length > 0) {
+                // Never let a broken tool-call block end the turn silently: the
+                // model would wait forever for a tool result. Inject a visible
+                // tool error and continue so it can re-emit valid markup.
+                const id = `tc_${++toolCallSeq}`;
+                const call = { tool: "protocol_error" };
+                const output = "Previous output contained invalid tool-call markup. " +
+                    "Re-emit a complete <fastcode_tool>{\"tool\":...}</fastcode_tool> block.\n" +
+                    parsed.errors.join("\n");
+                yield { type: "tool_call", id, call };
+                yield { type: "tool_result", id, call, ok: false, output };
+                history = [...history, { role: "user", content: formatToolResults([{ call, ok: false, output }]) }];
+                yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
+                continue;
+            }
             lastVisible = visibleText || streamed.text;
             naturalFinish = true;
             stopReason = "complete";
@@ -280,7 +298,7 @@ export async function* runAgent(options) {
             }
             const id = `tc_${++toolCallSeq}`;
             yield { type: "tool_call", id, call };
-            const result = await runAgentTool(call, cwd, { signal, turn: turn + 1 });
+            const result = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
             results.push({ call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects });
             trackSideEffects(activeFiles, result.sideEffects);
             yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects };

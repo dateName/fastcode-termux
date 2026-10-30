@@ -1,6 +1,6 @@
 {
   "name": "@datename/fastcode-termux",
-  "version": "0.1.6-beta",
+  "version": "0.1.7-beta",
   "description": "FastCode — a blazing-fast TUI coding assistant. Multi-LLM, skills.sh skills, slash commands. Works on Termux, Linux, Windows, and macOS.",
   "type": "module",
   "bin": {
@@ -21,7 +21,7 @@
     "node": ">=18.17"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build.mjs",
     "build:bundle": "node scripts/build.mjs",
     "dev": "tsx src/index.ts",
     "start": "node bin/fastcode.mjs",
@@ -65,6 +65,7 @@
     "url": "https://github.com/dateName/fastcode-termux/issues"
   },
   "dependencies": {
+    "bash-parser": "^0.5.0",
     "boxen": "^7.1.1",
     "chalk": "^5.3.0",
     "cli-highlight": "^2.1.11",

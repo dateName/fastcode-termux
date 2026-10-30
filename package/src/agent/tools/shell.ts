@@ -1,7 +1,7 @@
 import type { ShellExecResult } from "../shell-session.js";
 import { executeShellCommand, pollShellSession } from "../shell-session.js";
 import type { Tool } from "./types.js";
-import { invalid, numberOption } from "./validate.js";
+import { invalid, normalizeTimeoutMs, numberOption } from "./validate.js";
 
 export const shellTool: Tool = {
     name: "shell",
@@ -26,7 +26,7 @@ export const shellTool: Tool = {
         const result = await executeShellCommand(call.command, ctx.cwd, {
             signal: ctx.signal,
             turn: ctx.turn,
-            timeoutMs: numberOption(call.timeoutMs, 120000),
+            timeoutMs: normalizeTimeoutMs(call.timeoutMs),
         });
         return formatExec(result);
     },

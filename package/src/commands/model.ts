@@ -1,5 +1,7 @@
-import { getProviderOrThrow, probeProvider } from "../providers/index.js";
-import { resolveProviderKey } from "../config/store.js";
+import { getProviderOrThrow } from "../providers/index.js";
+export function isValidModelId(value) {
+    return /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/.test(value);
+}
 export const modelCommand = {
     name: "model",
     description: "Pick a model interactively, or switch with /model <id>",
@@ -10,41 +12,7 @@ export const modelCommand = {
             actions.setModel(id);
             return { message: `Model set to ${id}.` };
         }
-        const { key } = resolveProviderKey(provider.id, provider.authEnv);
-        const fetched = await provider.listModels(key).catch(() => []);
-        const models = dedupe(fetched);
-        if (models.length === 0) {
-            return { message: `No models available from ${provider.label}.` };
-        }
-        const online = await probeProvider(provider, key);
-        const list = models.slice(0, 50);
-        return {
-            message: `Models for ${provider.label}: ${list.length}${online ? "" : " (offline — showing the built-in list)"}.\n` +
-                "Use ↑/↓, a number, or Enter to select.",
-            picker: {
-                title: `Select model · ${provider.label}${online ? "" : " (offline)"}`,
-                current: state.model,
-                items: list.map((m) => ({
-                    value: m.id,
-                    label: m.id,
-                    hint: m.label ? `— ${m.label}` : undefined,
-                })),
-                onSelect: (id) => {
-                    actions.setModel(id);
-                    actions.pushSystemMessage(`Model set to ${id}.`);
-                },
-            },
-        };
+        actions.startLogin({ flow: "model", provider: provider.id, model: state.model });
+        return { message: `Configure ${provider.label}: choose a model, then enter its API key.` };
     },
 };
-function dedupe(models) {
-    const seen = new Set();
-    const out = [];
-    for (const model of models) {
-        if (!model?.id || seen.has(model.id))
-            continue;
-        seen.add(model.id);
-        out.push(model);
-    }
-    return out;
-}

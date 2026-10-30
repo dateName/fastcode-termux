@@ -1,199 +1,143 @@
-# FastCode 架构说明（Termux 优先）
+# FastCode 架构说明
 
-本文描述 FastCode 0.1.6-beta 的分层、数据流、扩展点与 Termux 适配位置。
-目标：只看这一篇，就知道该改哪个文件、会影响哪些模块。
+> 版本：0.1.7-beta（Windows 工作副本，2026-10-30）
+> 适用：`package/src` 当前源码树与 `dist/cli.js` 构建产物
+> 维护：改模块、命令、环境变量或安全语义时同步本文件
 
-## 1. 分层总览
+## 1. 分层
 
-    +--------------------------------------------------------------+
-    | 入口层   bin/fastcode.mjs -> dist/cli.js（esbuild 自包含）    |
-    |                           -> dist/index.js（tsc 回退）        |
-    +--------------------------------------------------------------+
-    | 命令层   cli.ts（TUI 之外）+ commands/*（TUI 斜杠命令）      |
-    +--------------------------------------------------------------+
-    | 界面层   app.ts + ui/*（Ink/React；只渲染事件，不跑 agent）   |
-    +--------------------------------------------------------------+
-    | 编排层   agent/runner.ts（纯 async generator，无 React）      |
-    +--------------------------------------------------------------+
-    | 领域层   agent/*（工具/协议/压缩/patches/shell）              |
-    |          providers/*、session/*、skills/*、plugins/*          |
-    +--------------------------------------------------------------+
-    | 基础层   config/*、lib/*、patch/*                             |
-    +--------------------------------------------------------------+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ 入口层  bin/fastcode.mjs -> dist/cli.js（esbuild 自包含）     │
+│                          -> dist/index.js（tsc 回退）        │
+├─────────────────────────────────────────────────────────────┤
+│ 命令层  cli-main.ts（TUI 之外）+ commands/*（斜杠命令）       │
+├─────────────────────────────────────────────────────────────┤
+│ 界面层  app.ts + ui/*（Ink/React；只渲染事件，不跑 agent）    │
+│         headless.ts（--ui json / 非 TTY plain）               │
+├─────────────────────────────────────────────────────────────┤
+│ 编排层  agent/runner.ts（async generator）                   │
+│         agent/registry.ts + tools/*（工具契约与执行）        │
+├─────────────────────────────────────────────────────────────┤
+│ 领域层  providers/*  session/*  skills/*  plugins/*          │
+│         agent/guards.ts  agent/shell-ast.ts  approval*.ts    │
+├─────────────────────────────────────────────────────────────┤
+│ 基础层  config/*  lib/*  patch/*  types.ts                   │
+└─────────────────────────────────────────────────────────────┘
+```
 
-依赖方向：上层依赖下层。`agent/runner.ts` 不依赖 Ink/React；
-`ui` 只消费 runner 事件，不直接执行工具。唯一共享较广的是 `providers/` 与 `config/`。
+原则：
 
-## 2. 模块清单（src/ 114 个 TS 模块；dist 为编译产物 + 自包含 dist/cli.js）
+- `agent/runner.ts` 不依赖 React；UI 只消费事件。
+- 工具执行统一经过 `ToolRegistry`：prepare → approve → execute。
+- Hard Block 在 `guards.ts`，AST 只做第二意见；审批在 `approval*`，不反向改 guard 结论。
+- 事实流 append-only；投影可重建；剪枝后仍保留带 manifest 的可验证投影。
 
-    bin/                    启动壳：优先 dist/cli.js，回退 dist/index.js / src
-    dist/cli.js             自包含单文件（运行产物），也是 CLI 入口
-    dist/index.js           tsc 回退入口：先跑 CLI，再决定是否进入 TUI
-    dist/app.ts             TUI 主组件：事件消费、Transcript、输入/选择器、斜杠命令
-    dist/ui/                Banner/Message/Prompt/Spinner/Picker/StatusBar/TrustGate
-    dist/commands/          30 个斜杠命令（含 /jobs /kill /cancel /steer /attach /compact /expand /edit）
-    dist/providers/         13 个服务商 + 共享 OpenAI 兼容实现
-    dist/agent/             runner、registry、tools/、protocol、protocol-mode、guards、limits、
-                            stream、context、compaction、approval、shell-session、process-tree
-    dist/patch/             parse → plan → apply（事务式多文件补丁）
-    dist/session/           log（事实流）、projection（工作集投影/resume）
-    dist/skills/            SKILL.md 发现、解析、安装
-    dist/plugins/           插件包发现与提示拼装
-    dist/config/            paths、store（config/auth/capabilities）、trust、themes
-    dist/lib/               http、net、native-tools、model-meta、markdown、platform、uiMode、
-                            startup、diagnostics、pkg
+## 2. 入口与命令
 
-    仓库根：
-    package/scripts/        build.mjs（esbuild）、esbuild-plugins.mjs
-    scripts/                install.sh、build-portable.sh、update-termux.sh、smoke-test.mjs
-    .github/workflows/      release.yml（v* tag 自动构建 Release + npm publish）
+- `bin/fastcode.mjs`：优先加载自包含 `dist/cli.js`，回退 `dist/index.js` / `src/index.ts`。
+- `src/index.ts`：调用 CLI；`--ui json` 走 headless，非 TTY 的 plain 走 headless，其余加载 Ink TUI。
+- `src/cli-main.ts`：meow 参数解析；provider/model/config/sessions/resume/trust/skills/doctor/update、`--ui`。
+- `src/commands/*`：斜杠命令纯函数；`/provider`、`/model`、`/login` 无参数统一进入 app 的模型配置向导。
+- `src/headless.ts`：无 Ink 运行器；stdout 只输出 NDJSON 协议/回答，诊断写 stderr。
 
-每个文件的职责见 `docs/MODULES.md`。
+## 3. TUI 与交互
 
-## 3. 启动与运行数据流
+- `app.ts`：会话状态、`runAgent` 事件消费、Picker/Prompt、登录向导、审批 resolver。
+- `ui/Picker.ts`：方向键、`1–9`、Enter、Esc；不直接持有权限逻辑。
+- `ui/Prompt.ts`、`Message.ts`、`Spinner.ts`、`StatusBar.ts`、`TrustGate.ts`：纯展示组件。
+- 模型配置向导：
+  - `/provider` → provider Picker → model Picker → key（若 provider 需要）
+  - `/model` → 当前 provider 的 model Picker（当前模型预选）
+  - `/login` → provider → model → key
+  - 取消不提交未完成配置；key 输入掩码；keyless provider 跳过 key。
+- 审批交互：
+  - `tty`：Ink Picker；默认选项为 deny。
+  - `native`：`termux-dialog sheet`；严格校验 code/index，缺失/超时回落 tty。
+  - `plain`：文本编号输入；无 TTY 时 headless readline。
+  - `json`：NDJSON `gate:ask` / `gate:decision`；stdout 只输出协议。
+- Hard Block 不生成审批请求，不显示 Allow/Always/Force。
 
-### 3.1 冷启动
+## 4. Agent 与工具
 
-    1) bin/fastcode.mjs 解析自身路径 → 优先 import dist/cli.js，否则 dist/index.js
-    2) cli.ts 解析子命令；provider/model/config/sessions/trust/skills/doctor 等直接退出
-    3) 否则要求 stdout 是 TTY，加载 Ink/React 与 app.ts
-    4) app.ts 读取 config；resume 时调用 session/projection 恢复消息/cwd/provider/model
-    5) 渲染 TrustGate（需要时）与主界面
+- `agent/runner.ts`：单轮/多轮、流式、工具调用、预算、loop detection、compaction、checkpoint、resume 历史。
+- `agent/registry.ts`：
+  - `stateScope` / `revalidate` 契约断言；
+  - shell Soft Gate → `pending` ApprovalRequest；
+  - Hard Block 直接 deny；
+  - resolver 返回 allow/deny/feedback；无 resolver 或异常 fail-closed；
+  - once/session/always 授权经 `approval-store`；always 写入 trust 并绑定 catalogHash。
+- `agent/tools/*`：15 个单文件工具；文件工具走沙箱路径；patch 三阶段 parse/plan/apply。
+- `agent/protocol.ts`：`<fastcode_tool>` JSON 与 DSML 双方言；解析器返回 `{calls, consumedEnd, errors}`；残留标签抢救与重复解析防护。
+- `agent/shell-ast.ts`：纯 JS `bash-parser` 第二意见，只升级 hard；只解析 `-c`、`find -exec`、`eval/source/.`、同段一次赋值；解析失败保持形状结果。
 
-### 3.2 一次聊天（agentMode 打开）
+## 5. Guardrails
 
-    用户输入
-      -> app.handleSubmit
-      -> runAgent()（agent/runner.ts）
-           - 压缩：超过 model-meta 阈值或 heap 水位时本地压缩，摘要写 summary-*.md
-           - 预算：tokenBudget / costBudgetUsd，耗尽保留已生成文本
-           - runStream -> streamSSE（25s idle 默认，可用 FASTCODE_SSE_IDLE_MS 调大）
-           - lib/net：request/stream 重试；公共前缀去重；clientRequestId
-           - 协议：legacy 伪协议 <fastcode_tool> / native tool_calls（auto 时按能力）
-           - 工具：registry.prepare → approve → execute
-           - 补丁：patch/parse → plan → apply（全量 plan 后才落盘）
-           - 每轮 yield checkpoint，activeFiles 从 ToolResult.sideEffects 累积
-      -> app 消费事件：更新 transcript/状态栏，写事实流（user/assistant_raw/tool_call/
-         tool_result/checkpoint/compacted），tool 输出在稳定 UI 下默认折叠
-      -> 完成/中断/预算/循环：done 携带 history 与 finalText
+- `agent/guards.ts` 三态：`allow` / `soft_gate` / `hard_block`。
+- Hard Block 包括：根/当前/父/home/变量/通配符/系统路径递归删除、源码目录递归删除、`find -delete`、force-push 受保护分支、`git clean -fdx`、`dd of=/dev/*`、mkfs/mke2fs/fdisk/diskpart/format、docker prune/全删、`kubectl delete --all namespaces`、`chmod/chown -R` 根或系统路径、shutdown/reboot/poweroff/systemctl stop、`.pem`/`*.key`/`auth.json`/sessions 删除/清空、`.env` 截断/单 `>` 覆盖/shred、`curl|sh`、`base64 -d|sh`、定向 credential grep/外发、非字面量 eval/source/-c、`nc -e`、`/dev/tcp`。
+- Soft Gate：普通文件/可重建目录删除、`.env` 删除/移动、`git reset --hard`、`git clean -fd`、feature force-push、普通 `kubectl` ns/scale、普通 truncate/shred、裸 `printenv`/`env`。
+- `FASTCODE_ALLOW_DANGEROUS=1` 只绕过 Soft Gate，不能绕过 Hard Block。
+- AST 只做升级，不降级；解析失败保持形状匹配结果。
 
-### 3.3 恢复（resume）
+## 6. 会话与恢复
 
-    fastcode resume [id|latest]
-      -> cli 读取 session_start/checkpoint 的 cwd/provider/model，必要时 chdir
-      -> session/projection.resumeSession：
-           - 读事实流；最后一条不是 session_end 时提示未闭合
-           - 校验 projection.fingerprint（toolCatalogHash + provider::model + cwdDigest +
-             compactionSource）；不匹配则从事实流重建
-           - 未配对 tool_call 按只读/幂等/非幂等补全
-           - native 事实恢复为 assistant.toolCalls + role:"tool" 消息
-      -> app 用恢复的 provider/model 覆盖本次运行，显示告警后继续
+- `session/log.ts`：append-only JSONL；`session_start` / `user` / `assistant_raw` / `tool_call` / `tool_result` / `checkpoint` / `compacted` / `session_end`。
+- close/剪枝前写 projection；`.projection.json` 保存 manifest：
+  - `contentHash`：投影内容 sha256
+  - `sessionHash`：源事实 sha256
+  - `lastFactSeq`：覆盖的最高事实序号
+- `session/projection.ts`：恢复先校验 manifest，再校验 fingerprint；事实晚于投影则重建；剪枝后只使用校验通过的投影；tool_call/tool_result 配对修复。
+- 剪枝保留投影，删除原始 JSONL；旧格式/无 manifest 投影明确告警，不静默返回空会话。
 
-### 3.4 后台 shell
+## 7. Provider、流与压缩
 
-    shell 命令
-      -> agent/shell-session.ts
-           - POSIX：最多 2 个常驻 sh -s；命令带唯一结束标记
-           - >2s 未完成：返回 sessionId，命令继续在后台
-           - 轮询：只返回新输出；退避 1→2→4→30s
-           - Windows：独立进程 + taskkill /T
-      -> /jobs 列表、/attach 增量、/kill 杀进程树
+- `providers/*`：13 个 provider；`authEnv` 是 provider 级密钥候选；`capabilities.toolCalling` 缓存 native/pseudo。
+- `lib/http.ts`：SSE 解析、UTF-8 单字节拼接、idle timeout `NetworkStallError`、连通性探测。
+- `lib/net.ts`：retryRequest / retryStream，前缀去重，`QuotaError`。
+- `agent/compaction.ts`：token 阈值、heap 强制、server-aware 互斥、summary 落盘。
+- `lib/model-meta.ts`：上下文窗口 / charsPerToken / supportsTools；用户可覆盖。
 
-### 3.5 配置、密钥与能力
+## 8. Shell 与进程树
 
-    auth.json（provider 级 Key，v3；旧版自动迁移/备份）
-    config.json（provider/model/theme/sharedDirs/capabilities…）
-    trusted.json（version 1：paths 用 realpath；旧 trusted[] 自动迁移）
-    model-meta.json（可选：contextWindow/charsPerToken/supportsTools 覆盖）
+- `agent/shell-session.ts`：resident `sh -s` 池（≤2）、2s 转后台、增量输出、`/jobs` `/attach` `/kill`。
+- 超时/取消统一 `terminateProcessTree`：进程组 `SIGTERM` → grace → `SIGKILL`；ESRCH 视为已退出。
+- 后台任务保留 timeout；转后台只解除前台 AbortSignal。
+- `setsid` 后代仍可能逃逸；不扫描 `ppid=1`，错误信息明确边界。
 
-能力缓存：`capabilities.toolCalling["provider::model"] = "native" | "pseudo"`。
-原生 tools 返回 400 时本次降级伪协议并缓存 pseudo（fail closed）。
+## 9. 配置、信任、技能
 
-### 3.6 分发与打包
+- `config/store.ts`：`config.json` stat 指纹缓存（mtime/size/ctime）；save/verify 显式失效；auth v1/v2 → provider 级 v3 迁移。
+- `config/trust.ts`：项目 realpath + tool approval（catalogHash 绑定）；原子写；`fastcode trust --forget <key>`。
+- `skills/manager.ts`：技能目录 sha256 manifest；漂移禁用；`/skills verify --confirm` 重新基线；默认 registry 为空。
+- `lib/diagnostics.ts`：doctor 输出平台、TMPDIR、内存、auth、session、guard、缓存、协议、skills。
 
-    - package/src → tsc → package/dist；esbuild 打包出自包含 dist/cli.js（提交进 Git）
-    - clone 后无需 npm install 即可运行（前提是 dist/cli.js 在仓库里）
-    - scripts/build-portable.sh 生成 release/ 的 tar.gz/zip、npm pack .tgz、SHA256SUMS
-    - .github/workflows/release.yml 在 v* tag 时上传 GitHub Release 并 npm publish
+## 10. 构建与发布
 
-## 4. 扩展点
+- `npm run build` = `tsc -p tsconfig.build.json` + `node scripts/build.mjs`。
+- `src/cli-main.ts` 不再叫 `cli.ts`，避免 tsc 输出覆盖 `dist/cli.js` bundle。
+- esbuild 输出自包含 `dist/cli.js`；`highlight.js` 裁剪为常用语言子集；`bash-parser` 纯 JS。
+- 便携包必须包含 `bash-parser` 依赖闭包，否则真机 smoke 直接加载 dist 模块会失败。
+- 不提交/发布本工作树的改动，除非用户明确授权。
 
-### 4.1 新增服务商
+## 11. 安全边界
 
-    1) providers/<id>.ts：id/label/authEnv/baseUrl/defaultModel/listModels/stream
-    2) 在 providers/index.ts 注册
-    3) 若支持原生 tools：确认 toolCalling 能力与 400 降级路径
-    4) docs/CONFIGURATION.md 补环境变量；lib/diagnostics 补诊断
+- 这是应用层防手滑 + 可回滚，不是内核级访问控制。
+- 不能拦截 FastCode 之外的手工命令、静态二进制、直接 syscall、运行时变量展开、shell function/alias、动态生成命令、行为级反弹 shell。
+- Hard Block / Soft Gate / AST 的覆盖与限制以 `RUNBOOK.md` 和方案 §4 为准。
 
-### 4.2 新增斜杠命令
+## 12. 验证与维护
 
-    1) commands/<name>.ts 导出 {name, description, run({args,raw,state,actions})}
-    2) commands/index.ts 注册
-    3) 返回 {message|quit|picker}；运行中只放行 cancel/steer/jobs/kill/attach/expand/context
+```text
+npm run typecheck
+npm run lint
+npm run build
+node scripts/smoke-test.mjs
+git diff --check
+```
 
-### 4.3 新增工具
+当前基线（2026-10-30）：
 
-    1) agent/tools/<name>.ts 实现 Tool：name/stateScope/revalidate/prepare/execute
-    2) agent/tools/index.ts 注册
-    3) 需要时在 agent/tool-schemas.ts 加原生 schema
-    4) 路径走 sandboxPath；副作用返回 sideEffects.touched/removed
-    5) 在 docs/CONFIGURATION.md 或工具说明里写限制
+- PC：207/207
+- Termux 真机：212/212（含 POSIX 专属 #4/#50/#51/#54）
 
-### 4.4 技能 / 插件（不改代码）
-
-    技能：~/.fastcode/skills/<name>/SKILL.md
-    插件：~/.fastcode/plugins/<name>/PLUGIN.md（可选 skills/）
-
-## 5. Termux / 手机适配点
-
-| 关注点 | 位置 | 行为 |
-|---|---|---|
-| 平台识别 | lib/platform.ts | TERMUX_VERSION 或 PREFIX 含 com.termux |
-| 稳定 UI | lib/uiMode.ts | Termux 默认开启；只降低动画/重绘，不再关闭输入光标 |
-| 目录布局 | config/paths.ts | 默认 ~/.fastcode，FASTCODE_HOME 可迁移 |
-| 密钥权限 | config/paths.ts lockdown() | auth.json 0600 |
-| shell | agent/shell-session.ts | 常驻 sh -s 池 / 独立进程；只杀进程树 |
-| 后台长命令 | agent/shell-session.ts | 2s 后转后台；/jobs /attach /kill |
-| 进程树 | agent/process-tree.ts | POSIX 进程组；Windows taskkill /T |
-| 文件系统 | session/log.ts | /sdcard 上 checkpoint fsync（FASTCODE_FSYNC 可覆盖） |
-| 输入 | ui/Prompt.ts | showCursor 常开；/edit 外部编辑器绕开 Ink IME 缺陷 |
-| 自检 | lib/diagnostics.ts | doctor 显示平台/权限/内存/TMPDIR/phantom/SSE/池 |
-
-## 5.1 安全与恢复（0.1.6-beta）
-
-| 关注点 | 位置 | 行为 |
-|---|---|---|
-| 项目信任 | config/trust.ts + ui/TrustGate.ts | v1 paths(realpath)；每个 approve 重读，mtime memo |
-| 危险命令 | agent/guards.ts | deny 列表 + allowlist + 工作区限制；只读/副作用分类 |
-| 工具契约 | agent/registry.ts | stateScope/revalidate；requiresTrust ⇒ trust 断言 |
-| 文本输出 | agent/limits.ts | 边产边截断，head/tail 统一上限 |
-| 工具输出折叠 | app.ts | 稳定 UI 默认一行摘要；/expand 展开 |
-| 补丁安全 | patch/* | O_NOFOLLOW、lstat、CRLF/mode 保持、全量 plan、符号链接拒绝 |
-| 补丁审批 | patch/plan.ts | 敏感/大 diff → pending；没有 resolver 时 fail closed |
-| 事实流 | session/log.ts | append-only JSONL；seq；checkpoint；剪枝前写 projection |
-| 投影 | session/projection.ts | <20KB；fingerprint 校验；摘要/compactionSource |
-| 请求超时/重试 | agent/stream.ts + lib/net.ts | SSE idle + 前缀去重 + QuotaError |
-| 压缩 | agent/compaction.ts | token 阈值 / heap 强制；server-aware 互斥 |
-| 原生协议 | protocol-mode.ts + providers | tool_calls 归并；400 降级；能力缓存 |
-| 中断 | process-tree.ts | SIGTERM → 2s → SIGKILL；输出保留 |
-
-已知限制：
-
-- Ink 5.x 的 IME 光标定位未根治；实测 Termux pty 尺寸异常（129×129）时会出现 `abcdef` → `bcdefa` 和右侧裁切，
-  修正 pty（`stty cols/rows`）后基本输入通过。`/edit` 仍是绕行，彻底修需 Ink ≥6.7 + useCursor。
-- 进程内仍有 string-width 4.2.3 / 5.1.2 / 7.2.0 三份；未做强制 overrides（CJS/ESM 风险）。
-- approval pending 的数字选择 UI/resolver 尚未实现，命中 pending 时 fail closed。
-- 原生 tools 仅覆盖 OpenAI 兼容 provider；Anthropic/Google/未知 provider 走伪协议。
-
-## 6. 维护性评估
-
-**可以按文件维护**：入口、命令、界面、编排、领域、基础分层清晰；provider/command/tool 均单文件注册。
-`agent/runner.ts` 与 `ui` 解耦后，可在无 React 环境下跑回归（smoke #32–35）。
-消息 Markdown 只做内容缓存；不使用 memo，避免 Termux resize 后宽度/换行被旧 props 锁死。
-
-当前较大的文件：`app.ts`（事件消费/输入/命令，~32KB）、`agent/runner.ts`（~20KB）、
-`agent/shell-session.ts`（~15KB）、`patch/plan.ts`（~12KB）。后续可把 app 的 transcript/输入/
-命令分发拆成 hooks；runner 的工具执行循环可抽成独立模块。
-
-维护方式：改 `src` → `npm run typecheck && npm run lint && npm run build && node scripts/smoke-test.mjs`
-→ 提交新的 `dist/cli.js`。**不要直接改 dist。**
+改 `src` 后必须重新 build 并提交新的 `dist`；仓库内文档以本文件、`MODULES.md`、`CONFIGURATION.md` 与两份 README 为准。离线开发文档归档在 `config/kai`，不上传。

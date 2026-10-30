@@ -22,6 +22,9 @@ export declare function collectDiagnostics(): {
     keyStatus: "ok" | "missing" | "unbound";
     keyEnv: string;
     skillsInstalled: number;
+    skillsRegistry: string;
+    debug: boolean;
+    configCache: boolean;
     pluginsInstalled: number;
     enabledSkills: any;
     enabledPlugins: any;

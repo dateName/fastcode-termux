@@ -10,7 +10,7 @@
  * reuses the same key. The old "provider::model" (v2) and provider-only (v1)
  * formats are read and migrated to the provider-scoped v3 layout on first load.
  */
-import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { getPaths, lockdown, ensureDir } from "./paths.js";
 import { DEFAULT_THEME } from "./themes.js";
@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG = {
         "or unified diffs the user can apply.",
     enabledSkills: [],
     enabledPlugins: [],
-    skillsRegistry: "https://skillshub.wtf",
+    skillsRegistry: "",
     lifetimeCostUsd: 0,
     /**
      * Extra directories the file tools may read and write outside the project
@@ -47,21 +47,51 @@ export const DEFAULT_CONFIG = {
     },
 };
 export const AUTH_VERSION = 3;
-export function loadConfig() {
-    const { config } = getPaths();
-    if (!existsSync(config))
-        return { ...DEFAULT_CONFIG };
+let configCache;
+function configFingerprint(file) {
     try {
-        const raw = JSON.parse(readFileSync(config, "utf8"));
-        return { ...DEFAULT_CONFIG, ...raw };
+        const info = statSync(file);
+        // mtime + size are required; ctime adds resilience on filesystems with
+        // coarse mtime resolution. stat() is much cheaper than a full read on
+        // Termux shared storage.
+        return `${info.mtimeMs}:${info.size}:${info.ctimeMs}`;
     }
     catch {
-        return { ...DEFAULT_CONFIG };
+        return "missing";
     }
+}
+/** Drop the cached config so the next loadConfig() re-stats and re-reads. */
+export function invalidateConfigCache() {
+    configCache = undefined;
+}
+export function configCacheStatus() {
+    return configCache ? { cached: true, fingerprint: configCache.fingerprint } : { cached: false };
+}
+export function loadConfig() {
+    const { config } = getPaths();
+    const fingerprint = configFingerprint(config);
+    if (configCache && configCache.path === config && configCache.fingerprint === fingerprint)
+        return { ...configCache.value };
+    let value;
+    if (!existsSync(config)) {
+        value = { ...DEFAULT_CONFIG };
+    }
+    else {
+        try {
+            const raw = JSON.parse(readFileSync(config, "utf8"));
+            value = { ...DEFAULT_CONFIG, ...raw };
+        }
+        catch {
+            value = { ...DEFAULT_CONFIG };
+        }
+    }
+    configCache = { path: config, fingerprint, value };
+    return { ...value };
 }
 export function saveConfig(cfg) {
     const { config } = getPaths();
     atomicWrite(config, JSON.stringify(cfg, null, 2));
+    invalidateConfigCache();
 }
 /** Composite id used by the legacy v2 format; kept for API compatibility. */
 export function scopeId(providerId, model) {

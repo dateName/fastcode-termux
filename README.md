@@ -4,10 +4,12 @@
 
 | | |
 |---|---|
-| Version | **0.1.6-beta** (test build) |
+| Version | **0.1.7-beta** (test build) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
+
+> 0.1.7-beta is the current working-tree version. npm and GitHub Release assets remain 0.1.6-beta until 0.1.7-beta is published.
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
@@ -35,7 +37,7 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 💬 Multi-model chat | **13 providers**, switch with `/provider` and `/model` |
 | 🛠️ Local coding agent | read/write files, grep, patch, run shell commands (on by default) |
 | 🔎 Code navigation | search a project, locate by structure, batch-read files |
-| 🧩 Agent Skills | install `SKILL.md` skills to extend behaviour |
+| 🧩 Agent Skills | install `SKILL.md` skills; directory sha256 locks with `/skills verify --confirm` re-baseline |
 | 🧠 Thinking effort | `/effort auto/low/medium/high/max`, shown in the status bar |
 | 🎨 Themes | `/theme` |
 | 💰 Usage | token and cost readout in the status bar |
@@ -61,20 +63,20 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 |---|---|---|
 | 🔒 Project trust | first run in an unknown folder asks before agent tools load | `fastcode trust` / `untrust` / `trusted`; `FASTCODE_TRUST_ALL=1` |
 | 🧱 File sandbox | file tools stay inside the project; `../` and symlink escapes are rejected | `config.sharedDirs`, `FASTCODE_ALLOW_PATHS` |
-| 🚫 Dangerous-command guard | `rm -rf`, `dd`, `mkfs`, fork bombs are refused **before** execution | `FASTCODE_ALLOW_DANGEROUS=1` |
+| 🚫 Dangerous-command guard | non-overridable Hard Block for root/source/wildcard/system deletes, force-push to protected branches, `git clean -fdx`, disk/container/system commands, `.env` overwrite, targeted credential grep/exfil, dynamic eval/source/-c, reverse-shell entries and curl\|sh; `.env` delete, bare `printenv`, `git reset --hard` are Soft Gate and approve through the resolver | `FASTCODE_ALLOW_DANGEROUS=1` only for Soft Gate |
 | ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
 | 🧾 Patch transaction | parse → plan → apply; CRLF/mode preserved; symlinks refused; move never overwrites | `/expand` for full diff |
 | 🛑 Process tree | abort/`/kill` kills children and grandchildren | POSIX process group; Windows `taskkill /T` |
-| 🔐 Approval hook | sensitive/large patches require approval; no resolver = **deny** (fail closed) | pending UI is not implemented yet |
+| 🔐 Approval hook | Soft Gate and sensitive/large patches produce a pending request; no resolver = **deny** (fail closed) | `--ui tty\|native\|plain\|json`; once/session/always; `fastcode trust --forget <key>` |
 
-### Known limitations (0.1.6-beta)
+### Known limitations (0.1.7-beta)
 
 - Ink 5.x IME cursor placement is not fully fixed; a stale Termux pty size can clip/reorder text (`abcdef` → `bcdefa`).
   Correct the pty with `stty`, or use `/edit`; a full fix needs Ink ≥6.7.
 - Three `string-width` versions may disagree on ambiguous-width characters.
 - Native tools cover OpenAI-compatible providers only; others use the pseudo protocol.
-- Approval pending has no TUI resolver yet, so those operations are denied.
+- Approval pending is wired to tty/native/plain/json resolvers; Tier 3 backup-before-execution is still pending (third batch), so Tier 3 destructive actions fail closed.
 
 ---
 
@@ -101,7 +103,7 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-From npm (beta): `npm install -g @datename/fastcode-termux@0.1.6-beta` (dist-tag `beta`).
+From npm (beta): `npm install -g @datename/fastcode-termux@0.1.7-beta` (dist-tag `beta`).
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
@@ -118,15 +120,15 @@ The script symlinks `package/dist/cli.js` into `$PREFIX/bin` (Termux) or `~/.loc
 
 ### 2. Portable bundle (no npm)
 
-Download the latest `fastcode-portable-0.1.6-beta.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
+Download the latest `fastcode-portable-0.1.7-beta.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
 
 ```bash
-tar -xzf fastcode-portable-0.1.6-beta.tar.gz
-cd fastcode-portable-0.1.6-beta
+tar -xzf fastcode-portable-0.1.7-beta.tar.gz
+cd fastcode-portable-0.1.7-beta
 ./fastcode
 ```
 
-The 0.1.6-beta bundle is committed under `release/` and attached to the GitHub Release.
+The 0.1.6-beta bundle remains under `release/`; build and attach the 0.1.7-beta bundle only when that version is actually released.
 Rebuild it with `sh scripts/build-portable.sh`.
 
 ### 3. From source (only if you want to modify or rebuild)
@@ -193,14 +195,18 @@ Pick **one** provider and export its key:
 echo 'export DEEPSEEK_API_KEY=sk-your-key' >> ~/.bashrc
 ```
 
-**Or** bind a key from the TUI. Keys are scoped to the provider, so every model of that provider reuses it; the input is masked:
+**Or** configure a provider from the TUI. `/provider`, `/model`, and `/login` without arguments open the same keyboard-driven setup flow; arrow keys and Enter select, and `1`–`9` quick-select the numbered options. Escape cancels without changing settings. API key input is masked:
 
 ```text
-/login                                      # guided: provider → model → key (masked)
+/provider                                   # choose provider → model → key
+/model                                      # current provider/model → key
+/login                                      # choose provider → model → key
+/login deepseek                             # continue at model selection
+/login deepseek deepseek-chat               # continue at masked key entry
 /login deepseek deepseek-chat sk-your-key   # or on one line
 ```
 
-Every save echoes **provider · scope (all its models) · key tail (`sk-****abcd`) · file**.
+Offline model lists show built-in/cached choices with a notice; a model ID can also be entered manually. Providers that do not require a key skip key entry. Every save echoes **provider · scope (all its models) · key tail (`sk-****abcd`) · file**.
 
 > 🔐 Keys live in `~/.fastcode/auth.json`, **one key per provider**, separate from `config.json`. Switching models inside a provider reuses the same key. v1/v2 files are migrated automatically on first read and backed up as `auth.json.v2.bak` — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Env vars (`DEEPSEEK_API_KEY`, …) are also provider-wide.
 
@@ -236,8 +242,8 @@ Inside the TUI: `/help` · `/model` · `/provider` · `/effort` · `/login` · `
 | How to update | `cd ~/fastcode && git pull && bash scripts/install.sh` (install.sh alone does not pull) |
 | npm install gives old/broken behavior | the npm registry can lag the repo — prefer the clone or the portable bundle for now; `fastcode update` compares versions |
 | "requires a TTY" | run in a real terminal; pipes and some remote tools trigger this |
-| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.6-beta) |
-| Command blocked | that's the safety guard; override with `FASTCODE_ALLOW_DANGEROUS=1` |
+| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.7-beta) |
+| Command blocked | check for `[guardrails] HARD_BLOCK`; Hard Block cannot be overridden. Non-hard/Soft Gate paths may be temporarily allowed with `FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
 
@@ -284,9 +290,9 @@ sh scripts/build-portable.sh
 Artifacts land in `release/`:
 
 ```text
-fastcode-portable-0.1.6-beta.tar.gz       self-contained single-file bundle
-fastcode-portable-0.1.6-beta.zip          same (needs the `zip` command)
-datename-fastcode-termux-0.1.6-beta.tgz   npm package (npm pack)
+fastcode-portable-0.1.7-beta.tar.gz       self-contained single-file bundle
+fastcode-portable-0.1.7-beta.zip          same (needs the `zip` command)
+datename-fastcode-termux-0.1.7-beta.tgz   npm package (npm pack)
 SHA256SUMS                           checksums
 ```
 
@@ -305,16 +311,16 @@ npm publish --access public --tag beta
 CI publishes automatically (`.github/workflows/release.yml`) — just push a tag:
 
 ```bash
-git tag v0.1.6-beta
-git push origin v0.1.6-beta        # Actions: build + package + upload Release
+git tag v0.1.7-beta
+git push origin v0.1.7-beta        # Actions: build + package + upload Release
 ```
 
 Or manually:
 
 ```bash
-gh release create v0.1.6-beta -t "FastCode 0.1.6-beta" \
-  release/fastcode-portable-0.1.6-beta.tar.gz \
-  release/datename-fastcode-termux-0.1.6-beta.tgz \
+gh release create v0.1.7-beta -t "FastCode 0.1.7-beta" \
+  release/fastcode-portable-0.1.7-beta.tar.gz \
+  release/datename-fastcode-termux-0.1.7-beta.tgz \
   release/SHA256SUMS
 ```
 
@@ -362,4 +368,4 @@ This project is a fix + Termux adaptation that stands on other people's work. Th
 Original author credits, upstream project names and copyrights remain the property of their
 respective owners; this repo only fixes and adapts for Termux.
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.6-beta</sub>
+<sub>Made for Termux 🐧📱 · FastCode 0.1.7-beta</sub>

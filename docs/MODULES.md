@@ -9,13 +9,13 @@
 |---|---|---|
 | bin/fastcode.mjs | 优先 import 自包含 `dist/cli.js`，回退 `dist/index.js` / `src/index.ts`；缺依赖时打印修复指引 | dist/cli.js, dist/index.js, src/index.ts |
 | src/index.ts | 调用 CLI，非 TUI 子命令直接返回；否则检查 TTY 后加载 Ink/React/App | cli, ink, react, app |
-| src/cli.ts | 参数解析；provider/model/config/sessions/resume/trust/skills/doctor/update | skills, store, paths, providers, diagnostics, session/log, session/projection |
+| src/cli-main.ts | 参数解析；provider/model/config/sessions/resume/trust/skills/doctor/update（改名避免 tsc 产物覆盖 dist/cli.js bundle） | skills, store, paths, providers, diagnostics, session/log, session/projection |
 
 ## 界面层
 
 | 文件 | 职责 | 依赖 |
 |---|---|---|
-| src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发、checkpoint/事实流落盘 | runner, session, commands, ui |
+| src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发；统一 provider → model → key 配置流程并暂存至确认 | runner, session, commands, providers, config/store, ui |
 | src/ui/Banner.ts | 启动横幅（稳定 UI 下不动画） | 无 |
 | src/ui/Message.ts | 消息气泡；Markdown 渲染缓存（不 memo，避免终端 resize 后宽度不更新） | lib/markdown |
 | src/ui/Prompt.ts | 输入框与斜杠自动补全；`showCursor` 常开 | ink-text-input, commands/index |
@@ -47,12 +47,17 @@
 | src/agent/protocol.ts | `<fastcode_tool>`/DSML 解析与剥离；formatToolResults；AGENT_SYSTEM_PROMPT | 无 |
 | src/agent/protocol-mode.ts | legacy/native/auto 选择；能力缓存；400 降级判定 | model-meta |
 | src/agent/tool-schemas.ts | 原生 function-calling JSON schema（15 工具） | types |
-| src/agent/guards.ts | 危险命令；只读/副作用判定；指纹归一化；FASTCODE_LOOP_EXEMPT | 无 |
+| src/agent/guards.ts | 三态危险命令判定；Hard Block/Soft Gate；只读/副作用判定；指纹归一化；FASTCODE_LOOP_EXEMPT | shell-ast |
+| src/agent/shell-ast.ts | 纯 JS `bash-parser` 第二意见；只做 hard 升级；`-c`/`find -exec`/`eval/source/.`/同段赋值 | bash-parser |
+| src/agent/approval.ts | ApprovalRequest/Decision、稳定 option id、默认选项、plain 编号解析 | 无 |
+| src/agent/approval-store.ts | once/session/always 作用域；session 内存；always 绑 catalogHash | approval, trust, guards |
+| src/agent/approval-native.ts | termux-dialog sheet resolver；code/index 严格映射，缺失/超时回落 | approval |
+| src/agent/approval-json.ts | NDJSON gate:ask/decision schema、版本与错 id/畸形校验 | approval |
+| src/headless.ts | `--ui json` / 非 TTY plain 的无线程 TUI 运行器 | runner, providers, approval-json |
 | src/agent/limits.ts | 边产边截断的工具输出缓冲 | 无 |
 | src/agent/stream.ts | runStream：idle 超时、retryStream、incomplete、toolCalls | lib/net, types |
 | src/agent/context.ts | 旧版字符压缩（兼容保留） | types |
 | src/agent/compaction.ts | token 阈值 / heap 强制压缩；摘要落盘；server-aware 互斥 | model-meta, config/paths |
-| src/agent/approval.ts | ApprovalDecision/Request/Option 类型 | 无 |
 | src/agent/process-tree.ts | POSIX 进程组 kill；Windows taskkill /T | 无 |
 | src/agent/shell-session.ts | 常驻 sh -s 池、后台 session、增量轮询、/jobs /kill 数据源 | process-tree |
 | src/agent/ignore.ts | .fastcodeignore、默认忽略、二进制识别 | 无 |
@@ -88,9 +93,9 @@
 | src/commands/index.ts | COMMANDS、findCommand、parseSlash |
 | about / cwd / clear / exit / help / config / cost / system / theme / reset | 基本信息与配置 |
 | agent / tools | agent 模式与工具说明 |
-| model / provider | 交互选择器与直接切换 |
+| model / provider | 统一配置向导入口与参数快捷切换 |
 | effort | 思考强度 |
-| login / logout / whoami | Key 绑定/登出/状态 |
+| login / logout / whoami | Key 配置向导入口、provider 级 Key 绑定/登出/状态 |
 | skills / plugin | 技能与插件 |
 | context | token/阈值/heap |
 | cancel / steer / bg / attach / expand / edit | 运行中控制、后台与输入绕行 |
@@ -101,7 +106,7 @@
 
 | 文件 | 职责 | 依赖 |
 |---|---|---|
-| src/skills/manager.ts | 技能列表/安装/卸载/提示拼装 | config/paths, lib/http, skills/parser |
+| src/skills/manager.ts | 技能列表/安装/卸载/提示拼装；目录 sha256 完整性校验与重新基线 | config/paths, lib/http, skills/parser, node:crypto |
 | src/skills/parser.ts | SKILL.md frontmatter | 无 |
 | src/plugins/manager.ts | 插件发现/导入/移除/提示拼装 | config/paths |
 
@@ -117,7 +122,8 @@
 | src/lib/net.ts | retryRequest、retryStream（前缀去重）、QuotaError | types |
 | src/lib/native-tools.ts | tool_calls index 归并与 finalize | types |
 | src/lib/model-meta.ts | 13 provider 元数据；用户覆盖；estTokens | 无 |
-| src/lib/markdown.ts | Markdown → ANSI | marked, marked-terminal |
+| src/lib/markdown.ts | Markdown → ANSI；常用语言高亮，冷门语言纯文本回退 + 轻提示 | marked, marked-terminal, highlight-subset |
+| src/lib/highlight-subset.ts | 仅注册常用 highlight.js 语言；供 esbuild 别名与回退判定共用 | highlight.js/lib/core + languages |
 | src/lib/platform.ts | Termux/OS 识别 | 无 |
 | src/lib/uiMode.ts | 稳定 UI / live streaming 判定 | platform |
 | src/lib/startup.ts | 欢迎语/缺 Key 提示 | store, providers |
@@ -129,7 +135,7 @@
 | 文件 | 职责 |
 |---|---|
 | package/scripts/build.mjs | esbuild：src/index.ts → dist/cli.js（自包含） |
-| package/scripts/esbuild-plugins.mjs | 字体内联、require 垫片、桩依赖 |
+| package/scripts/esbuild-plugins.mjs | 字体内联、require 垫片、桩依赖、highlight.js 常用语言裁剪 |
 | scripts/install.sh / install-termux.sh | 软链 dist/cli.js 到 $PREFIX/bin |
 | scripts/build-portable.sh | release/ tar.gz/zip + npm pack + SHA256SUMS |
 | scripts/update-termux.sh | 目录/git/npm 更新 |

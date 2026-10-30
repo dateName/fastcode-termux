@@ -4,7 +4,7 @@ const CWD_NOTE = "Paths are relative to the session working directory unless abs
 
 export function toolSchemas(): ToolSchema[] {
     return [
-        schema("shell", "Run a shell command. Long commands return a session id for polling.", {
+        schema("shell", "Run a shell command. Long commands return a session id for polling. Killing a session kills its process group; setsid descendants may escape.", {
             command: { type: "string" },
             timeoutMs: { type: "number" },
             session_id: { type: "string", description: "Poll an existing background session." },

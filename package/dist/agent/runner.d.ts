@@ -3,6 +3,7 @@ import type { ActiveFile } from "../session/log.js";
 import type { SideEffects } from "./tools/types.js";
 import { type CompactionConfig } from "./compaction.js";
 import { type ToolProtocol } from "./protocol-mode.js";
+import type { ApprovalResolver } from "./approval.js";
 export interface ToolCall {
     tool: string;
     [key: string]: any;
@@ -39,6 +40,7 @@ export interface RunOptions {
     onNativeOk?: () => void;
     takeSteering?: () => string[];
     onDelta?: (delta: string, text: string) => void;
+    requestApproval?: ApprovalResolver;
 }
 export type AgentStopReason = "complete" | "max_turns" | "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "incomplete" | "stream_error";
 export type AgentErrorKind = "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "stream_error";

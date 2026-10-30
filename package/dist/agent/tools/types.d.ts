@@ -5,6 +5,7 @@ export interface SideEffects {
     created?: string[];
     removed?: string[];
 }
+import type { ApprovalResolver } from "../approval.js";
 export interface ToolCall {
     tool: string;
     [key: string]: any;
@@ -18,6 +19,8 @@ export interface ToolCtx {
     cwd: string;
     signal?: AbortSignal;
     turn?: number;
+    requestApproval?: ApprovalResolver;
+    catalogHash?: string;
 }
 export type Prepared = {
     ok: true;

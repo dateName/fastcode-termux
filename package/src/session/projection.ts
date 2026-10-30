@@ -18,6 +18,18 @@ export interface ProjectionFingerprint {
     compactionSource: "local" | "server" | "none";
 }
 
+export interface ProjectionManifest {
+    version: 1;
+    algorithm: "sha256";
+    savedAt: string;
+    /** Hash of the projection content (messages/meta/files). */
+    contentHash: string;
+    /** Hash of the source JSONL facts at save time, when available. */
+    sessionHash?: string;
+    /** Highest fact sequence covered by this projection. */
+    lastFactSeq?: number;
+}
+
 export interface Projection {
     version: 1;
     kind: "projection";
@@ -28,6 +40,17 @@ export interface Projection {
     messages: ChatMessage[];
     activeFiles: ActiveFile[];
     lastFactSeq: number;
+    /** Integrity data written at save/prune time; never re-derived from facts. */
+    manifest?: ProjectionManifest;
+}
+
+export type ProjectionReadStatus = "ok" | "legacy" | "hash_mismatch" | "corrupt" | "missing";
+
+export interface ProjectionReadResult {
+    status: ProjectionReadStatus;
+    projection?: Projection;
+    expectedHash?: string;
+    actualHash?: string;
 }
 
 export interface ResumeState {
@@ -190,6 +213,91 @@ function applySummary(messages: ChatMessage[], facts: any[]): ChatMessage[] {
     }
 }
 
+export function projectionContentHash(projection: Projection): string {
+    const core = {
+        version: projection.version,
+        kind: projection.kind,
+        cwd: projection.cwd,
+        providerId: projection.providerId,
+        model: projection.model,
+        fingerprint: projection.fingerprint,
+        messages: projection.messages,
+        activeFiles: projection.activeFiles,
+        lastFactSeq: projection.lastFactSeq,
+    };
+    return createHash("sha256").update(JSON.stringify(core)).digest("hex");
+}
+
+export function factsContentHash(facts: any[]): string {
+    return createHash("sha256").update(JSON.stringify(facts)).digest("hex");
+}
+
+function lastFactSeqOf(facts: any[]): number {
+    let seq = 0;
+    for (const fact of facts) {
+        if (typeof fact?.seq === "number" && fact.seq > seq)
+            seq = fact.seq;
+    }
+    return seq;
+}
+
+function withManifest(projection: Projection, facts?: any[]): Projection {
+    return {
+        ...projection,
+        manifest: {
+            version: 1,
+            algorithm: "sha256",
+            savedAt: new Date().toISOString(),
+            contentHash: projectionContentHash(projection),
+            ...(facts ? { sessionHash: factsContentHash(facts), lastFactSeq: lastFactSeqOf(facts) } : {}),
+        },
+    };
+}
+
+function emptyProjection(meta: SessionMeta): Projection {
+    return buildProjection([], meta);
+}
+
+/**
+ * Keep native tool_call/tool_result pairs complete. Orphan tool messages left
+ * behind by projection truncation are dropped; missing results are synthesized
+ * with the existing "execution unknown" notice so a resumed model never waits
+ * for a result that cannot arrive.
+ */
+export function pairToolMessages(messages: ChatMessage[]): { messages: ChatMessage[]; repaired: boolean } {
+    const out: ChatMessage[] = [];
+    const expected = new Map<string, string>();
+    let repaired = false;
+    const synthesize = () => {
+        for (const [id, tool] of expected)
+            out.push({ role: "tool", toolCallId: id, content: unpairedToolNotice(tool) });
+        if (expected.size > 0)
+            repaired = true;
+        expected.clear();
+    };
+    for (const message of messages) {
+        if (message.role === "tool") {
+            if (!message.toolCallId || !expected.has(message.toolCallId)) {
+                repaired = true;
+                continue;
+            }
+            expected.delete(message.toolCallId);
+            out.push(message);
+            continue;
+        }
+        synthesize();
+        out.push(message);
+        if (message.role === "assistant" && Array.isArray(message.toolCalls)) {
+            for (const call of message.toolCalls) {
+                if (call?.id)
+                    expected.set(String(call.id), String(call.name ?? "unknown"));
+            }
+        }
+    }
+    synthesize();
+    return { messages: out, repaired };
+}
+
 export function buildProjection(facts: any[], metaOverride?: Partial<SessionMeta>): Projection {
     const detected = sessionMetaFromFacts(facts);
     const meta: SessionMeta = {
@@ -197,7 +305,7 @@ export function buildProjection(facts: any[], metaOverride?: Partial<SessionMeta
         providerId: metaOverride?.providerId || detected.providerId,
         model: metaOverride?.model || detected.model,
     };
-    const messages = clampMessages(applySummary(factsToMessages(facts), facts));
+    const messages = pairToolMessages(clampMessages(applySummary(factsToMessages(facts), facts))).messages;
     const source = compactionSourceFromFacts(facts);
     let activeFiles: ActiveFile[] = [];
     let lastFactSeq = 0;
@@ -242,23 +350,37 @@ function clampMessages(messages: ChatMessage[]): ChatMessage[] {
     return list;
 }
 
-export function readProjection(file: string): Projection | undefined {
+export function readProjectionResult(file: string): ProjectionReadResult {
+    let raw: any;
     try {
-        const raw = JSON.parse(readFileSync(projectionPath(file), "utf8"));
-        if (!raw || raw.version !== 1 || !Array.isArray(raw.messages) || !raw.fingerprint)
-            return undefined;
-        return raw as Projection;
+        raw = JSON.parse(readFileSync(projectionPath(file), "utf8"));
     }
-    catch {
-        return undefined;
+    catch (err: any) {
+        if (err?.code === "ENOENT")
+            return { status: "missing" };
+        return { status: "corrupt" };
     }
+    if (!raw || raw.version !== 1 || !Array.isArray(raw.messages) || !raw.fingerprint)
+        return { status: "corrupt" };
+    const projection = raw as Projection;
+    if (!raw.manifest || typeof raw.manifest.contentHash !== "string")
+        return { status: "legacy", projection };
+    const actualHash = projectionContentHash(projection);
+    if (actualHash !== raw.manifest.contentHash)
+        return { status: "hash_mismatch", projection, expectedHash: raw.manifest.contentHash, actualHash };
+    return { status: "ok", projection, expectedHash: raw.manifest.contentHash, actualHash };
 }
 
-export function writeProjection(file: string, projection: Projection): void {
+export function readProjection(file: string): Projection | undefined {
+    const result = readProjectionResult(file);
+    return result.status === "ok" || result.status === "legacy" ? result.projection : undefined;
+}
+
+export function writeProjection(file: string, projection: Projection, facts?: any[]): void {
     const target = projectionPath(file);
     const tmp = target + "." + process.pid + ".tmp";
     try {
-        writeFileSync(tmp, JSON.stringify(projection, null, 2), "utf8");
+        writeFileSync(tmp, JSON.stringify(withManifest(projection, facts), null, 2), "utf8");
         renameSync(tmp, target);
     }
     catch (err) {
@@ -274,35 +396,74 @@ export function writeProjection(file: string, projection: Projection): void {
 
 export function resumeSession(file: string, currentCwd = process.cwd()): ResumeState {
     const facts = readSession(file);
+    const hasFacts = facts.length > 0;
     const detected = sessionMetaFromFacts(facts);
+    const read = readProjectionResult(file);
+    const stored = read.projection;
     const meta: SessionMeta = {
-        cwd: detected.cwd || currentCwd,
-        providerId: detected.providerId,
-        model: detected.model,
+        cwd: detected.cwd || stored?.cwd || currentCwd,
+        providerId: detected.providerId || stored?.providerId || "",
+        model: detected.model || stored?.model || "",
     };
-    const expected = projectionFingerprint(meta, compactionSourceFromFacts(facts));
-    const stored = readProjection(file);
+    const expected = projectionFingerprint(
+        meta,
+        hasFacts ? compactionSourceFromFacts(facts) : (stored?.fingerprint.compactionSource ?? "none"),
+    );
     const warnings: string[] = [];
-    let projection: Projection;
+    let projection: Projection | undefined;
     let rebuilt = false;
-    if (stored && sameFingerprint(stored.fingerprint, expected)) {
+    const currentSessionHash = hasFacts ? factsContentHash(facts) : undefined;
+    const sessionChanged = hasFacts && Boolean(stored?.manifest?.sessionHash) &&
+        stored!.manifest!.sessionHash !== currentSessionHash;
+    const coveredSeq = stored?.manifest?.lastFactSeq ?? stored?.lastFactSeq ?? 0;
+    const factsNotCovered = hasFacts && coveredSeq < lastFactSeqOf(facts);
+
+    if (stored && (read.status === "ok" || read.status === "legacy") &&
+        sameFingerprint(stored.fingerprint, expected) && !sessionChanged && !factsNotCovered) {
         projection = stored;
+        if (read.status === "legacy")
+            warnings.push("Projection has no manifest; integrity could not be verified.");
     }
     else {
-        projection = buildProjection(facts, meta);
-        rebuilt = true;
-        if (stored)
+        if (read.status === "hash_mismatch")
+            warnings.push("Projection manifest hash does not match its contents; ignoring the stored copy.");
+        else if (read.status === "corrupt")
+            warnings.push("Projection file is corrupt; rebuilding from session facts.");
+        else if (sessionChanged || factsNotCovered)
+            warnings.push("Session facts changed since the projection was saved; rebuilt from facts.");
+        else if (stored)
             warnings.push("Projection fingerprint changed (tools/model/cwd); rebuilt from facts.");
-        else
-            warnings.push("No projection found; rebuilt from facts.");
-        try {
-            writeProjection(file, projection);
+
+        if (hasFacts) {
+            projection = buildProjection(facts, meta);
+            rebuilt = true;
+            if (!stored)
+                warnings.push("No projection found; rebuilt from facts.");
+            try {
+                writeProjection(file, projection, facts);
+            }
+            catch {
+                warnings.push("Could not write the projection (filesystem is read-only?); using the in-memory rebuild.");
+            }
         }
-        catch {
-            warnings.push("Could not write the projection (filesystem is read-only?); using the in-memory rebuild.");
+        else if (stored && read.status !== "hash_mismatch" && read.status !== "corrupt") {
+            // The original JSONL was pruned. The verified projection is the
+            // only remaining evidence, so use it rather than re-deriving trust
+            // from facts that no longer exist.
+            projection = stored;
+            warnings.push("Session facts were pruned; using the stored projection.");
+        }
+        else {
+            projection = emptyProjection(meta);
+            warnings.push("Session content is unavailable or unverifiable; resumed history is empty.");
         }
     }
+
+    const repaired = pairToolMessages(projection.messages);
+    if (repaired.repaired)
+        warnings.push("Tool call/result pairing was repaired during resume.");
+    const finalProjection: Projection = { ...projection, messages: repaired.messages };
     if (detected.cwd && detected.cwd !== currentCwd)
         warnings.push(`Session was recorded in ${detected.cwd}; current directory is ${currentCwd}.`);
-    return { projection, messages: projection.messages, meta, warnings, rebuilt };
+    return { projection: finalProjection, messages: finalProjection.messages, meta, warnings, rebuilt };
 }

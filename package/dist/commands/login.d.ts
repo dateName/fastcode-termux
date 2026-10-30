@@ -5,12 +5,12 @@
  * provider. Shared by the `/login` command and the guided flow in the app.
  */
 export declare function saveScopedKey(providerId: any, providerLabel: any, model: any, key: any): string;
+export declare function maskLoginEcho(args: any): string;
 export declare const loginCommand: {
     name: string;
     description: string;
-    run({ args, state, actions }: {
+    run({ args, actions }: {
         args: any;
-        state: any;
         actions: any;
     }): {
         message: string;

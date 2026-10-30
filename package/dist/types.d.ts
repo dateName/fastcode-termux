@@ -178,6 +178,7 @@ export interface AppActions {
     startLogin(options: {
         provider?: string;
         model?: string;
+        flow?: "provider" | "model" | "login";
     }): void;
 }
 export interface SkillManifest {

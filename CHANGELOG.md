@@ -2,6 +2,42 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
+## 0.1.7-beta（开发版，未发布）
+
+> 状态：`package.json` = `0.1.7-beta`。npm 与 GitHub Release 上的资产仍为 0.1.6-beta，尚未发布 0.1.7-beta。
+> 本版本重点：三态 Guardrails、AST 第二意见、审批闭环、模型配置 TUI、会话 manifest、配置缓存、技能完整性。
+
+**FastCode 0.1.7-beta 已从“单体 TUI”演进为：事件化 runner + 15 工具契约 + 三态 Guardrails + AST 第二意见 + 可审批/可回滚的 tool 执行 + 事实流/投影恢复 + 多 provider + Termux 单文件分发。**
+
+### Guardrails
+- Hard Block / Soft Gate / allow 三态；Hard Block 不受 `FASTCODE_ALLOW_DANGEROUS`、trust、session/always 影响。
+- `.env` 删除为 Soft Gate，截断/覆盖为 Hard Block；裸 `printenv`/`env` 为 Soft Gate，定向 grep/外发为 Hard Block。
+- 纯 JS `bash-parser` AST 第二意见：只升不降，覆盖 `-c`、`find -exec`、`eval/source/.`、同段一次赋值。
+- `nc -e`、`/dev/tcp`、非字面量 `eval/source/-c` 纳入 Hard Block。
+
+### 审批与交互
+- Soft Gate 和大 patch 生成 pending；once/session/always、catalogHash 失效、`trust --forget`。
+- TUI Picker / termux-dialog / plain 编号 / headless JSON 四种审批模式。
+- Hard Block 不生成审批请求，也不显示 Allow/Always/Force。
+- Tier 3 备份前置仍未接入（第三批），当前无默认 yes，破坏性动作 fail-closed。
+
+### 模型配置 TUI
+- `/provider`、`/model`、`/login` 无参数统一进入 provider → model → key 向导。
+- 带参数快捷路径保留；支持方向键/数字/Enter、离线模型列表、手动 model ID、key 掩码、keyless provider 跳过 key。
+- Esc 取消不提交未完成配置。
+
+### 可靠性与会话
+- `timeoutMs` 钳位与 debug 可见性；后台任务转后台保留超时，SIGTERM → grace → SIGKILL。
+- 配置缓存使用 mtime/size/ctime 指纹；save/verify 失效。
+- projection 保存 manifest（contentHash/sessionHash/lastFactSeq）；剪枝 → 回收 → 恢复保持工具配对。
+- 技能目录 sha256 完整性锁定；`/skills verify --confirm` 重新基线。
+- 语法高亮裁剪常用语言，冷门语言纯文本回退 + 提示。
+
+### 验证
+- PC：typecheck/lint/build 通过，smoke 207/207。
+- Termux：真机 smoke 212/212（0.1.6-beta 同源构建；0.1.7-beta 版本号变更后未重新部署）。
+- 真机已验证 TUI、审批 Esc/allow once、模型配置向导取消不改配置。
+
 ## 0.1.6-beta（测试版）
 
 > 状态：`package.json` = `0.1.6-beta`；GitHub Release `v0.1.6-beta`（prerelease）

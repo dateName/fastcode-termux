@@ -54,6 +54,12 @@ export type KeyLookup = {
 } | {
     status: "missing";
 };
+/** Drop the cached config so the next loadConfig() re-stats and re-reads. */
+export declare function invalidateConfigCache(): void;
+export declare function configCacheStatus(): {
+    cached: boolean;
+    fingerprint?: string;
+};
 export declare function loadConfig(): any;
 export declare function saveConfig(cfg: any): void;
 /** Composite id used by the legacy v2 format; kept for API compatibility. */

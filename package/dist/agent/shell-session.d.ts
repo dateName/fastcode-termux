@@ -16,6 +16,9 @@ export interface ShellJobView {
     bytes: number;
     startedAt: number;
     pid?: number;
+    /** Lifecycle visibility for /jobs and regression tests. */
+    timeoutArmed?: boolean;
+    foregroundAttached?: boolean;
 }
 interface ExecOptions {
     signal?: AbortSignal;

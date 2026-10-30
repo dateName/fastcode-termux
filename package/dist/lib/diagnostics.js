@@ -11,9 +11,10 @@ import { detectPlatform, platformLabel } from "./platform.js";
 import { readPackageMeta } from "./pkg.js";
 import { shouldUseStableTerminalUi } from "./uiMode.js";
 import { getPaths } from "../config/paths.js";
-import { loadConfig, resolveApiKey, resolveProviderKey } from "../config/store.js";
+import { configCacheStatus, loadConfig, resolveApiKey, resolveProviderKey } from "../config/store.js";
+import { debugEnabled } from "./debug.js";
 import { PROVIDERS } from "../providers/index.js";
-import { listInstalledSkills } from "../skills/manager.js";
+import { listInstalledSkills, resolveRegistry } from "../skills/manager.js";
 import { listInstalledPlugins } from "../plugins/manager.js";
 import { findUnclosedSessions, fsyncMode, loggingEnabled, listSessions, sessionCacheLimitBytes } from "../session/log.js";
 import { isTrusted } from "../config/trust.js";
@@ -95,6 +96,9 @@ export function collectDiagnostics() {
         keyStatus: provider ? keyLookup.status : "missing",
         keyEnv: provider?.authEnv?.[0],
         skillsInstalled,
+        skillsRegistry: resolveRegistry(process.env["FASTCODE_SKILLS_REGISTRY"], config.skillsRegistry),
+        debug: debugEnabled(),
+        configCache: configCacheStatus().cached,
         pluginsInstalled,
         enabledSkills: (config.enabledSkills ?? []).length,
         enabledPlugins: (config.enabledPlugins ?? []).length,
@@ -157,7 +161,7 @@ export function formatDiagnostics(info) {
     lines.push("  trusted cwd   " + (info.trusted ? "yes" : "NO - agent tools ask first or stay off") + "   (" + (info.trustFile ?? "?") + ")");
     lines.push("  session log   " + (info.sessionLogEnabled ? "on" : "off") + "   cache cap " + info.sessionCacheMb + "MB, " + info.sessionsCount + " file(s), " + (info.sessionsBytes / 1024 / 1024).toFixed(2) + "MB used");
     lines.push("  session fsync " + info.sessionFsync + "   unclosed " + info.unclosedSessions + "   " + (info.sessionsDir ?? "(unavailable)"));
-    lines.push("  shell guard   " + info.shellDenyPatterns + " deny patterns" + (info.allowDangerous ? "   [FASTCODE_ALLOW_DANGEROUS is ON]" : ""));
+    lines.push("  shell guard   " + info.shellDenyPatterns + " legacy soft patterns" + (info.allowDangerous ? "   [FASTCODE_ALLOW_DANGEROUS is ON]" : ""));
     lines.push("  tool output   " + info.toolOutputLimit + " chars max (streaming cap)");
     lines.push(`  budgets       ${info.tokenBudget > 0 ? "tokens ≤ " + info.tokenBudget : "token budget off"} · ${info.costBudgetUsd > 0 ? "$" + info.costBudgetUsd : "cost budget off"}`);
     lines.push(`  compaction    ${info.compactionEnabled ? "on" : "off"} · ${Math.round(info.compactionRatio * 100)}% · heap ${info.compactionHeapUsedMb.toFixed(1)}/${info.compactionHeapMb}MB${info.compactionForced ? " [FORCED]" : ""}${info.serverCompactionAware ? " · server-aware" : ""}`);
@@ -167,6 +171,7 @@ export function formatDiagnostics(info) {
     lines.push(`  sse timeout   ${info.sseIdleMs}ms idle`);
     lines.push(`  tool protocol ${info.toolProtocol} (${info.toolProtocolMode}) · cached ${info.toolCapability}`);
     lines.push(`  provider      ${info.providerId} · model ${info.model}`);
+    lines.push(`  config cache  ${info.configCache ? "warm" : "cold"} · debug ${info.debug ? "on" : "off"}`);
     let apiKeyStatus;
     if (info.keyPresent)
         apiKeyStatus = "present";
@@ -175,7 +180,7 @@ export function formatDiagnostics(info) {
     else
         apiKeyStatus = `MISSING — set ${info.keyEnv ?? "the provider env var"} or /login ${info.providerId} ${info.model} <key>`;
     lines.push(`  api key       ${apiKeyStatus}`);
-    lines.push(`  skills        ${info.skillsInstalled} installed, ${info.enabledSkills} enabled`);
+    lines.push(`  skills        ${info.skillsInstalled} installed, ${info.enabledSkills} enabled (${info.skillsRegistry || "no registry configured"})`);
     lines.push(`  plugins       ${info.pluginsInstalled} installed, ${info.enabledPlugins} enabled`);
     lines.push("");
     lines.push("  provider keys:");

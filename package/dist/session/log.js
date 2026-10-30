@@ -10,9 +10,10 @@
  *   FASTCODE_SESSION_CACHE_MB=N   sessions cache cap in MB (default 256)
  *   FASTCODE_FSYNC=0|1            force checkpoint fsync off/on
  */
-import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
-import { basename, join } from "node:path";
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeSync } from "node:fs";
+import { join } from "node:path";
 import { getPaths } from "../config/paths.js";
+import { buildProjection, writeProjection } from "./projection.js";
 const NL = String.fromCharCode(10);
 export function sessionCacheLimitBytes() {
     const mb = Number(process.env["FASTCODE_SESSION_CACHE_MB"]);
@@ -105,6 +106,9 @@ function openLog(id, file, meta) {
             append({ type: "session_end" });
             closed = true;
             try {
+                // Snapshot + manifest are written while the facts still exist;
+                // pruning later keeps this verified copy.
+                ensureProjection(file);
                 pruneSessions();
             }
             catch {
@@ -287,32 +291,13 @@ export function latestUnclosedSession() {
     return findUnclosedSessions()[0];
 }
 function ensureProjection(file) {
-    const target = projectionPath(file);
-    if (existsSync(target))
-        return;
+    // Always refresh from the facts that still exist: a projection written at
+    // an earlier checkpoint may be stale by the time we close or prune. If the
+    // JSONL is already gone, leave the verified projection untouched.
     const entries = readSession(file);
     if (entries.length === 0)
         return;
-    const summary = summarize(basename(file).replace(/[.]jsonl$/, ""), file, entries);
-    const lastUser = [...entries].reverse().find((entry) => entry.type === "message" && entry.role === "user");
-    const lastAssistant = [...entries].reverse().find((entry) => entry.type === "message" && entry.role === "assistant");
-    const payload = {
-        version: 1,
-        kind: "pruned_session",
-        source: basename(file),
-        createdAt: new Date().toISOString(),
-        summary: {
-            cwd: summary.cwd,
-            providerId: summary.providerId,
-            model: summary.model,
-            turns: summary.turns,
-            messages: summary.messages,
-            activeFiles: summary.activeFiles.slice(0, 200),
-            lastUser: typeof lastUser?.content === "string" ? lastUser.content.slice(0, 2000) : "",
-            lastAssistant: typeof lastAssistant?.content === "string" ? lastAssistant.content.slice(0, 2000) : "",
-        },
-    };
-    writeFileSync(target, JSON.stringify(payload, null, 2), "utf8");
+    writeProjection(file, buildProjection(entries), entries);
 }
 export function pruneSessions(limit = sessionCacheLimitBytes()) {
     const all = listSessions();

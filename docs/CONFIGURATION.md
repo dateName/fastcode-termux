@@ -28,7 +28,7 @@
 | systemPrompt | 系统提示 | 内置 |
 | enabledSkills | 启用的技能名数组 | [] |
 | enabledPlugins | 启用的插件名数组 | [] |
-| skillsRegistry | 技能市场地址 | https://skillshub.wtf |
+| skillsRegistry | 技能市场地址；默认空，不内置任何市场 | "" |
 | lifetimeCostUsd | 累计花费（展示用） | 0 |
 | sharedDirs | 额外允许读写的目录（相对项目根、`~/`、绝对路径） | [] |
 | maxAgentTurns | 单次请求最多工具轮次 | 24 |
@@ -107,13 +107,16 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
 
 ### 交互式绑定（推荐）
 
-    /login                      # 向导：服务商 → 模型（仅记录来源）→ Key（掩码输入）
-    /login deepseek             # 跳过服务商
-    /login deepseek deepseek-chat               # 直接进入 Key 输入
+    /provider                                   # 选择服务商 → 模型 → 按需输入 Key
+    /model                                      # 当前服务商/模型 → 按需输入 Key
+    /login                                      # 选择服务商 → 模型 → 按需输入 Key
+    /login deepseek                             # 从模型选择继续
+    /login deepseek deepseek-chat               # 从掩码 Key 输入继续
     /login deepseek deepseek-chat sk-xxxx       # 一行完成
 
 保存成功后回显：服务商、作用域（该 provider 的全部模型）、Key 尾号、保存位置。
-Key 输入时终端以 `*` 掩码显示。
+Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作选择器；Esc 取消且不提交未完成的 provider/model 配置。
+模型列表离线时显示 provider 内置列表与离线提示；可手动输入 model ID。无需 Key 的 provider 会跳过 Key 步骤。
 
 发送消息前会校验当前 provider 是否有可用 Key；没有就拦截并提示。
 服务商返回 401/403（鉴权失败）或 402/429（额度/限流）时，界面会给出明确提示。
@@ -154,6 +157,8 @@ Key 输入时终端以 `*` 掩码显示。
 | FASTCODE_BASE_URL | 自定义服务商基地址 |
 | FASTCODE_MODEL | 自定义服务商默认模型 |
 | FASTCODE_UPDATE_REGISTRY | fastcode update 查询地址 |
+| FASTCODE_SKILLS_REGISTRY | 覆盖 skills 注册表地址；空字符串或纯空白视为未设置，回落到 `skillsRegistry`；两者都空时按名称/owner-repo 安装会被拒绝，直接 URL 安装仍可用 |
+| FASTCODE_DEBUG | 设为 1 打开低流量 stderr 调试日志（timeout 钳位、配置缓存失效等） |
 | FASTCODE_ALLOW_PATHS | 额外允许访问的根目录，多个用系统分隔符（Termux 为冒号） |
 | FASTCODE_ALLOW_SHARED_STORAGE | 设为 0 关闭 Termux 默认放行的 ~/storage/shared |
 | FASTCODE_TOOL_OUTPUT_LIMIT | 工具输出上限（字符），默认 30000，边产边截断 |
@@ -167,7 +172,7 @@ Key 输入时终端以 `*` 掩码显示。
 | FASTCODE_TOOL_PROTOCOL | `legacy`（默认）/ `native` / `auto`；原生 tools 返回 400 时自动降级并缓存 `pseudo` |
 | FASTCODE_SSE_IDLE_MS | SSE 无数据超时（毫秒），默认 25000；推理型模型首 token 很慢时可调大 |
 | FASTCODE_TRUST_ALL | 设为 1 跳过项目信任确认 |
-| FASTCODE_ALLOW_DANGEROUS | 设为 1 关闭危险命令拦截 |
+| FASTCODE_ALLOW_DANGEROUS | 设为 1 临时放行非 Hard Block 的普通/Soft Gate 命令；Hard Block 永不受影响 |
 | FASTCODE_SHELL_ALLOWLIST | 只允许匹配这些正则的命令，分号分隔 |
 | FASTCODE_SHELL_DENY_EXTRA | 追加的危险命令正则，分号分隔 |
 | FASTCODE_RESTRICT_TO_WORKSPACE | 设为 1 额外拒绝 ../ 路径穿越 |
@@ -237,10 +242,41 @@ trusted.json 当前为 **version 1**：`paths` 的 key 是 realpath 绝对路径
 阶段 1 的 `registry.approve()` 只启用 allow/deny 二元判定；pending 审批与 UI 在阶段 5/8 启用。
 每个副作用工具在执行前都会重新读取 trust（按 mtime+size memo），不跨调用缓存。
 
-shell 工具在执行前先过危险命令拦截（内置 deny 列表）：
-rm -rf、del /f、rmdir /s、format/mkfs/diskpart、dd if=、写入 /dev/sd、
-shutdown/reboot/poweroff、fork bomb 会被直接拒绝；正文会给出命中的正则。
-需要临时放行时 export FASTCODE_ALLOW_DANGEROUS=1。
+shell 工具在执行前先过三态判定：`allow` / `soft_gate` / `hard_block`。
+
+- **Hard Block（不可授权）**：根/当前/父/home/变量目标的递归删除、源码目录或通配符递归删除、
+  系统路径递归删除、`find -delete`、force-push main/master/prod、`git clean -fdx`、
+  `dd of=/dev/*`、mkfs/mke2fs/fdisk/diskpart/format、docker system prune/全删、`kubectl delete --all namespaces`、
+  `chmod -R … /`、`chown -R … /系统路径`、shutdown/reboot/poweroff/systemctl stop、
+  `.pem`/`*.key`/`auth.json`/sessions 删除或清空、`.env` 截断/单 `>` 覆盖/shred、
+  `curl|sh`、`base64 -d|sh`、定向 `printenv`/`env | grep` 敏感词、环境变量输出到网络/文件、
+  `eval`/`source`/`.`/`-c` 后跟非字面量、`nc/ncat/socat -e|-c`、`/dev/tcp`、`X=rm; $X -rf /`、
+  `find -exec rm …` 等。返回 `[guardrails] HARD_BLOCK action=… target=… reason=…`，
+  不受 `FASTCODE_ALLOW_DANGEROUS`、trust、session/always 或配置影响。
+- **Soft Gate**：裸 `printenv`/`env`（可审查输出）、普通文件删除、可重建目录删除、
+  `.env` 删除/移动、`git reset --hard`（含 `HEAD~N`，reflog 可恢复）、`git clean -fd`、
+  feature 分支 force-push、`kubectl delete ns` / `scale --replicas=0`、普通 `truncate`/`shred` 等；
+  审批 resolver 尚未接线时 fail-closed 拒绝。
+- 历史 `DEFAULT_DENY` 与 `FASTCODE_SHELL_ALLOWLIST` 拒绝也归入 Soft Gate，不再保留“普通 deny”第四态。
+
+`FASTCODE_ALLOW_DANGEROUS=1` 只绕过 Soft Gate，不能让 Hard Block 通过。
+`.env` 删除（soft）与截断/覆盖（hard）已按操作语义拆分；`>> .env` 追加不拦。
+
+AST 第二意见（纯 JS `bash-parser`）只做“升级到 hard_block”，不会把形状匹配的 hard 降级；
+只解析 `-c`、`find -exec`、`eval/source/.` 三类入口和同段一次变量赋值。解析失败时保留形状匹配结果。
+
+### 审批与交互模式
+
+Soft Gate 命中后生成 pending 请求，由 runner 透传到 TUI resolver；无 resolver 或 resolver 异常一律 fail-closed。
+授权范围：`once` 单次；`session` 进程内、绑定 catalogHash；`always` 写入 `trusted.json` 的 `tools`，
+catalogHash 变化后失效。`fastcode trusted` 列出，`fastcode trust --forget <key>` 撤销。
+
+    fastcode --ui tty "prompt"       Ink Picker（默认）
+    fastcode --ui native "prompt"    Termux:API termux-dialog sheet；缺失/超时回落 tty
+    fastcode --ui plain "prompt"     纯文本编号选择（非 TTY 时走 headless）
+    fastcode --ui json "prompt"      NDJSON gate:ask/decision，stdout 只输出协议
+
+Tier 3 不给默认 yes；本批未接备份，因此 Tier 3 破坏性动作 fail-closed。Hard Block 不生成审批请求。
 
 ### 会话落盘与恢复
 
@@ -276,18 +312,21 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
     fastcode config path    # 只打印 config.json 路径
     fastcode doctor         # 环境 + 缺哪个 Key
 
-## 6. 交互选择器与思考强度（0.1.6-beta）
+## 6. 交互选择器与思考强度（0.1.7-beta）
 
 ### 6.1 /model 与 /provider
 
-无参数调用会打开交互列表：
+无参数 `/provider`、`/model`、`/login` 会进入统一的 provider → model → key 向导，并从各自对应的步骤开始：
 
-    /model        # 方向键 ↑/↓、1-9 数字直选、Enter 确认、Esc 取消
-    /provider
+    /provider     # 从 provider 选择开始
+    /model        # 当前 provider 的 model 选择；当前 model 默认预选
+    /login        # 从 provider 选择开始
+    /login deepseek                 # 从 model 选择继续
+    /login deepseek deepseek-chat   # 从 masked key 输入继续
 
-- 列表来自 `provider.listModels()` 与本地静态表的合并去重。
-- 打开时会用 `probeProvider()` 探测 `/models`；失败则标注 `(offline)`。
-- 旧写法仍然有效：`/model <id>`、`/provider <id>`。
+- Provider/model picker 支持 ↑/↓、Enter、`1`–`9` 编号选择、Esc 取消；新 provider 默认预选其 defaultModel。
+- 模型列表由 `provider.listModels()` 返回，provider 离线时使用内置/缓存列表并明确标记 `(offline)`；列表仍支持手动输入 model ID。
+- 无需 Key 的 provider 直接完成 model 配置；`/model <id>`、`/provider <id>` 和完整 `/login provider model key` 快捷路径仍然有效。
 
 ### 6.2 /effort
 
@@ -306,7 +345,7 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
 - 若模型返回 400 且错误提到 reasoning/thinking/unsupported，
   客户端会去掉该参数重试一次。
 
-## 7. 长任务相关配置（0.1.6-beta）
+## 7. 长任务相关配置（0.1.7-beta）
 
 | 字段 | 作用 | 默认 |
 |---|---|---|

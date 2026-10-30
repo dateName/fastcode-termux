@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { killProcessTree } from "./process-tree.js";
+import { terminateProcessTree } from "./process-tree.js";
+import { normalizeTimeoutMs } from "./tools/validate.js";
 const OUTPUT_LIMIT = 1024 * 1024;
 const DEFAULT_BACKGROUND_MS = 2000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -25,6 +26,10 @@ class ShellJob {
     donePromise;
     resolveDone;
     waiters = [];
+    timeoutTimer;
+    abortSignal;
+    abortListener;
+    cleaned = false;
     constructor(command, cwd) {
         this.id = "sh_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
         this.key = this.id.replace(/[^a-z0-9]/gi, "");
@@ -58,8 +63,44 @@ class ShellJob {
             return;
         this.status = status;
         this.exitCode = exitCode;
+        this.cleanupLifecycle();
         this.resolveDone();
         this.notify();
+    }
+    /**
+     * Task-level timeout lives until the job actually finishes. Returning to
+     * the foreground only detaches the AbortSignal; it must not disarm this.
+     */
+    armTimeout(ms) {
+        if (this.timeoutTimer || this.status !== "running")
+            return;
+        this.timeoutTimer = setTimeout(() => this.kill("timeout"), ms);
+        this.timeoutTimer.unref?.();
+    }
+    attachAbort(signal) {
+        if (!signal || this.abortListener)
+            return;
+        const listener = () => this.kill("killed");
+        this.abortSignal = signal;
+        this.abortListener = listener;
+        signal.addEventListener("abort", listener, { once: true });
+    }
+    /** Detach Esc/foreground cancellation but keep the timeout armed. */
+    detachForeground() {
+        if (this.abortSignal && this.abortListener)
+            this.abortSignal.removeEventListener("abort", this.abortListener);
+        this.abortSignal = undefined;
+        this.abortListener = undefined;
+    }
+    cleanupLifecycle() {
+        if (this.cleaned)
+            return;
+        this.cleaned = true;
+        if (this.timeoutTimer) {
+            clearTimeout(this.timeoutTimer);
+            this.timeoutTimer = undefined;
+        }
+        this.detachForeground();
     }
     waitForChange(ms) {
         if (this.status !== "running" || this.delivered < this.output.length)
@@ -94,17 +135,22 @@ class ShellJob {
             bytes: this.output.length,
             startedAt: this.startedAt,
             pid: this.child?.pid,
+            timeoutArmed: Boolean(this.timeoutTimer),
+            foregroundAttached: Boolean(this.abortListener),
         };
     }
     kill(reason) {
         if (this.status !== "running")
             return;
-        this.append(reason === "timeout" ? "\n[command timed out: process tree killed]" : "\n[command aborted: process tree killed]");
+        this.append(reason === "timeout"
+            ? "\n[command timed out: process group killed; setsid descendants may escape]"
+            : "\n[command aborted: process group killed; setsid descendants may escape]");
         this.status = reason;
+        this.cleanupLifecycle();
         if (this.resident)
             this.resident.kill();
         else if (this.child)
-            killProcessTree(this.child, "SIGTERM");
+            terminateProcessTree(this.child);
         this.resolveDone();
         this.notify();
     }
@@ -206,8 +252,7 @@ class ResidentShell {
     }
     kill() {
         this.dead = true;
-        killProcessTree(this.child, "SIGTERM");
-        setTimeout(() => killProcessTree(this.child, "SIGKILL"), 2000);
+        terminateProcessTree(this.child);
         const index = pool.indexOf(this);
         if (index >= 0)
             pool.splice(index, 1);
@@ -217,7 +262,7 @@ export async function executeShellCommand(command, cwd, options = {}) {
     pruneJobs();
     if (options.signal?.aborted)
         return { ok: false, status: "killed", output: "command aborted before start" };
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = normalizeTimeoutMs(options.timeoutMs, DEFAULT_TIMEOUT_MS);
     const backgroundAfterMs = options.backgroundAfterMs ?? DEFAULT_BACKGROUND_MS;
     const useResident = process.platform !== "win32" && !needsOneShot(command);
     let job;
@@ -236,16 +281,15 @@ export async function executeShellCommand(command, cwd, options = {}) {
         job = startOneShot(command, cwd);
     }
     jobs.set(job.id, job);
-    const timer = setTimeout(() => job.kill("timeout"), timeoutMs);
-    const onAbort = () => job.kill("killed");
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    const cleanup = () => {
-        clearTimeout(timer);
-        options.signal?.removeEventListener("abort", onAbort);
-    };
+    job.armTimeout(timeoutMs);
+    job.attachAbort(options.signal);
+    if (options.signal?.aborted)
+        job.kill("killed");
     await Promise.race([job.done(), delay(backgroundAfterMs)]);
     if (job.status === "running") {
-        cleanup();
+        // Task keeps running: only the foreground Esc/abort association is
+        // released. The timeout stays armed until the job really finishes.
+        job.detachForeground();
         return {
             ok: true,
             status: "running",
@@ -254,7 +298,6 @@ export async function executeShellCommand(command, cwd, options = {}) {
             nextPollMs: job.nextPollMs,
         };
     }
-    cleanup();
     return syncResult(job);
 }
 export async function pollShellSession(id, waitMs = 0) {

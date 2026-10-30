@@ -1,6 +1,8 @@
 import { parsePatch } from "../../patch/parse.js";
 import { planPatch, reviewPatchPlan } from "../../patch/plan.js";
 import { applyPatchPlan } from "../../patch/apply.js";
+import { DEFAULT_ALLOW_OPTIONS, approvalRequestId, type ApprovalOption, type ApprovalRequest } from "../approval.js";
+import { approvalKey, isPreApproved, rememberApproval } from "../approval-store.js";
 import type { Tool } from "./types.js";
 import { invalid, requiredString } from "./validate.js";
 
@@ -38,10 +40,29 @@ export const applyPatchTool: Tool = {
         if (review.kind === "deny")
             return { ok: false, output: `patch denied: ${review.reason}` };
         if (review.kind === "pending") {
-            return {
-                ok: false,
-                output: `patch needs approval (${review.reason}), but no approval resolver is registered; nothing was written.`,
-            };
+            const key = approvalKey("apply_patch", call, ctx.cwd);
+            const catalogHash = ctx.catalogHash ?? "";
+            if (!isPreApproved(key, catalogHash)) {
+                if (!ctx.requestApproval) {
+                    return {
+                        ok: false,
+                        output: `patch needs approval (${review.reason}), but no approval resolver is registered; nothing was written.`,
+                    };
+                }
+                const request = patchApprovalRequest(call, review, planned.plan);
+                let decision;
+                try {
+                    decision = await ctx.requestApproval(request);
+                }
+                catch (err: any) {
+                    return { ok: false, output: `patch approval failed (fail closed): ${err?.message ?? String(err)}` };
+                }
+                if (!decision || decision.kind !== "allow") {
+                    const reason = decision?.kind === "deny" ? decision.reason : decision?.kind === "feedback" ? decision.text : "no allow decision";
+                    return { ok: false, output: `patch denied: ${reason ?? "no reason"}; nothing was written.` };
+                }
+                rememberApproval(key, catalogHash, decision.scope);
+            }
         }
         const applied = applyPatchPlan(planned.plan);
         const warnings = applied.warnings.length > 0 ? "\n\nwarnings:\n" + applied.warnings.map((line) => "- " + line).join("\n") : "";
@@ -52,3 +73,23 @@ export const applyPatchTool: Tool = {
         };
     },
 };
+
+function patchApprovalRequest(call: any, review: { reason: string; changedLines: number }, plan: any): ApprovalRequest {
+    const options = DEFAULT_ALLOW_OPTIONS.map((option) => ({ ...option })) as ApprovalOption[];
+    const denyIndex = options.findIndex((option) => option.kind === "deny");
+    const files = Array.isArray(plan?.files) ? plan.files : [];
+    const diff = files.map((file: any) => `${file.relPath ?? file.path}: ${file.changedLines ?? "?"} line(s)`).join("\n");
+    return {
+        id: approvalRequestId(),
+        tool: "apply_patch",
+        args: call,
+        reason: review.reason.includes("sensitive") ? "sensitive_path" : "large_diff",
+        options,
+        preview: diff ? { kind: "diff", text: diff } : undefined,
+        tier: 2,
+        prompt: `Apply patch? ${review.reason}`,
+        source: "system",
+        defaultIndex: denyIndex >= 0 ? denyIndex : 0,
+        timeoutMs: 120_000,
+    };
+}

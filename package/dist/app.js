@@ -15,6 +15,8 @@ import { AGENT_SYSTEM_PROMPT, stripToolCalls, } from "./agent/protocol.js";
 import { compactionConfigFromEnv } from "./agent/compaction.js";
 import { resolveToolProtocol, withToolCapability } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
+import { decisionForOption, parseApprovalChoice } from "./agent/approval.js";
+import { nativeApproval } from "./agent/approval-native.js";
 import { toolSchemas } from "./agent/tool-schemas.js";
 import { shutdownShells } from "./agent/shell-session.js";
 import { Banner } from "./ui/Banner.js";
@@ -24,9 +26,10 @@ import { MessageBubble } from "./ui/Message.js";
 import { Prompt } from "./ui/Prompt.js";
 import { Picker } from "./ui/Picker.js";
 import { COMMANDS, findCommand, parseSlash } from "./commands/index.js";
-import { saveScopedKey } from "./commands/login.js";
-import { getProvider, getProviderOrThrow, PROVIDERS } from "./providers/index.js";
-import { loadConfig, saveConfig, resolveApiKey, getLegacy, } from "./config/store.js";
+import { maskLoginEcho, saveScopedKey } from "./commands/login.js";
+import { isValidModelId } from "./commands/model.js";
+import { getProvider, getProviderOrThrow, probeProvider, PROVIDERS } from "./providers/index.js";
+import { loadConfig, saveConfig, resolveApiKey, resolveProviderKey, getLegacy, } from "./config/store.js";
 import { getTheme } from "./config/themes.js";
 import { createStartupTranscript } from "./lib/startup.js";
 import { shouldUseLiveStreamingUi, shouldUseStableTerminalUi } from "./lib/uiMode.js";
@@ -36,23 +39,6 @@ import { createSessionLog, latestUnclosedSession, loggingEnabled, openSessionLog
 import { resumeSession } from "./session/projection.js";
 import { isTrusted, trustProject } from "./config/trust.js";
 import { TrustGate } from "./ui/TrustGate.js";
-/**
- * Mask the secret part of a `/login` invocation in the transcript:
- * `/login prov` → unchanged, `/login prov <key>` → key masked,
- * `/login prov model <key>` → provider/model shown, key masked.
- */
-function maskLoginEcho(args) {
-    const parts = ["/login", args[0] ?? ""];
-    if (args.length === 2) {
-        parts.push("********");
-    }
-    else if (args.length >= 3) {
-        parts.push(args[1]);
-        for (let i = 2; i < args.length; i += 1)
-            parts.push("********");
-    }
-    return parts.filter((p) => p !== "").join(" ");
-}
 function positiveInt(value, fallback) {
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
@@ -74,6 +60,17 @@ function optionalBudget(name) {
     const value = Number(process.env[name]);
     return Number.isFinite(value) && value > 0 ? value : undefined;
 }
+function uniqueModelList(models) {
+    const seen = new Set();
+    const result = [];
+    for (const model of models) {
+        if (!model?.id || seen.has(model.id))
+            continue;
+        seen.add(model.id);
+        result.push(model);
+    }
+    return result;
+}
 function unclosedNotice(session) {
     const where = session.cwd || "(unknown directory)";
     const files = session.activeFiles?.length ?? 0;
@@ -91,7 +88,7 @@ function streamErrorMessage(message, provider, model) {
     }
     return `Error: ${message}`;
 }
-export const App = ({ initialPrompt, resume }) => {
+export const App = ({ initialPrompt, resume, ui = "tty" }) => {
     const { exit } = useApp();
     const startupRef = useRef(null);
     if (!startupRef.current) {
@@ -166,6 +163,9 @@ export const App = ({ initialPrompt, resume }) => {
     const [pendingLogin, setPendingLogin] = useState(null);
     const [picker, setPicker] = useState(null);
     const [pickerIndex, setPickerIndex] = useState(0);
+    const modelSetupIdRef = useRef(0);
+    const openModelSetupPickerRef = useRef(null);
+    const plainApprovalRef = useRef(null);
     const [busy, setBusy] = useState(false);
     const [expanded, setExpanded] = useState(false);
     const steerQueueRef = useRef([]);
@@ -186,13 +186,15 @@ export const App = ({ initialPrompt, resume }) => {
     // and renders nothing when even the smallest font is too wide.
     const showBanner = transcript.length <= startup.transcript.length && !busy;
     const promptPlaceholder = pendingLogin
-        ? pendingLogin.step === "provider"
-            ? "Provider id (e.g. deepseek) · Esc to cancel"
-            : pendingLogin.step === "model"
+        ? pendingLogin.step === "loading-models"
+            ? "Loading available models…"
+            : pendingLogin.step === "model-manual"
                 ? "Model id (e.g. deepseek-chat) · Esc to cancel"
-                : pendingLogin.provider && getLegacy(pendingLogin.provider)
-                    ? "Paste API key (masked), or type 'keep' · Esc to cancel"
-                    : "Paste API key (masked) · Esc to cancel"
+                : pendingLogin.hasExistingKey
+                    ? "API key (masked), or Enter to keep existing key · Esc to cancel"
+                    : pendingLogin.provider && getLegacy(pendingLogin.provider)
+                        ? "API key (masked), or type 'keep' · Esc to cancel"
+                        : "Paste API key (masked) · Esc to cancel"
         : undefined;
     const promptMask = pendingLogin?.step === "key" ? "*" : undefined;
     // Persist config whenever it changes.
@@ -208,11 +210,14 @@ export const App = ({ initialPrompt, resume }) => {
     // Esc cancels streaming. Double Ctrl+C quits.
     useInput((inputChar, key) => {
         if (picker) {
-            if (key.escape) {
-                picker.onCancel?.();
+            if (key.escape || (key.ctrl && inputChar === "c")) {
+                const onCancel = picker.onCancel;
                 setPicker(null);
+                onCancel?.();
                 return;
             }
+            if (picker.items.length === 0)
+                return;
             if (key.upArrow) {
                 setPickerIndex((i) => Math.max(0, i - 1));
                 return;
@@ -231,11 +236,16 @@ export const App = ({ initialPrompt, resume }) => {
             }
             return;
         }
-        if (key.escape) {
+        if (key.escape || (key.ctrl && inputChar === "c" && (plainApprovalRef.current || pendingLogin))) {
+            if (plainApprovalRef.current) {
+                plainApprovalRef.current.cancel();
+                return;
+            }
             if (pendingLogin) {
+                modelSetupIdRef.current += 1;
                 setPendingLogin(null);
                 setInput("");
-                pushSystem("API key entry cancelled.");
+                pushSystem("Model configuration cancelled. Existing settings were not changed.");
                 return;
             }
             if (abortRef.current) {
@@ -275,6 +285,284 @@ export const App = ({ initialPrompt, resume }) => {
             { id: idRef.current, role: "user", content: text, markdown: false },
         ]);
     }, []);
+    const finishModelSetup = useCallback((setup, providerId, modelId, keyReceipt = undefined) => {
+        if (setup.id !== modelSetupIdRef.current)
+            return;
+        const provider = getProvider(providerId);
+        if (!provider) {
+            setPendingLogin(null);
+            setInput("");
+            pushSystem("Provider is no longer available. Configuration was not changed.");
+            return;
+        }
+        setConfig((current) => ({ ...current, providerId: provider.id, model: modelId }));
+        setPendingLogin(null);
+        setInput("");
+        modelSetupIdRef.current += 1;
+        pushSystem(keyReceipt
+            ? `${keyReceipt}\nActive model: ${provider.id} · ${modelId}.`
+            : `Provider/model set to ${provider.id} · ${modelId}. ${provider.authEnv.length === 0 ? "No API key is required." : ""}`);
+    }, [pushSystem]);
+    const continueModelSetup = useCallback((setup, providerId, modelId) => {
+        if (setup.id !== modelSetupIdRef.current)
+            return;
+        const provider = getProvider(providerId);
+        if (!provider) {
+            setPendingLogin(null);
+            pushSystem("Unknown provider. Configuration was not changed.");
+            return;
+        }
+        if (provider.authEnv.length === 0) {
+            finishModelSetup(setup, provider.id, modelId);
+            return;
+        }
+        const existing = resolveApiKey(provider.id, modelId, provider.authEnv);
+        setPendingLogin({
+            ...setup,
+            step: "key",
+            provider: provider.id,
+            model: modelId,
+            hasExistingKey: existing.status === "ok",
+        });
+        setPicker(null);
+        setInput("");
+        pushSystem(`Selected ${provider.label} · ${modelId}. Enter the API key for this provider. ` +
+            "The key is provider-wide and will be reused for its models." +
+            (existing.status === "ok" ? " Press Enter on an empty input to keep the existing key." : ""));
+    }, [finishModelSetup, pushSystem]);
+    const openModelSetupPicker = useCallback(async (setup, step, providerId = undefined) => {
+        if (setup.id !== modelSetupIdRef.current)
+            return;
+        if (step === "provider") {
+            setPendingLogin({ ...setup, step: "provider", provider: undefined, model: undefined });
+            const currentProvider = setup.provider ?? config.providerId;
+            setPickerIndex(Math.max(0, PROVIDERS.findIndex((provider) => provider.id === currentProvider)));
+            setPicker({
+                title: "Configure provider · choose a provider",
+                current: currentProvider,
+                items: PROVIDERS.map((provider) => ({
+                    value: provider.id,
+                    label: `${provider.id.padEnd(12)} ${provider.label}`,
+                    hint: provider.authEnv.length === 0 ? "no API key required" : provider.defaultModel,
+                })),
+                onSelect: (id) => {
+                    const selected = getProvider(id);
+                    if (!selected)
+                        return;
+                    const nextSetup = {
+                        ...setup,
+                        provider: selected.id,
+                        model: selected.id === config.providerId ? config.model : selected.defaultModel,
+                    };
+                    void openModelSetupPickerRef.current?.(nextSetup, "model", selected.id);
+                },
+                onCancel: () => {
+                    if (setup.id !== modelSetupIdRef.current)
+                        return;
+                    modelSetupIdRef.current += 1;
+                    setPendingLogin(null);
+                    setInput("");
+                    pushSystem("Model configuration cancelled. Existing settings were not changed.");
+                },
+            });
+            return;
+        }
+        const provider = getProvider(providerId);
+        if (!provider) {
+            setPendingLogin(null);
+            pushSystem("Unknown provider. Configuration was not changed.");
+            return;
+        }
+        setPendingLogin({ ...setup, step: "loading-models", provider: provider.id });
+        setInput("");
+        setPickerIndex(0);
+        setPicker({
+            title: `Loading models · ${provider.label}`,
+            current: undefined,
+            items: [],
+            onSelect: () => { },
+            onCancel: () => {
+                if (setup.id !== modelSetupIdRef.current)
+                    return;
+                modelSetupIdRef.current += 1;
+                setPendingLogin(null);
+                setInput("");
+                pushSystem("Model configuration cancelled. Existing settings were not changed.");
+            },
+        });
+        const { key } = resolveProviderKey(provider.id, provider.authEnv);
+        let models = [];
+        let online = false;
+        try {
+            models = uniqueModelList(await provider.listModels(key));
+            online = await probeProvider(provider, key);
+        }
+        catch {
+            online = false;
+        }
+        if (setup.id !== modelSetupIdRef.current)
+            return;
+        if (!models.some((model) => model.id === provider.defaultModel))
+            models.unshift({ id: provider.defaultModel, label: "provider default" });
+        const manualModelValue = "__fastcode_manual_model_id__";
+        const items = [
+            ...models.slice(0, 49).map((model) => ({
+                value: model.id,
+                label: model.id,
+                hint: model.label && model.label !== model.id ? model.label : undefined,
+            })),
+            { value: manualModelValue, label: "Enter model ID manually…" },
+        ];
+        const currentModel = setup.model ?? provider.defaultModel;
+        const currentIndex = items.findIndex((item) => item.value === currentModel);
+        setPendingLogin({ ...setup, step: "model", provider: provider.id, model: currentModel });
+        setPickerIndex(currentIndex >= 0 ? currentIndex : 0);
+        pushSystem(`Models for ${provider.label}: ${models.length}${online ? "" : " (offline — showing built-in/cached models)"}.`);
+        setPicker({
+            title: `Configure model · ${provider.label}${online ? "" : " · offline list"}`,
+            current: currentModel,
+            items,
+            onSelect: (id) => {
+                if (setup.id !== modelSetupIdRef.current)
+                    return;
+                if (id === manualModelValue) {
+                    setPendingLogin({ ...setup, step: "model-manual", provider: provider.id });
+                    setInput("");
+                    pushSystem("Enter a model ID (letters, numbers, . _ : / + -; up to 200 characters).");
+                    return;
+                }
+                continueModelSetup(setup, provider.id, id);
+            },
+            onCancel: () => {
+                if (setup.id === modelSetupIdRef.current)
+                    void openModelSetupPickerRef.current?.(setup, "provider");
+            },
+        });
+    }, [config.model, config.providerId, continueModelSetup, pushSystem]);
+    openModelSetupPickerRef.current = openModelSetupPicker;
+    const startModelSetup = useCallback(({ provider, model, flow = "login" }) => {
+        const setup = {
+            id: ++modelSetupIdRef.current,
+            flow,
+            originalProvider: config.providerId,
+            originalModel: config.model,
+            provider,
+            model,
+        };
+        setPendingLogin(setup);
+        setInput("");
+        if (flow === "model" && provider) {
+            void openModelSetupPicker(setup, "model", provider);
+        }
+        else if (provider && model) {
+            continueModelSetup(setup, provider, model);
+        }
+        else if (provider) {
+            void openModelSetupPicker(setup, "model", provider);
+        }
+        else {
+            void openModelSetupPicker(setup, "provider");
+        }
+    }, [config.model, config.providerId, continueModelSetup, openModelSetupPicker]);
+    const requestApproval = useCallback(async (request) => {
+        const defaultDecision = () => {
+            const option = request.options[request.defaultIndex ?? 0];
+            if (!option || option.kind === "allow")
+                return { kind: "deny", reason: "approval timeout/cancel (fail closed)" };
+            return decisionForOption(option);
+        };
+        if (ui === "native" && process.platform !== "win32") {
+            const native = await nativeApproval(request, abortRef.current?.signal);
+            if (native)
+                return native;
+        }
+        const preview = request.preview?.kind === "diff" && request.preview.text
+            ? `\n\n${request.preview.text.slice(0, 4000)}`
+            : "";
+        pushSystem(`[approval] Tier ${request.tier ?? 2} · ${request.tool}\n${request.prompt ?? "Approval required"}${preview}`);
+        if (ui === "json") {
+            return { kind: "deny", reason: "JSON approval mode requires the headless protocol channel (not wired in this build)" };
+        }
+        const approvalSignal = abortRef.current?.signal;
+        if (ui === "plain") {
+            return await new Promise((resolve) => {
+                let settled = false;
+                let timer;
+                const onAbort = () => finish({ kind: "deny", reason: "run cancelled" });
+                const finish = (decision) => {
+                    if (settled)
+                        return;
+                    settled = true;
+                    if (timer)
+                        clearTimeout(timer);
+                    approvalSignal?.removeEventListener("abort", onAbort);
+                    plainApprovalRef.current = null;
+                    resolve(decision);
+                };
+                approvalSignal?.addEventListener("abort", onAbort, { once: true });
+                const lines = request.options.map((option, index) => `${index + 1}. ${option.label}`);
+                pushSystem(`Choose an option:\n${lines.join("\n")}\nEnter a number (1-${request.options.length}); Esc cancels.`);
+                plainApprovalRef.current = {
+                    request,
+                    submit: (text) => {
+                        const option = parseApprovalChoice(request, text);
+                        if (!option) {
+                            pushSystem(`Invalid approval choice. Enter 1-${request.options.length}.`);
+                            return;
+                        }
+                        finish(decisionForOption(option));
+                    },
+                    cancel: () => finish({ kind: "deny", reason: "cancelled" }),
+                };
+                timer = setTimeout(() => {
+                    pushSystem("Approval timed out; applying the most conservative option.");
+                    finish(defaultDecision());
+                }, Math.max(1000, request.timeoutMs ?? 60_000));
+                timer.unref?.();
+            });
+        }
+        return await new Promise((resolve) => {
+            let settled = false;
+            let timer;
+            const onAbort = () => finish({ kind: "deny", reason: "run cancelled" });
+            const finish = (decision) => {
+                if (settled)
+                    return;
+                settled = true;
+                if (timer)
+                    clearTimeout(timer);
+                approvalSignal?.removeEventListener("abort", onAbort);
+                setPicker(null);
+                resolve(decision);
+            };
+            approvalSignal?.addEventListener("abort", onAbort, { once: true });
+            const items = request.options.map((option, index) => ({
+                value: option.id ?? String(index),
+                label: option.label,
+            }));
+            const defaultIndex = Math.max(0, Math.min(request.defaultIndex ?? 0, items.length - 1));
+            setPickerIndex(defaultIndex);
+            setPicker({
+                title: `Approval · Tier ${request.tier ?? 2}`,
+                items,
+                current: items[defaultIndex]?.value,
+                onSelect: (value) => {
+                    const index = items.findIndex((item) => item.value === value);
+                    const option = request.options[index];
+                    if (option)
+                        finish(decisionForOption(option));
+                    else
+                        finish({ kind: "deny", reason: "unknown approval option" });
+                },
+                onCancel: () => finish({ kind: "deny", reason: "cancelled" }),
+            });
+            timer = setTimeout(() => {
+                pushSystem("Approval timed out; applying the most conservative option.");
+                finish(defaultDecision());
+            }, Math.max(1000, request.timeoutMs ?? 60_000));
+            timer.unref?.();
+        });
+    }, [pushSystem, ui]);
     const actions = useMemo(() => ({
         setProvider: (id) => setConfig((c) => ({ ...c, providerId: id })),
         setModel: (id) => setConfig((c) => ({ ...c, model: id })),
@@ -316,14 +604,8 @@ export const App = ({ initialPrompt, resume }) => {
         setExpanded: (value) => setExpanded(value),
         setInput: (value) => setInput(value),
         pushSystemMessage: pushSystem,
-        startLogin: ({ provider, model }) => {
-            setPendingLogin({
-                step: provider ? (model ? "key" : "model") : "provider",
-                provider,
-                model,
-            });
-        },
-    }), [pushSystem]);
+        startLogin: (options) => startModelSetup(options),
+    }), [pushSystem, startModelSetup]);
     const runSlash = useCallback(async (raw) => {
         const parsed = parseSlash(raw);
         if (!parsed)
@@ -377,7 +659,9 @@ export const App = ({ initialPrompt, resume }) => {
                 exit();
         }
         catch (err) {
-            pushSystem(`Command failed: ${err.message}`);
+            pushSystem(parsed.name === "login"
+                ? "Login failed. The credential was not included in this error message."
+                : `Command failed: ${err.message}`);
         }
         return true;
     }, [
@@ -404,6 +688,11 @@ export const App = ({ initialPrompt, resume }) => {
         const text = raw.trim();
         if (!text)
             return;
+        if (plainApprovalRef.current) {
+            plainApprovalRef.current.submit(text);
+            setInput("");
+            return;
+        }
         if (busy) {
             if (text.startsWith("/")) {
                 await runSlash(text);
@@ -488,6 +777,7 @@ export const App = ({ initialPrompt, resume }) => {
                     steerQueueRef.current = [];
                     return queued;
                 },
+                requestApproval,
                 onDelta: (delta, full) => {
                     if (!sawDeltaRef.current) {
                         sawDeltaRef.current = true;
@@ -621,6 +911,7 @@ export const App = ({ initialPrompt, resume }) => {
         history,
         pushSystem,
         pushUser,
+        requestApproval,
         runSlash,
     ]);
     // Guided `/login`: provider → model → key. Text prompts only; the key step
@@ -628,57 +919,50 @@ export const App = ({ initialPrompt, resume }) => {
     const handleWizardSubmit = useCallback(async (raw) => {
         const value = raw.trim();
         setInput("");
-        if (!value || !pendingLogin)
+        if (!pendingLogin)
             return;
-        if (pendingLogin.step === "provider") {
-            const provider = getProvider(value);
-            if (!provider) {
-                pushSystem(`Unknown provider "${value}". Available: ${PROVIDERS.map((p) => p.id).join(", ")}`);
+        if (pendingLogin.step === "model-manual") {
+            if (!isValidModelId(value)) {
+                pushSystem("Invalid model ID. Use 1-200 letters, numbers, or . _ : / + -; configuration was not changed.");
                 return;
             }
-            if (provider.authEnv.length === 0) {
-                pushSystem(`${provider.label} doesn't require an API key. Nothing to save.`);
-                setPendingLogin(null);
-                return;
-            }
-            setPendingLogin({ step: "model", provider: provider.id });
-            const models = await provider.listModels(undefined).catch(() => []);
-            const names = models.slice(0, 8).map((m) => m.id).join(", ");
-            pushSystem(`Provider: ${provider.label} (${provider.id}).\n` +
-                `Type the model id to bind this key to — e.g. \`${provider.defaultModel}\`.` +
-                (names ? `\n  known models: ${names}` : ""));
+            continueModelSetup(pendingLogin, pendingLogin.provider, value);
             return;
         }
-        if (pendingLogin.step === "model") {
-            const provider = getProvider(pendingLogin.provider);
-            if (!provider) {
-                setPendingLogin(null);
-                return;
-            }
-            setPendingLogin({ step: "key", provider: provider.id, model: value });
-            pushSystem(`Saved from model: ${provider.id} · ${value}.\n` +
-                `This key will be reused by every ${provider.label} model.\n` +
-                `Paste the API key (input is masked).` +
-                (getLegacy(provider.id) ? `\nOr type \`keep\` to re-bind the stored ${provider.label} key.` : ""));
+        if (pendingLogin.step !== "key")
             return;
-        }
         const provider = getProvider(pendingLogin.provider);
         if (!provider) {
             setPendingLogin(null);
+            pushSystem("Provider is no longer available. Configuration was not changed.");
+            return;
+        }
+        if (!value) {
+            if (pendingLogin.hasExistingKey) {
+                finishModelSetup(pendingLogin, provider.id, pendingLogin.model);
+            }
+            else {
+                pushSystem("An API key is required for this provider. Configuration was not changed.");
+            }
             return;
         }
         let key = value;
         if (value.toLowerCase() === "keep") {
             const legacy = getLegacy(provider.id);
             if (!legacy) {
-                pushSystem(`No stored ${provider.label} key to reuse — paste the key instead.`);
+                pushSystem(`No stored ${provider.label} key to reuse. Paste the API key; configuration was not changed.`);
                 return;
             }
             key = legacy;
         }
-        pushSystem(saveScopedKey(provider.id, provider.label, pendingLogin.model, key));
-        setPendingLogin(null);
-    }, [pendingLogin, pushSystem]);
+        try {
+            const receipt = saveScopedKey(provider.id, provider.label, pendingLogin.model, key);
+            finishModelSetup(pendingLogin, provider.id, pendingLogin.model, receipt);
+        }
+        catch {
+            pushSystem("Could not save the API key. Credential details were omitted; model settings were not changed.");
+        }
+    }, [continueModelSetup, finishModelSetup, pendingLogin, pushSystem]);
     useEffect(() => {
         if (!initialPrompt || initialPromptSubmittedRef.current)
             return;

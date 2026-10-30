@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前版本标识：**0.1.6-beta（测试版）** — `package.json` 已为 `0.1.6-beta`；tag `v0.1.6-beta` / GitHub Release / npm（beta tag）均已发布
+> 当前工作树：**0.1.7-beta**（未发布）；历史条目中的 0.1.6-beta 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -441,3 +441,30 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
 - 运行时：`FASTCODE_TOOL_PROTOCOL=legacy`（默认）、`FASTCODE_COMPACTION=0`、
   `FASTCODE_SESSION_LOG=0`、`FASTCODE_SSE_IDLE_MS` 调整。
 - 安装：保留 `~/opt/fastcode-termux.old-*`；数据备份 `~/.fastcode.bak-*`。
+
+---
+
+## 0.1.7-beta（2026-10-30，工作树未发布）
+
+### 总览
+
+- 版本：`package.json` = `0.1.7-beta`；npm/GitHub Release 仍为 0.1.6-beta。
+- 范围：Guardrails 三态与 AST 第二意见、审批 resolver、模型配置 TUI、会话 manifest、配置缓存、技能完整性、Termux 真机验收。
+- 验证：PC smoke **207/207**；Termux 真机 smoke **212/212**（0.1.6-beta 同源构建）。
+
+### 关键改动
+
+| 主题 | 改动 | 落点 |
+|---|---|---|
+| Guardrails | Hard Block / Soft Gate / allow 三态；`.env` 删除 soft、截断/覆盖 hard；printenv 分级 | `agent/guards.ts` |
+| AST | 纯 JS `bash-parser`，只升不降；`-c`/`find -exec`/`eval/source/.`/同段赋值 | `agent/shell-ast.ts` |
+| 审批 | pending request；once/session/always；catalogHash；trust --forget；tty/native/plain/json | `agent/approval*.ts`、`registry.ts`、`app.ts` |
+| 模型配置 | `/provider` `/model` `/login` 无参数统一向导；取消不改配置；key 掩码 | `app.ts`、`commands/{provider,model,login}.ts` |
+| 会话 | manifest contentHash/sessionHash/lastFactSeq；剪枝后可恢复；工具配对修复 | `session/{log,projection}.ts` |
+| 配置/技能 | stat 指纹缓存；技能目录 sha256；`/skills verify --confirm` | `config/store.ts`、`skills/manager.ts` |
+| 构建 | `cli-main.ts` 避免 tsc 覆盖 bundle；highlight 子集；便携包需 bash-parser 闭包 | `tsconfig*`、`scripts/*` |
+
+### 回退
+
+- 运行时：`FASTCODE_TOOL_PROTOCOL=legacy`、`FASTCODE_COMPACTION=0`、`FASTCODE_SESSION_LOG=0`。
+- 安装：保留 `~/opt/fastcode-termux.old-*` 与 `~/.fastcode.bak-*`。

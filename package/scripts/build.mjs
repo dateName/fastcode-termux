@@ -14,7 +14,7 @@ import * as esbuild from "esbuild";
 import { chmodSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { stubOptionalDeps, createInlineCfontsFonts, bannerJs } from "./esbuild-plugins.mjs";
+import { stubOptionalDeps, createInlineCfontsFonts, trimHighlightLanguages, bannerJs } from "./esbuild-plugins.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = dirname(here);
@@ -33,7 +33,7 @@ const result = await esbuild.build({
   outfile,
   external: ["node:*"],
   banner: { js: bannerJs },
-  plugins: [stubOptionalDeps, createInlineCfontsFonts(pkgRoot)],
+  plugins: [stubOptionalDeps, trimHighlightLanguages(pkgRoot), createInlineCfontsFonts(pkgRoot)],
   minify,
   sourcemap: false,
   treeShaking: true,

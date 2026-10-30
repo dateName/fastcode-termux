@@ -7,6 +7,8 @@ export const killCommand = {
         const id = ctx.args[0];
         if (!id)
             return { message: "Usage: /kill <session-id>  (see /jobs)" };
-        return { message: killShellSession(id) ? `Killed ${id} (process tree).` : `No running session named ${id}.` };
+        return { message: killShellSession(id)
+                ? `Killed ${id} (process group killed; setsid descendants may escape).`
+                : `No running session named ${id}.` };
     },
 };

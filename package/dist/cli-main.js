@@ -15,7 +15,7 @@ import { collectDiagnostics, formatDiagnostics } from "./lib/diagnostics.js";
 import { existsSync } from "node:fs";
 import { latestSessionFile, listSessions, projectionPath, readSession, resolveSessionFile } from "./session/log.js";
 import { readProjection, sessionMetaFromFile } from "./session/projection.js";
-import { listTrusted, trustProject, untrustProject } from "./config/trust.js";
+import { forgetToolApproval, listToolApprovals, listTrusted, trustProject, untrustProject } from "./config/trust.js";
 const NL = String.fromCharCode(10);
 const HELP = [
     "",
@@ -39,7 +39,8 @@ const HELP = [
     "  Trust (first-run safety)",
     "    $ fastcode trust [dir]           Trust a folder (enables agent tools)",
     "    $ fastcode untrust [dir]         Revoke trust for a folder",
-    "    $ fastcode trusted               List trusted folders",
+    "    $ fastcode trusted               List trusted folders and remembered approvals",
+    "    $ fastcode trust --forget <key>  Revoke one remembered approval",
     "",
     "  Skills & maintenance",
     "    $ fastcode skills list           Print installed skills",
@@ -63,16 +64,25 @@ const HELP = [
     "  DASHSCOPE_API_KEY) or from /login inside the TUI.",
     "  Override the data directory with FASTCODE_HOME.",
     "",
+    "  Approval UI:  --ui tty|native|plain|json   (default tty)",
+    "",
 ].join(NL);
-export async function parseCli(): Promise<any> {
+export async function parseCli() {
     const cli = meow(HELP, {
         importMeta: import.meta,
         flags: {
             version: { type: "boolean", shortFlag: "v" },
+            ui: { type: "string", default: "tty" },
+            forget: { type: "string" },
         },
         autoHelp: true,
         autoVersion: true,
     });
+    const uiMode = String(cli.flags.ui ?? "tty").toLowerCase();
+    if (!["tty", "native", "plain", "json"].includes(uiMode)) {
+        console.error("Unknown --ui mode: " + uiMode + " (use tty, native, plain, or json)");
+        process.exit(1);
+    }
     // First positional dictates the sub-command. Anything else is a prompt.
     const [first, ...rest] = cli.input;
     if (first === "provider") {
@@ -214,12 +224,22 @@ export async function parseCli(): Promise<any> {
     if (first === "trust" || first === "untrust" || first === "trusted") {
         if (first === "trusted") {
             const all = listTrusted();
-            if (all.length === 0) {
+            if (all.length === 0)
                 console.log("No trusted folders yet. Run: fastcode trust");
-                return { done: true };
-            }
             for (const entry of all)
                 console.log("  " + entry.path + "   (" + entry.addedAt + ")");
+            const approvals = listToolApprovals();
+            if (approvals.length > 0) {
+                console.log("");
+                console.log("Remembered tool approvals:");
+                for (const entry of approvals)
+                    console.log("  " + entry.key + "   catalog=" + entry.catalogHash);
+            }
+            return { done: true };
+        }
+        if (first === "trust" && typeof cli.flags.forget === "string") {
+            const key = String(cli.flags.forget);
+            console.log(forgetToolApproval(key) ? "Forgot approval: " + key : "No such approval: " + key);
             return { done: true };
         }
         const dir = rest[0] ?? process.cwd();
@@ -293,7 +313,7 @@ export async function parseCli(): Promise<any> {
     }
     // No sub-command → treat all positionals as the initial prompt.
     const prompt = cli.input.length > 0 ? cli.input.join(" ") : undefined;
-    return prompt ? { prompt, done: false } : { done: false };
+    return prompt ? { prompt, done: false, ui: uiMode } : { done: false, ui: uiMode };
 }
 function compareVersions(a, b) {
     const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
@@ -314,7 +334,7 @@ async function updateReport() {
         const res = await fetch(registry, { headers: { accept: "application/json" } });
         if (!res.ok)
             throw new Error(res.status + " " + res.statusText);
-        const payload: any = await res.json();
+        const payload = await res.json();
         const latest = payload.version;
         const cmp = compareVersions(latest, meta.version);
         lines.push("Published latest: " + latest);

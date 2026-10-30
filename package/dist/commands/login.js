@@ -21,13 +21,25 @@ export function saveScopedKey(providerId, providerLabel, model, key) {
         `Remove with /logout ${providerId}`,
     ].join("\n");
 }
+export function maskLoginEcho(args) {
+    const parts = ["/login", args[0] ?? ""];
+    if (args.length === 2) {
+        parts.push("********");
+    }
+    else if (args.length >= 3) {
+        parts.push(args[1]);
+        for (let i = 2; i < args.length; i += 1)
+            parts.push("********");
+    }
+    return parts.filter((part) => part !== "").join(" ");
+}
 export const loginCommand = {
     name: "login",
     description: "Bind a provider-wide API key. Usage: /login [provider] [model] [key]",
-    run({ args, state, actions }) {
+    run({ args, actions }) {
         if (args.length === 0) {
-            actions.startLogin({});
-            return { message: introText(state) };
+            actions.startLogin({ flow: "login" });
+            return { message: "Configure a provider: choose a provider and model, then enter its API key." };
         }
         const provider = getProvider(args[0]);
         if (!provider) {
@@ -49,15 +61,3 @@ export const loginCommand = {
         return { message: saveScopedKey(provider.id, provider.label, model, key) };
     },
 };
-function introText(state) {
-    const env = getProvider(state.providerId)?.authEnv?.[0] ?? "PROVIDER_API_KEY";
-    return [
-        "Bind a provider-wide API key (reused by every model of that provider).",
-        "",
-        `  current provider: ${state.providerId}`,
-        "",
-        "FastCode will ask for the provider, then optionally a model name, then the key.",
-        "  one-liner:  /login <provider> <model> <key>",
-        `  or set:     export ${env}=<key>   (provider-wide, any model)`,
-    ].join("\n");
-}

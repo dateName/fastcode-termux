@@ -9,7 +9,7 @@ export const aboutCommand = {
             `Platform: ${platformLabel()}  •  Node ${process.version}`,
             ``,
             `GitHub:   https://github.com/dateName/fastcode-termux`,
-            `Skills:   https://skillshub.wtf`,
+            `Skills:   configure a registry with /skills registry <url>`,
         ];
         return { message: lines.join("\n") };
     },

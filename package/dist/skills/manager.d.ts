@@ -1,3 +1,17 @@
+export type SkillIntegrity = "ok" | "drift" | "unverified";
+/**
+ * Pick the skills registry without treating an empty environment variable as
+ * "configured". `??` would keep `""` and make env overrides silently break;
+ * explicit null/empty checks keep `""` and `" "` on the config path. There is
+ * intentionally no built-in default registry.
+ */
+export declare function resolveRegistry(envValue?: string | null, configValue?: string | null): string;
+export declare function hashSkillDirectory(folder: string): string;
+export declare function rebaselineSkills(names?: string[]): Array<{
+    name: string;
+    ok: boolean;
+    warning?: string;
+}>;
 /** List skills currently installed under ~/.fastcode/skills. */
 export declare function listInstalledSkills(): any[];
 /** Look up a skill by name (matches folder name OR frontmatter name). */
@@ -9,6 +23,7 @@ export declare function installSkill(spec: any, opts?: any): Promise<{
     source: any;
     path: string;
     body: any;
+    integrity: SkillIntegrity;
 }>;
 /** Remove an installed skill by name or folder. */
 export declare function uninstallSkill(name: any): boolean;
