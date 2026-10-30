@@ -128,7 +128,7 @@ cd fastcode-portable-0.1.7-beta
 ./fastcode
 ```
 
-The 0.1.6-beta bundle remains under `release/`; build and attach the 0.1.7-beta bundle only when that version is actually released.
+The local `release/` directory now contains 0.1.7-beta assets; GitHub Release and npm still point at 0.1.6-beta until 0.1.7-beta is published.
 Rebuild it with `sh scripts/build-portable.sh`.
 
 ### 3. From source (only if you want to modify or rebuild)

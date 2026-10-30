@@ -3,9 +3,9 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
-> 当前工作树版本：**0.1.7-beta（开发版，未发布）**。`package.json` 已 bump。
-> `release/`、GitHub Release 与 npm 上仍是历史 **0.1.6-beta** 产物；0.1.7-beta 的便携包、
-> npm tarball、tag/Release 需在发布时重新生成，不能把本文件当发布已完成。
+> 当前工作树版本：**0.1.7-beta（开发版，未发布）**。本地 `release/` 已生成
+> 0.1.7-beta 的 portable tar.gz/zip、npm tarball 与 SHA256SUMS；
+> GitHub Release 与 npm 上仍是历史 **0.1.6-beta**。tag/Release/npm 发布仍需另行执行。
 
 ## 0. 先确认 Node 与 git
 

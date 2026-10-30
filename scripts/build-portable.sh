@@ -33,6 +33,11 @@ else
   ( cd "$BUNDLE/package" && npm install --omit=dev --no-audit --no-fund )
 fi
 
+echo "==> 复制 smoke 依赖闭包（bash-parser）"
+node "$ROOT/scripts/copy-smoke-deps.mjs" "$PKG" "$BUNDLE/package"
+mkdir -p "$BUNDLE/scripts"
+cp "$ROOT/scripts/smoke-test.mjs" "$BUNDLE/scripts/smoke-test.mjs"
+
 echo "==> 写入启动脚本"
 cat > "$BUNDLE/fastcode" <<'EOF'
 #!/bin/sh
