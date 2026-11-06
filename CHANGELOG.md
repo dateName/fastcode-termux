@@ -2,9 +2,8 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.7（当前工作树，未发布）
+## 0.1.7
 
-> 状态：`package.json` = `0.1.7`。npm 与 GitHub Release 上的资产仍为 0.1.6-beta，尚未发布 0.1.7。
 > 本版本重点：三态 Guardrails、egress 策略、AST 第二意见、审批闭环、模型配置 TUI、会话 manifest、配置缓存、技能完整性。
 
 **FastCode 0.1.7 已从“单体 TUI”演进为：事件化 runner + 15 工具契约 + 三态 Guardrails + Egress 策略 + AST 第二意见 + 可审批/可回滚的 tool 执行 + 事实流/投影恢复 + 多 provider + Termux 单文件分发。**
