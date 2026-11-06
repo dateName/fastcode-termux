@@ -3,7 +3,7 @@
 审计对象：src/（114 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
 
-> 历史快照：本审计对象为 0.1.6-beta。0.1.7-beta 的 Guardrails/AST/审批变更见 CHANGELOG 0.1.7 与 ARCHITECTURE §5–6。
+> 历史快照：本审计对象为 0.1.6-beta。0.1.7 的 Guardrails/AST/审批/egress 变更见 CHANGELOG 0.1.7 与 ARCHITECTURE §5–6。
 
 ## 级别定义
 
@@ -67,11 +67,19 @@
 
 ### L-1 grep 无单文件大小上限（低，0.1.6-beta 已缓解）
 
-- 位置：src/agent/tools.ts 的 grepFiles()
+- 位置：src/agent/tools/readers.ts 的 grepFiles()
 - 修复：默认跳过 > `FASTCODE_GREP_MAX_BYTES`（1MB）的文件与二进制扩展名；
-  `read_file/read_many` 默认 200KB 截断；`walk()` 支持 `.fastcodeignore`。
-- 仍未解决：正则仍由模型输入直接构造，极端模式仍有 ReDoS 可能；
-  建议后续限制 pattern 长度/复杂度或在子进程执行。
+  `read_file` 支持 offset/limit 行区间，`read_many` 受 `FASTCODE_READ_MANY_MAX_BYTES` 总预算约束；
+  `grep` 增加 pattern 长度上限（1000）、prepare 期正则编译与 `maxResults`；`walk()` 支持 `.fastcodeignore`。
+- 仍未解决：复杂嵌套量词仍可能 ReDoS；未做正则执行超时或子进程隔离，建议后续补上。
+
+### L-2 Egress 策略与出口覆盖（审计结论，2026-11-06）
+
+- 位置：`src/agent/policy/egress.ts`，由 `registry.execute()` 在 prepare 后、approve 前调用。
+- 已覆盖：工具路径读写/删/复制/移动/patch、工具 payload、shell command 内容标记、工具输出回模型前、NDJSON/TUI/session 事件。
+- 不变量：默认 audit；block 态 `EGRESS_DENY` 不生成审批、不写 `trusted.json`；超预算 outbound fail-closed；`ALLOW_DANGEROUS`/`TRUST_ALL`/`sharedDirs` 不可覆盖。
+- 未覆盖：provider 网络正文、session JSONL 落盘正文、CLI 子命令输出、skills/plugins prompt 注入、TTS/share/clipboard、debug 日志；shell 路径仍是启发式。
+- 证据：Windows smoke 275/275、Termux 真机 281/281；真机 egress 套件 28/28、共享存储分层矩阵、`FAIL` 无产品级失败。详见 `ARCHITECTURE.md` §5.1。
 
 ## 二、待办（已定位，尚未修改）
 

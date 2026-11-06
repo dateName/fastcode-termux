@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync, stat
 import { join, dirname } from "node:path";
 import { getPaths, lockdown, ensureDir } from "./paths.js";
 import { DEFAULT_THEME } from "./themes.js";
+import { DEFAULT_EGRESS_CONFIG } from "../agent/policy/defaults.js";
 export const DEFAULT_CONFIG = {
     providerId: "anthropic",
     model: "claude-sonnet-5.5",
@@ -45,6 +46,11 @@ export const DEFAULT_CONFIG = {
     capabilities: {
         toolCalling: {},
     },
+    /**
+     * Application-layer egress policy. Default is audit-only; set
+     * enabled:true + mode:"block" to enforce. See docs/CONFIGURATION.md.
+     */
+    egress: { ...DEFAULT_EGRESS_CONFIG },
 };
 export const AUTH_VERSION = 3;
 let configCache;

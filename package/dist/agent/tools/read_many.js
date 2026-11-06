@@ -1,5 +1,5 @@
-import { readMany } from "./readers.js";
-import { invalid, preparePath, stringArray } from "./validate.js";
+import { readManyResult } from "./readers.js";
+import { invalid, optionalNumber, preparePath, stringArray } from "./validate.js";
 export const readManyTool = {
     name: "read_many",
     stateScope: "call",
@@ -8,6 +8,11 @@ export const readManyTool = {
         let paths;
         try {
             paths = stringArray(call, "paths");
+            if (paths.length === 0)
+                return invalid("paths must contain at least one path");
+            const maxBytes = optionalNumber(call, "maxBytes");
+            if (maxBytes !== undefined && maxBytes < 1)
+                return invalid("maxBytes must be >= 1");
         }
         catch (err) {
             return invalid(err.message);
@@ -20,6 +25,19 @@ export const readManyTool = {
         return { ok: true };
     },
     async execute(call, ctx) {
-        return { ok: true, output: await readMany(ctx.cwd, stringArray(call, "paths")) };
+        const paths = stringArray(call, "paths");
+        const requested = optionalNumber(call, "maxBytes");
+        const maxBytes = requested === undefined ? undefined : Math.max(1, Math.floor(requested));
+        const result = await readManyResult(ctx.cwd, paths, maxBytes);
+        return {
+            ok: true,
+            output: result.text,
+            truncated: result.truncated,
+            totalBytes: result.totalBytes,
+            returnedBytes: result.returnedBytes,
+            filesRead: result.filesRead,
+            filesSkipped: result.filesSkipped,
+            hint: result.filesSkipped > 0 ? `${result.filesSkipped} file(s) skipped by the read_many byte budget.` : undefined,
+        };
     },
 };

@@ -171,6 +171,8 @@ export async function* runAgent(options) {
         }
         if (resetNotice)
             yield { type: "notice", text: resetNotice };
+        if (streamed.retried > 0)
+            yield { type: "notice", text: `Network stream was interrupted; retried ${streamed.retried} time(s).` };
         if (streamed.usage) {
             consumedInput += streamed.usage.inputTokens ?? promptTokens;
             spentCost += streamed.usage.costUsd ?? 0;
@@ -236,7 +238,9 @@ export async function* runAgent(options) {
                     ? { ok: false, output: parseError }
                     : await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
                 trackSideEffects(activeFiles, result.sideEffects);
-                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects };
+                if (result.egress)
+                    yield { type: "egress_denied", ...result.egress };
+                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result) };
                 history = [...history, { role: "tool", toolCallId: id, content: String(result.output ?? "") }];
             }
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
@@ -262,7 +266,7 @@ export async function* runAgent(options) {
                     "Re-emit a complete <fastcode_tool>{\"tool\":...}</fastcode_tool> block.\n" +
                     parsed.errors.join("\n");
                 yield { type: "tool_call", id, call };
-                yield { type: "tool_result", id, call, ok: false, output };
+                yield { type: "tool_result", id, call, ok: false, output, code: "INVALID_ARGS", hint: "Re-emit a complete tool call." };
                 history = [...history, { role: "user", content: formatToolResults([{ call, ok: false, output }]) }];
                 yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
                 continue;
@@ -301,7 +305,9 @@ export async function* runAgent(options) {
             const result = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
             results.push({ call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects });
             trackSideEffects(activeFiles, result.sideEffects);
-            yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects };
+            if (result.egress)
+                yield { type: "egress_denied", ...result.egress };
+            yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result) };
         }
         if (results.length > 0)
             history = [...history, { role: "user", content: formatToolResults(results) }];
@@ -342,6 +348,21 @@ function positive(value, fallback) {
 }
 function optionalPositive(value) {
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+function toolResultMeta(result) {
+    return {
+        sideEffects: result.sideEffects,
+        ...(result.code ? { code: result.code } : {}),
+        ...(result.hint ? { hint: result.hint } : {}),
+        ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+        ...(result.totalLines !== undefined ? { totalLines: result.totalLines } : {}),
+        ...(result.returnedLines !== undefined ? { returnedLines: result.returnedLines } : {}),
+        ...(result.totalBytes !== undefined ? { totalBytes: result.totalBytes } : {}),
+        ...(result.returnedBytes !== undefined ? { returnedBytes: result.returnedBytes } : {}),
+        ...(result.filesRead !== undefined ? { filesRead: result.filesRead } : {}),
+        ...(result.filesSkipped !== undefined ? { filesSkipped: result.filesSkipped } : {}),
+        ...(result.matches !== undefined ? { matches: result.matches } : {}),
+    };
 }
 function trackSideEffects(activeFiles, sideEffects) {
     if (!sideEffects)

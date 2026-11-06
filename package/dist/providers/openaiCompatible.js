@@ -1,5 +1,17 @@
 import { fetchJson, streamSSE } from "../lib/http.js";
 import { finalizeToolCalls, mergeToolCallDelta } from "../lib/native-tools.js";
+import { buildHeaders, buildRequestUrl } from "./spec.js";
+export function toRequestSpec(opts) {
+    return {
+        baseUrl: trim(opts.baseUrl),
+        chatPath: opts.chatPath,
+        modelsPath: opts.modelsPath,
+        query: opts.query,
+        pathParams: opts.pathParams,
+        authHeaderName: opts.authHeaderName,
+        authPrefix: opts.authPrefix ?? (opts.authHeader !== undefined ? `${opts.authHeader} ` : undefined),
+    };
+}
 /** Build a chat-completions body in the classic or the newer (compat) dialect. */
 function buildBody(req, compat, opts, includeReasoning = true) {
     const messages = [];
@@ -48,6 +60,7 @@ function buildBody(req, compat, opts, includeReasoning = true) {
 }
 export async function* streamChatCompletion(req, opts) {
     const hasReasoning = Boolean(req.reasoningEffort && req.reasoningEffort !== "auto" && opts.reasoning && opts.reasoning !== "none");
+    const spec = toRequestSpec(opts);
     const send = async (compat, includeReasoning = hasReasoning) => {
         const headers = {
             "content-type": "application/json",
@@ -55,10 +68,10 @@ export async function* streamChatCompletion(req, opts) {
             ...(opts.extraHeaders ?? {}),
         };
         if (opts.apiKey)
-            headers["authorization"] = (opts.authHeader ?? "Bearer") + " " + opts.apiKey;
+            Object.assign(headers, buildHeaders(spec, opts.apiKey));
         if (req.clientRequestId)
             headers["idempotency-key"] = req.clientRequestId;
-        return await fetch(trim(opts.baseUrl) + "/chat/completions", {
+        return await fetch(buildRequestUrl(spec, opts.chatPath ?? "/chat/completions"), {
             method: "POST",
             headers,
             body: JSON.stringify(buildBody(req, compat, opts, includeReasoning)),
@@ -130,13 +143,14 @@ export async function* streamChatCompletion(req, opts) {
 }
 export async function listModelsHttp(opts) {
     const staticModels = opts.staticModels ?? [];
+    if (opts.modelsPath === null)
+        return staticModels;
     if (!opts.apiKey && staticModels.length)
         return staticModels;
     try {
-        const headers = {};
-        if (opts.apiKey)
-            headers["authorization"] = (opts.authHeader ?? "Bearer") + " " + opts.apiKey;
-        const json = await fetchJson(trim(opts.baseUrl) + "/models", { headers });
+        const spec = toRequestSpec(opts);
+        const headers = opts.apiKey ? buildHeaders(spec, opts.apiKey) : {};
+        const json = await fetchJson(buildRequestUrl(spec, opts.modelsPath ?? "/models"), { headers });
         const ids = (json.data ?? [])
             .map((m) => m.id)
             .filter((id) => typeof id === "string" && id.length > 0);

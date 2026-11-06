@@ -6,7 +6,9 @@
  * are not loaded for `fastcode skills list`.
  */
 import { parseCli } from "./cli-main.js";
+import { installProcessGuards } from "./lib/lifecycle.js";
 async function main() {
+    installProcessGuards();
     const cli = await parseCli();
     if (cli.done)
         return;

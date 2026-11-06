@@ -1,9 +1,9 @@
 import { debugLog } from "../../lib/debug.js";
 import { sandboxPath } from "./paths.js";
-import type { Prepared, ToolCall } from "./types.js";
+import type { Prepared, ToolCall, ToolErrorCode } from "./types.js";
 
-export function invalid(output: string): Prepared {
-    return { ok: false, output };
+export function invalid(output: string, code: ToolErrorCode = "INVALID_ARGS", hint?: string): Prepared {
+    return { ok: false, output, code, ...(hint ? { hint } : {}) };
 }
 
 export function requiredString(call: ToolCall, key: string): string {
@@ -23,6 +23,25 @@ export function stringArray(call: ToolCall, key: string): string[] {
 
 export function numberOption(value: any, fallback: number): number {
     return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+export function optionalNumber(call: ToolCall, key: string): number | undefined {
+    const value = call[key];
+    if (value === undefined || value === null)
+        return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value))
+        throw new Error(`${key} must be a finite number`);
+    return value;
+}
+
+export function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
+    if (value === undefined)
+        return fallback;
+    return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+export function booleanOption(value: any, fallback = false): boolean {
+    return typeof value === "boolean" ? value : fallback;
 }
 
 export const MAX_TIMEOUT_MS = 2147483647;
@@ -78,6 +97,8 @@ export function preparePath(cwd: string, raw: string): Prepared {
         return { ok: true };
     }
     catch (err: any) {
-        return invalid(err?.message ?? String(err));
+        const message = err?.message ?? String(err);
+        const code = /outside sandbox/i.test(message) ? "SANDBOX_DENY" : "INVALID_ARGS";
+        return invalid(message, code, /outside sandbox/i.test(message) ? "Use a path inside the project or an allowed root." : undefined);
     }
 }

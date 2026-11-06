@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { resolvePath } from "./paths.js";
 import type { Tool } from "./types.js";
@@ -20,7 +21,8 @@ export const makeDirTool: Tool = {
     },
     async execute(call, ctx) {
         const dir = resolvePath(ctx.cwd, call);
+        const existed = existsSync(dir);
         await mkdir(dir, { recursive: true });
-        return { ok: true, output: `created ${dir}`, sideEffects: { created: [dir] } };
+        return { ok: true, output: `created ${dir}`, sideEffects: existed ? undefined : { created: [dir] } };
     },
 };

@@ -39,7 +39,7 @@ export interface ApprovalRequest {
 
 export type ApprovalDecision =
   | { kind: "allow"; scope: ApprovalScope }
-  | { kind: "deny"; reason?: string; feedback?: string }
+  | { kind: "deny"; reason?: string; feedback?: string; code?: string; target?: string }
   | { kind: "pending"; request: ApprovalRequest }
   | { kind: "choose"; value: string; input?: string }
   | { kind: "feedback"; text: string };

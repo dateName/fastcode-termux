@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前工作树：**0.1.7-beta**（未发布）；历史条目中的 0.1.6-beta 保持不变
+> 当前工作树：**0.1.7**（未发布）；历史条目中的 0.1.6-beta 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -444,11 +444,11 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
 
 ---
 
-## 0.1.7-beta（2026-10-30，工作树未发布）
+## 0.1.7（2026-10-30，工作树未发布）
 
 ### 总览
 
-- 版本：`package.json` = `0.1.7-beta`；npm/GitHub Release 仍为 0.1.6-beta。
+- 版本：`package.json` = `0.1.7`；npm/GitHub Release 仍为 0.1.6-beta。
 - 范围：Guardrails 三态与 AST 第二意见、审批 resolver、模型配置 TUI、会话 manifest、配置缓存、技能完整性、Termux 真机验收。
 - 验证：PC smoke **207/207**；Termux 真机 smoke **212/212**（0.1.6-beta 同源构建）。
 

@@ -1,8 +1,11 @@
-import type { Prepared, ToolCall } from "./types.js";
-export declare function invalid(output: string): Prepared;
+import type { Prepared, ToolCall, ToolErrorCode } from "./types.js";
+export declare function invalid(output: string, code?: ToolErrorCode, hint?: string): Prepared;
 export declare function requiredString(call: ToolCall, key: string): string;
 export declare function stringArray(call: ToolCall, key: string): string[];
 export declare function numberOption(value: any, fallback: number): number;
+export declare function optionalNumber(call: ToolCall, key: string): number | undefined;
+export declare function clampInt(value: number | undefined, fallback: number, min: number, max: number): number;
+export declare function booleanOption(value: any, fallback?: boolean): boolean;
 export declare const MAX_TIMEOUT_MS = 2147483647;
 /**
  * Normalize a tool `timeoutMs` value.

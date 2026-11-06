@@ -16,8 +16,10 @@ import { buildSkillsPrompt } from "./skills/manager.js";
 import { loadConfig, resolveApiKey } from "./config/store.js";
 import { getProviderOrThrow } from "./providers/index.js";
 import { resumeSession } from "./session/projection.js";
+let eventSeq = 0;
 function writeEvent(value) {
-    process.stdout.write(JSON.stringify(value) + "\n");
+    eventSeq += 1;
+    process.stdout.write(JSON.stringify({ v: 1, seq: eventSeq, ts: new Date().toISOString(), ...value }) + "\n");
 }
 function optionalBudget(name) {
     const value = Number(process.env[name]);
@@ -99,7 +101,10 @@ export async function runHeadless(options) {
     };
     const abort = new AbortController();
     const onSigint = () => abort.abort();
+    const onTerminate = () => abort.abort();
     process.once("SIGINT", onSigint);
+    process.once("SIGTERM", onTerminate);
+    process.once("SIGHUP", onTerminate);
     try {
         for await (const event of runAgent({
             provider,
@@ -124,15 +129,63 @@ export async function runHeadless(options) {
             if (options.ui === "json") {
                 if (event.type === "assistant_text")
                     writeEvent({ event: "assistant", text: event.text });
+                else if (event.type === "tool_call")
+                    writeEvent({
+                        event: "tool_call",
+                        id: event.id,
+                        tool: event.call.tool,
+                        args: event.call,
+                        ...(event.native ? { native: true } : {}),
+                    });
+                else if (event.type === "egress_denied")
+                    writeEvent({
+                        event: "egress_denied",
+                        outlet: event.outlet,
+                        ...(event.target ? { target: event.target } : {}),
+                        rule: event.rule,
+                        mode: event.mode,
+                        would_block: event.wouldBlock,
+                        code: event.code,
+                        reason: event.reason,
+                    });
                 else if (event.type === "tool_result")
-                    writeEvent({ event: "tool_result", id: event.id, tool: event.call.tool, ok: event.ok });
+                    writeEvent({
+                        event: "tool_result",
+                        id: event.id,
+                        tool: event.call.tool,
+                        ok: event.ok,
+                        output: event.output,
+                        ...(event.sideEffects ? { side_effects: event.sideEffects } : {}),
+                        ...(event.code ? { code: event.code } : {}),
+                        ...(event.hint ? { hint: event.hint } : {}),
+                        ...(event.truncated !== undefined ? { truncated: event.truncated } : {}),
+                        ...(event.totalLines !== undefined ? { total_lines: event.totalLines } : {}),
+                        ...(event.returnedLines !== undefined ? { returned_lines: event.returnedLines } : {}),
+                        ...(event.totalBytes !== undefined ? { total_bytes: event.totalBytes } : {}),
+                        ...(event.returnedBytes !== undefined ? { returned_bytes: event.returnedBytes } : {}),
+                        ...(event.filesRead !== undefined ? { files_read: event.filesRead } : {}),
+                        ...(event.filesSkipped !== undefined ? { files_skipped: event.filesSkipped } : {}),
+                        ...(event.matches !== undefined ? { matches: event.matches } : {}),
+                    });
+                else if (event.type === "usage")
+                    writeEvent({
+                        event: "usage",
+                        input_tokens: event.usage.inputTokens ?? 0,
+                        output_tokens: event.usage.outputTokens ?? 0,
+                        cost_usd: event.usage.costUsd ?? 0,
+                    });
+                else if (event.type === "notice")
+                    writeEvent({ event: "notice", text: event.text });
                 else if (event.type === "error")
-                    writeEvent({ event: "error", kind: event.kind, message: event.message });
+                    writeEvent({ event: "error", kind: event.kind, code: event.kind, message: event.message });
                 else if (event.type === "done")
                     writeEvent({ event: "done", stopReason: event.stopReason, finalText: event.finalText });
             }
             else if (event.type === "assistant_text") {
                 process.stdout.write(event.text);
+            }
+            else if (event.type === "notice") {
+                process.stderr.write(`[fastcode] ${event.text}\n`);
             }
             else if (event.type === "done" && event.finalText) {
                 process.stdout.write(event.finalText + "\n");
@@ -141,6 +194,8 @@ export async function runHeadless(options) {
     }
     finally {
         process.removeListener("SIGINT", onSigint);
+        process.removeListener("SIGTERM", onTerminate);
+        process.removeListener("SIGHUP", onTerminate);
         rl.close();
     }
 }

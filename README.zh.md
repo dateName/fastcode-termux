@@ -4,12 +4,12 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.7-beta**（测试版） |
+| 版本 | **0.1.7**（当前工作树） |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> 0.1.7-beta 是当前工作树版本；npm 与 GitHub Release 上的资产在正式发布前仍是 0.1.6-beta。
+> 0.1.7 是当前工作树版本；npm 与 GitHub Release 上的资产在正式发布前仍是 0.1.6-beta。
 
 **English → [README.md](README.md)**
 
@@ -61,14 +61,15 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 |---|---|---|
 | 🔒 项目信任 | 首次在未知文件夹运行时，会在代理工具加载前询问 | `fastcode trust` / `untrust` / `trusted`；`FASTCODE_TRUST_ALL=1` |
 | 🧱 文件沙箱 | 文件工具限制在项目内；`../` 与软链接逃逸都会被拒绝 | `config.sharedDirs`、`FASTCODE_ALLOW_PATHS` |
-| 🚫 危险命令拦截 | 根/源码/通配符/系统路径删除、force-push 受保护分支、`git clean -fdx`、磁盘/容器/系统命令、`.env` 覆盖、定向凭证 grep/外发、动态 eval/source/-c、反弹 shell 入口、`curl\|sh` 走不可授权的 Hard Block；`.env` 删除、裸 `printenv`、`git reset --hard` 属 Soft Gate，通过 resolver 审批 | `FASTCODE_ALLOW_DANGEROUS=1` 仅作用于 Soft Gate |
+| 🚫 危险命令拦截 | 根/源码/通配符/系统路径删除、force-push 受保护分支、`git clean -fdx`、磁盘/容器/系统命令、敏感文件写入/删除/移动、敏感文件外传（`sensitive_file_egress`）、关键凭据读取（`id_*`、`/etc/shadow`、`/etc/sudoers`）、动态 eval/source/-c、反弹 shell 入口、`curl\|sh` 走不可授权的 Hard Block；`.env` 删除/写入/外发也是 Hard Block；裸 `printenv`、`git reset --hard` 属 Soft Gate，通过 resolver 审批 | `FASTCODE_ALLOW_DANGEROUS=1` 仅作用于 Soft Gate |
+| 🛰️ Egress 策略 | 应用层工具/载荷/输出策略；默认 audit-only，`enabled:true + mode:"block"` 返回 `EGRESS_DENY`；trust/sharedDirs 不能覆盖 | `config.egress`：`enabled`、`mode`、`denyPaths`、`denyGlobs`、`denyContentMarkers`、`maxScanBytes` |
 | ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
 | 🧾 补丁事务 | parse → plan → apply；保持 CRLF/mode；拒绝符号链接；move 不覆盖 | `/expand` 查看完整 diff |
-| 🛑 进程树 | abort/`/kill` 杀子进程与孙进程 | POSIX 进程组；Windows `taskkill /T` |
+| 🛑 进程树/退出 | abort/`/kill` 杀子进程与孙进程；SIGTERM/SIGHUP/fatal 清理 resident shell | POSIX 进程组；`lib/lifecycle.ts`；Windows `taskkill /T` |
 | 🔐 审批钩子 | Soft Gate 与敏感/大补丁生成 pending 请求；无 resolver 时 **拒绝**（fail closed） | `--ui tty\|native\|plain\|json`；once/session/always；`fastcode trust --forget <key>` |
 
-### 已知限制（0.1.7-beta）
+### 已知限制（0.1.7）
 
 - Ink 5.x 的 IME 光标定位未彻底修复；Termux pty 尺寸异常时可能裁切/乱序（`abcdef` → `bcdefa`）。
   用 `stty` 修正 pty，或用 `/edit`；彻底修需 Ink ≥6.7。
@@ -101,7 +102,7 @@ termux-setup-storage     # 让 agent 能访问 ~/storage/shared（手机项目/�
 
 按推荐优先级排列。仓库内已提交 **自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等依赖全部打进单文件），因此克隆后**无需 `npm install`** 即可运行。
 
-从 npm 安装测试版：`npm install -g @datename/fastcode-termux@0.1.7-beta`（dist-tag `beta`）。
+从 npm 安装：`npm install -g @datename/fastcode-termux@0.1.7`（0.1.7 发布后可用；在此之前使用 `@0.1.6-beta`，dist-tag `beta`）。
 
 > ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 
@@ -118,15 +119,15 @@ fastcode          # 直接可用（短别名 fc）
 
 ### 方式二：便携版（无需 npm）
 
-到 Releases 页面下载最新 `fastcode-portable-0.1.7-beta.tar.gz`（校验见 `SHA256SUMS`），解压即用：
+到 Releases 页面下载最新 `fastcode-portable-0.1.7.tar.gz`（校验见 `SHA256SUMS`），解压即用：
 
 ```bash
-tar -xzf fastcode-portable-0.1.7-beta.tar.gz
-cd fastcode-portable-0.1.7-beta
+tar -xzf fastcode-portable-0.1.7.tar.gz
+cd fastcode-portable-0.1.7
 ./fastcode
 ```
 
-> 便携版尚未上传时，可用 `sh scripts/build-portable.sh` 自行构建，或用 GitHub Actions 自动发布（见 [开发者](#-开发者)）。
+> 当前工作树对应的 `release/` 仍是 0.1.7-beta 旧归档；正式发布 0.1.7 前用 `sh scripts/build-portable.sh` 重新打包。GitHub Release 与 npm 在 0.1.7 发布前仍是 0.1.6-beta。
 
 ### 方式三：从源码运行（仅在你要改源码 / 重新构建时）
 
@@ -198,8 +199,8 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 /provider                                   # 选择服务商 → 模型 → Key
 /model                                      # 当前服务商/模型 → Key
 /login                                      # 选择服务商 → 模型 → Key
-/login deepseek deepseek-chat               # 从掩码 Key 输入继续
-/login deepseek deepseek-chat sk-你的key     # 或一行完成
+/login deepseek deepseek-flash               # 从掩码 Key 输入继续
+/login deepseek deepseek-flash sk-你的key     # 或一行完成
 ```
 
 离线时会显示内置/缓存模型列表与提示，也可手动输入 model ID；无需 Key 的服务商会跳过 Key 步骤。每次保存都会回显 **服务商 · 适用于该服务商全部模型 · Key 尾号（`sk-****abcd`）· 保存位置**。
@@ -214,7 +215,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 |---|---|
 | `fastcode` | 进入 TUI |
 | `fastcode "解释这个仓库"` | 带初始问题启动 |
-| `fastcode doctor` | 环境自检 —— **排障先跑这个** |
+| `fastcode doctor` / `fastcode doctor --net` | 环境自检；`--net` 额外探测 registry 连通性 —— **排障先跑这个** |
 | `fastcode provider` / `fastcode model` | 列出 / 切换服务商与模型 |
 | `fastcode config` | 查看配置内容与文件路径 |
 | `fastcode sessions` / `fastcode resume latest` | 历史会话 / 恢复上次会话 |
@@ -238,7 +239,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | 如何更新 | `cd ~/fastcode && git pull && bash scripts/install.sh`（单跑 install.sh 不会拉取） |
 | npm 安装后行为旧 / 报错 | npm registry 可能落后于仓库 —— 暂时优先用克隆或便携版；`fastcode update` 会比较版本 |
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
-| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.7-beta） |
+| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.7） |
 | 命令被拦截 | 那是危险命令保护；确认无误可临时 `export FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -286,9 +287,9 @@ sh scripts/build-portable.sh
 产物在 `release/`：
 
 ```text
-fastcode-portable-0.1.7-beta.tar.gz       免安装便携包（自包含单文件）
-fastcode-portable-0.1.7-beta.zip          同上（需系统有 zip）
-datename-fastcode-termux-0.1.7-beta.tgz   npm 包（npm pack）
+fastcode-portable-0.1.7.tar.gz       免安装便携包（自包含单文件）
+fastcode-portable-0.1.7.zip          同上（需系统有 zip）
+datename-fastcode-termux-0.1.7.tgz   npm 包（npm pack）
 SHA256SUMS                           以上文件的校验和
 ```
 
@@ -307,16 +308,16 @@ npm publish --access public --tag beta
 推荐用 CI 自动发布（`.github/workflows/release.yml`）：打 tag 即可
 
 ```bash
-git tag v0.1.7-beta
-git push origin v0.1.7-beta        # 触发 Actions：构建 + 打包 + 上传 Release
+git tag v0.1.7
+git push origin v0.1.7        # 触发 Actions：构建 + 打包 + 上传 Release
 ```
 
 也可手动：
 
 ```bash
-gh release create v0.1.7-beta -t "FastCode 0.1.7-beta" \
-  release/fastcode-portable-0.1.7-beta.tar.gz \
-  release/datename-fastcode-termux-0.1.7-beta.tgz \
+gh release create v0.1.7 -t "FastCode 0.1.7" \
+  release/fastcode-portable-0.1.7.tar.gz \
+  release/datename-fastcode-termux-0.1.7.tgz \
   release/SHA256SUMS
 ```
 
@@ -364,4 +365,4 @@ gh release create v0.1.7-beta -t "FastCode 0.1.7-beta" \
 
 原始作者署名与上游项目名称、版权归各自所有；本仓库仅做修复与 Termux 适配。
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.7-beta</sub>
+<sub>Made for Termux 🐧📱 · FastCode 0.1.7</sub>

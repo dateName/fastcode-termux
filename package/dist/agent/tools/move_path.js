@@ -1,4 +1,4 @@
-import { mkdir, rename } from "node:fs/promises";
+import { cp, mkdir, rename, rm } from "node:fs/promises";
 import { lstatSync } from "node:fs";
 import { dirname } from "node:path";
 import { sandboxPath } from "./paths.js";
@@ -10,6 +10,26 @@ function exists(path) {
     }
     catch {
         return false;
+    }
+}
+export async function moveWithFallback(from, to, ops = { rename, cp, rm }) {
+    try {
+        await ops.rename(from, to);
+        return "rename";
+    }
+    catch (err) {
+        if (err?.code !== "EXDEV")
+            throw err;
+        await ops.cp(from, to, { recursive: true, force: false, errorOnExist: true });
+        try {
+            await ops.rm(from, { recursive: true, force: false });
+        }
+        catch (cleanup) {
+            throw Object.assign(new Error(`copied ${from} to ${to}, but could not remove the source: ${cleanup?.message ?? String(cleanup)}`), {
+                code: "UNKNOWN",
+            });
+        }
+        return "copy";
     }
 }
 export const movePathTool = {
@@ -28,7 +48,7 @@ export const movePathTool = {
             if (!checkedTo.ok)
                 return checkedTo;
             if (exists(to))
-                return invalid(`move target exists: ${to}`);
+                return invalid(`move target exists: ${to}`, "EEXIST", "Choose a target that does not exist.");
             return { ok: true };
         }
         catch (err) {
@@ -39,9 +59,15 @@ export const movePathTool = {
         const from = sandboxPath(ctx.cwd, requiredString(call, "from"));
         const to = sandboxPath(ctx.cwd, requiredString(call, "to"));
         if (exists(to))
-            return { ok: false, output: `move target exists: ${to}` };
+            return { ok: false, output: `move target exists: ${to}`, code: "EEXIST", hint: "Choose a target that does not exist." };
         await mkdir(dirname(to), { recursive: true });
-        await rename(from, to);
-        return { ok: true, output: `moved ${from} to ${to}`, sideEffects: { removed: [from], touched: [to] } };
+        const method = await moveWithFallback(from, to);
+        return {
+            ok: true,
+            output: method === "copy"
+                ? `moved ${from} to ${to} (cross-device copy + remove)`
+                : `moved ${from} to ${to}`,
+            sideEffects: { removed: [from], touched: [to] },
+        };
     },
 };

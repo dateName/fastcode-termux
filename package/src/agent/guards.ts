@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { normalize, resolve } from "node:path";
 import { analyzeShellAst } from "./shell-ast.js";
 
@@ -359,10 +360,8 @@ function redirectTargets(command: string): string[] {
         }
         if (char !== ">")
             continue;
-        if (command[i + 1] === ">") {
+        if (command[i + 1] === ">" || command[i + 1] === "|")
             i += 1;
-            continue;
-        }
         let cursor = i + 1;
         while (/\s/.test(command[cursor] ?? ""))
             cursor += 1;
@@ -555,16 +554,275 @@ function parseRmArgs(args: string[]): { recursive: boolean; targets: string[] } 
     return { recursive, targets };
 }
 
-function isDotEnvTarget(target: string): boolean {
-    const base = stripShellToken(target).replace(/\\/g, "/").split("/").pop() ?? "";
-    return base.toLowerCase() === ".env";
+const SAFE_SENSITIVE_NAME_RE = /^(?:\.env\.example|\.envrc)$/i;
+const SENSITIVE_NAME_RE = /^(?:\.env(?:\.[^/]+)?|auth\.json|trust\.json|credentials(?:\.json)?|\.netrc|\.git-credentials|id_(?:rsa|dsa|ecdsa|ed25519)|authorized_keys|known_hosts|sessions|.*\.(?:pem|key|p12|pfx)|.*\.session(?:\.jsonl)?)$/i;
+const SENSITIVE_DIR_RE = /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.git\/hooks|\.fastcode|sessions)(?:\/|$)/i;
+const CRITICAL_READ_PATH_RE = /^(?:\/etc\/(?:shadow|gshadow|sudoers)|\/private\/etc\/(?:shadow|sudoers))$/i;
+const CRITICAL_READ_BASENAME_RE = /^id_(?:rsa|dsa|ecdsa|ed25519)$/i;
+const CRITICAL_READ_COMMANDS = new Set([
+    "cat", "tac", "head", "tail", "less", "more", "most", "strings", "base64",
+    "xxd", "od", "hexdump", "grep", "egrep", "fgrep", "awk", "sed", "perl",
+    "ruby", "python", "python3", "node", "openssl", "cp", "scp", "rsync",
+    "sftp", "ftp", "curl", "wget", "nc", "ncat", "netcat", "socat", "ssh",
+    "tar", "zip", "gzip", "bzip2", "xz", "7z", "find",
+]);
+const NETWORK_SINK_COMMANDS = new Set([
+    "curl", "wget", "nc", "ncat", "netcat", "socat", "ssh", "scp", "rsync",
+    "sftp", "ftp", "telnet",
+]);
+const SHARED_STORAGE_RE = /(?:^|[\\/])(?:sdcard|mnt[\\/]sdcard|storage[\\/](?:shared|emulated))(?=[\\/]|$)/i;
+
+function expandHome(target: string): string {
+    const home = process.env["HOME"] || process.env["USERPROFILE"] || "";
+    if (!home)
+        return target;
+    if (target === "~")
+        return home;
+    if (target.startsWith("~/") || target.startsWith("~\\"))
+        return home + target.slice(1);
+    return target.replace(/^\$(?:HOME|\{HOME\})/i, home);
 }
 
-function isSensitiveTarget(target: string): boolean {
-    const clean = stripShellToken(target).replace(/\\/g, "/").replace(/\/+$/, "");
-    const base = (clean.split("/").pop() ?? "").toLowerCase();
-    return base === "auth.json" || base === "sessions" || clean.includes("/sessions/") ||
-        base.endsWith(".pem") || base.endsWith(".key");
+function normalizeTargetPath(target: string): string {
+    const expanded = expandHome(stripShellToken(target).replace(/\\/g, "/"));
+    const absolute = resolve(process.cwd(), expanded);
+    let real = absolute;
+    try {
+        real = realpathSync.native(absolute);
+    }
+    catch {
+        // The target may not exist yet; lexical normalization still blocks ./ and a/../ forms.
+    }
+    return normalize(real).replace(/\\/g, "/");
+}
+
+function pathBasename(target: string): string {
+    return (normalizeTargetPath(target).split("/").pop() ?? "").toLowerCase();
+}
+
+export function isSharedStoragePath(target: string): boolean {
+    return SHARED_STORAGE_RE.test(normalizeTargetPath(target));
+}
+
+function matchesCriticalReadPath(target: string): boolean {
+    const raw = stripShellToken(target).replace(/\\/g, "/");
+    return CRITICAL_READ_PATH_RE.test(raw) || CRITICAL_READ_PATH_RE.test(normalizeTargetPath(target));
+}
+
+function cleanSensitiveToken(token: string): string {
+    let value = stripShellToken(String(token ?? "").trim());
+    value = value.replace(/^@+/, "");
+    const equals = value.lastIndexOf("=");
+    if (equals >= 0)
+        value = value.slice(equals + 1);
+    value = value.replace(/^@+/, "");
+    if (!/^[A-Za-z]:[\\/]/.test(value)) {
+        const colon = value.lastIndexOf(":");
+        if (colon > 0)
+            value = value.slice(colon + 1);
+    }
+    return value.replace(/[),;]+$/, "");
+}
+
+interface SensitiveFileHit {
+    target: string;
+    name: string;
+}
+
+function sensitiveFileHit(token: string): SensitiveFileHit | undefined {
+    const candidate = cleanSensitiveToken(token);
+    if (!candidate || candidate === "/dev/null" || candidate.toLowerCase() === "nul")
+        return undefined;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate))
+        return undefined;
+    const base = pathBasename(candidate);
+    if (!base || SAFE_SENSITIVE_NAME_RE.test(base))
+        return undefined;
+    if (SENSITIVE_NAME_RE.test(base))
+        return { target: candidate, name: base };
+    const normalized = normalizeTargetPath(candidate);
+    if (SENSITIVE_DIR_RE.test(normalized) || matchesCriticalReadPath(candidate))
+        return { target: candidate, name: base };
+    return undefined;
+}
+
+function criticalReadHit(token: string): string | undefined {
+    const candidate = cleanSensitiveToken(token);
+    if (!candidate)
+        return undefined;
+    const normalized = normalizeTargetPath(candidate);
+    if (matchesCriticalReadPath(candidate))
+        return candidate;
+    const base = (normalized.split("/").pop() ?? "").toLowerCase();
+    if (!CRITICAL_READ_BASENAME_RE.test(base))
+        return undefined;
+    if (/[\\/]/.test(candidate) || /(?:^|\/)\.ssh(?:\/|$)/.test(normalized))
+        return candidate;
+    return undefined;
+}
+
+export function isCriticalReadTarget(target: string): boolean {
+    return Boolean(criticalReadHit(target));
+}
+
+function commandTokens(command: string): string[] {
+    const tokens: string[] = [];
+    let current = "";
+    let quote = "";
+    let escaped = false;
+    const push = () => {
+        if (current) {
+            tokens.push(current);
+            current = "";
+        }
+    };
+    for (let i = 0; i < command.length; i += 1) {
+        const char = command[i];
+        if (escaped) {
+            current += char;
+            escaped = false;
+            continue;
+        }
+        if (char === "\\") {
+            escaped = true;
+            continue;
+        }
+        if (quote) {
+            if (char === quote)
+                quote = "";
+            else
+                current += char;
+            continue;
+        }
+        if (char === '"' || char === "'") {
+            quote = char;
+            continue;
+        }
+        if (/[\s|;&()<>]/.test(char)) {
+            push();
+            continue;
+        }
+        current += char;
+    }
+    push();
+    return tokens;
+}
+
+function segmentCommandName(segment: string): string {
+    const tokens = segment.split(/\s+/).filter(Boolean);
+    const index = commandIndex(tokens);
+    if (index < 0)
+        return "";
+    let name = rawCommandName(tokens[index]);
+    let cursor = index + 1;
+    while (name === "env") {
+        while (cursor < tokens.length && (tokens[cursor].startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/.test(stripShellToken(tokens[cursor]))))
+            cursor += 1;
+        if (cursor >= tokens.length)
+            break;
+        name = rawCommandName(tokens[cursor]);
+        cursor += 1;
+    }
+    return name;
+}
+
+function credentialReadMatch(command: string): DestructiveMatch | undefined {
+    for (const segment of splitCommandSegments(command)) {
+        if (!CRITICAL_READ_COMMANDS.has(segmentCommandName(segment)))
+            continue;
+        for (const token of commandTokens(segment)) {
+            const hit = criticalReadHit(token);
+            if (hit) {
+                return hardMatch("credential_read", hit, "critical-credential-read", [
+                    "Do not read private keys or system credential databases.",
+                    "Ask the user to rotate the credential if exposure is suspected.",
+                ]);
+            }
+        }
+    }
+    return undefined;
+}
+
+function sensitiveFileEgressMatch(command: string): DestructiveMatch | undefined {
+    const hits = commandTokens(command).map(sensitiveFileHit).filter(Boolean) as SensitiveFileHit[];
+    if (hits.length === 0)
+        return undefined;
+    const hasSink = splitCommandSegments(command).some((segment) => NETWORK_SINK_COMMANDS.has(segmentCommandName(segment)));
+    if (!hasSink)
+        return undefined;
+    const hit = hits[0];
+    return hardMatch("sensitive_file_egress", hit.target, `sensitive-file-upload: ${hit.name}`, [
+        "Do not send credential/session files to network sinks or upload targets.",
+        "Use a redacted copy that contains no secrets.",
+    ]);
+}
+
+function sensitiveWriteReason(name: string, args: string[]): DestructiveMatch | undefined {
+    const positional = args.map(stripShellToken).filter((arg) =>
+        arg && arg !== "--" && !arg.startsWith("-") && !/^\d+$/.test(arg));
+    if (positional.length === 0)
+        return undefined;
+    const writeMatch = (target: string): DestructiveMatch | undefined => {
+        const hit = sensitiveFileHit(target);
+        if (!hit)
+            return undefined;
+        return hardMatch("truncate_sensitive", hit.target, `sensitive-write: ${hit.name}`, [
+            "Move the credential/session file to a secure backup instead of rewriting it.",
+        ]);
+    };
+    if (name === "tee" || name === "sponge") {
+        for (const target of positional) {
+            const match = writeMatch(target);
+            if (match)
+                return match;
+        }
+        return undefined;
+    }
+    if (name === "sed" || name === "perl" || name === "ruby") {
+        const inPlace = args.some((arg) => /^-[a-z]*i/i.test(stripShellToken(arg)) ||
+            /^--in-place/i.test(stripShellToken(arg)));
+        return inPlace ? writeMatch(positional[positional.length - 1]) : undefined;
+    }
+    if (name === "cp" || name === "install" || name === "rsync" || name === "ln") {
+        const destination = positional[positional.length - 1];
+        const destinationMatch = writeMatch(destination);
+        if (destinationMatch)
+            return destinationMatch;
+        const sourceHit = positional.length > 1 ? sensitiveFileHit(positional[0]) : undefined;
+        if (sourceHit && isSharedStoragePath(destination)) {
+            return hardMatch("sensitive_file_egress", sourceHit.target, `shared-storage-egress: ${sourceHit.name}`, [
+                "Do not copy credential/session files into shared storage.",
+            ]);
+        }
+        return undefined;
+    }
+    if (name === "mv" || name === "move") {
+        const destination = positional[positional.length - 1];
+        const destinationMatch = writeMatch(destination);
+        if (destinationMatch)
+            return destinationMatch;
+        if (positional.length > 1) {
+            const sourceHit = sensitiveFileHit(positional[0]);
+            if (sourceHit) {
+                return hardMatch("move_sensitive", sourceHit.target, `sensitive-file-move: ${sourceHit.name}`, [
+                    "Do not rename or relocate credential/session files.",
+                ]);
+            }
+        }
+        return undefined;
+    }
+    return undefined;
+}
+
+function isDotEnvTarget(target: string): boolean {
+    const base = pathBasename(target);
+    if (SAFE_SENSITIVE_NAME_RE.test(base))
+        return false;
+    return base === ".env" || base.startsWith(".env.");
+}
+
+export function isSensitiveTarget(target: string): boolean {
+    return Boolean(sensitiveFileHit(target));
 }
 
 function isSystemPath(target: string): boolean {
@@ -617,13 +875,15 @@ function classifySegment(name: string, args: string[], segment: string): Destruc
         const { recursive, targets } = parseRmArgs(args);
         if (targets.length === 0)
             return undefined;
-        // .env delete is recoverable (rebuild from .env.example / secret
-        // manager), so it is a Soft Gate; truncation/redirect is Hard below.
-        const dotenvTargets = targets.filter(isDotEnvTarget);
+        // .env delete is not recoverable once secrets are lost, and all
+        // credential/session files are protected on write and delete.
         const classified = targets.filter((target) => !isDotEnvTarget(target));
         if (classified.length === 0) {
-            if (dotenvTargets.length > 0)
-                return softMatch("delete_dotenv", dotenvTargets[0], "dotenv-delete");
+            const sensitive = targets.find(isSensitiveTarget);
+            if (sensitive)
+                return hardMatch("delete_sensitive", stripShellToken(sensitive), "sensitive-file-delete", [
+                    "Move the credential/session file to a secure backup without printing its contents.",
+                ]);
             return undefined;
         }
         for (const target of classified) {
@@ -808,20 +1068,18 @@ function classifySegment(name: string, args: string[], segment: string): Destruc
     }
     if (name === "unlink" || name === "shred") {
         const targets = args.map(stripShellToken).filter((arg) => arg && !arg.startsWith("-"));
-        const sensitive = targets.find(isSensitiveTarget);
-        if (sensitive) {
-            return hardMatch("delete_sensitive", sensitive, "protected-credential-or-session-file", [
-                "Move the credential/session file to a secure backup without printing its contents.",
-            ]);
-        }
         const dotenv = targets.find(isDotEnvTarget);
         if (name === "shred" && dotenv) {
             return hardMatch("truncate_sensitive", dotenv, "shred-dotenv", [
                 "Never shred .env; move it to a secure backup instead.",
             ]);
         }
-        if (dotenv)
-            return softMatch("delete_dotenv", dotenv, "dotenv-delete");
+        const sensitive = targets.find(isSensitiveTarget);
+        if (sensitive) {
+            return hardMatch("delete_sensitive", sensitive, "protected-credential-or-session-file", [
+                "Move the credential/session file to a secure backup without printing its contents.",
+            ]);
+        }
         if (targets.length > 0)
             return softMatch("delete_file", targets[0], "file-delete");
     }
@@ -834,7 +1092,6 @@ function classifySegment(name: string, args: string[], segment: string): Destruc
                 "Move the credential/session file to a secure backup without printing its contents.",
             ]);
         }
-        const dotenv = targets.find(isDotEnvTarget);
         const classified = targets.filter((target) => !isDotEnvTarget(target));
         const recursive = values.some((arg) => /^\/[a-z]*s/i.test(arg) || /^--recursive$/i.test(arg));
         if (recursive && classified.length > 0) {
@@ -842,15 +1099,17 @@ function classifySegment(name: string, args: string[], segment: string): Destruc
                 "Delete reviewed explicit files/directories instead of recursive Windows delete.",
             ]);
         }
-        if (dotenv)
-            return softMatch("delete_dotenv", dotenv, "dotenv-delete");
         if (classified.length > 0)
             return softMatch("delete_file", classified[0], "file-delete");
     }
     if (name === "mv" || name === "move") {
         const values = args.map(stripShellToken).filter((arg) => arg && !arg.startsWith("-"));
-        if (values.length > 0 && isDotEnvTarget(values[0]))
-            return softMatch("move_dotenv", values[0], "dotenv-move");
+        const sourceHit = values.length > 0 ? sensitiveFileHit(values[0]) : undefined;
+        if (sourceHit) {
+            return hardMatch("move_sensitive", sourceHit.target, `sensitive-file-move: ${sourceHit.name}`, [
+                "Do not rename or relocate credential/session files.",
+            ]);
+        }
     }
     if ((name === "cp" || name === "install" || name === "mv") && args.some((arg) => stripShellToken(arg) === "/dev/null")) {
         const targets = args.map(stripShellToken).filter((arg) => arg && !arg.startsWith("-") && arg !== "/dev/null");
@@ -861,6 +1120,9 @@ function classifySegment(name: string, args: string[], segment: string): Destruc
             ]);
         }
     }
+    const write = sensitiveWriteReason(name, args);
+    if (write)
+        return write;
     return undefined;
 }
 
@@ -875,6 +1137,12 @@ function classifyDestructiveCommand(command: string, depth = 0): DestructiveMatc
     const credential = credentialDumpMatch(raw);
     if (credential?.kind === "hard")
         return credential;
+    const credentialRead = credentialReadMatch(raw);
+    if (credentialRead?.kind === "hard")
+        return credentialRead;
+    const egress = sensitiveFileEgressMatch(raw);
+    if (egress?.kind === "hard")
+        return egress;
     if (REMOTE_SHELL_PIPE_RE.test(scan) || BASE64_SHELL_PIPE_RE.test(scan) ||
         PROCESS_SUBSTITUTION_SHELL_RE.test(scan) || EVAL_FETCH_RE.test(raw) ||
         COMMAND_SUBSTITUTION_FETCH_RE.test(raw)) {
@@ -894,12 +1162,19 @@ function classifyDestructiveCommand(command: string, depth = 0): DestructiveMatc
     }
     for (const rawTarget of redirectTargets(raw)) {
         const target = stripShellToken(rawTarget);
+        if (!target)
+            continue;
+        if (isSharedStoragePath(target)) {
+            return hardMatch("sensitive_file_egress", target, "shared-storage-egress", [
+                "Do not redirect output into shared storage; write to a reviewed local path instead.",
+            ]);
+        }
         if (BLOCK_DEVICE_RE.test(target)) {
             return hardMatch("write_block_device", target, "redirect-to-block-device", [
                 "Never redirect output to a block device from the agent.",
             ]);
         }
-        if (target && (isSensitiveTarget(target) || isDotEnvTarget(target) || isSystemPath(target))) {
+        if (isSensitiveTarget(target) || isDotEnvTarget(target) || isSystemPath(target)) {
             return hardMatch("truncate_sensitive", target,
                 isDotEnvTarget(target) ? "overwrite-dotenv" : "redirect-over-protected-file", [
                     "Move the credential/session file to a secure backup instead of overwriting it.",

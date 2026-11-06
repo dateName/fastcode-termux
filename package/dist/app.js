@@ -189,7 +189,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         ? pendingLogin.step === "loading-models"
             ? "Loading available models…"
             : pendingLogin.step === "model-manual"
-                ? "Model id (e.g. deepseek-chat) · Esc to cancel"
+                ? "Model id (e.g. deepseek-flash) · Esc to cancel"
                 : pendingLogin.hasExistingKey
                     ? "API key (masked), or Enter to keep existing key · Esc to cancel"
                     : pendingLogin.provider && getLegacy(pendingLogin.provider)
@@ -830,6 +830,16 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                             ok: ev.ok,
                             output: ev.output,
                             sideEffects: ev.sideEffects,
+                            ...(ev.code ? { code: ev.code } : {}),
+                            ...(ev.hint ? { hint: ev.hint } : {}),
+                            ...(ev.truncated !== undefined ? { truncated: ev.truncated } : {}),
+                            ...(ev.totalLines !== undefined ? { totalLines: ev.totalLines } : {}),
+                            ...(ev.returnedLines !== undefined ? { returnedLines: ev.returnedLines } : {}),
+                            ...(ev.totalBytes !== undefined ? { totalBytes: ev.totalBytes } : {}),
+                            ...(ev.returnedBytes !== undefined ? { returnedBytes: ev.returnedBytes } : {}),
+                            ...(ev.filesRead !== undefined ? { filesRead: ev.filesRead } : {}),
+                            ...(ev.filesSkipped !== undefined ? { filesSkipped: ev.filesSkipped } : {}),
+                            ...(ev.matches !== undefined ? { matches: ev.matches } : {}),
                         });
                         const collapsed = stableUi && !expanded;
                         const body = collapsed ? collapseToolOutput(ev.output) : ev.output;
@@ -848,6 +858,25 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                     case "loop_detected":
                         pushSystem(`Loop detected: \`${ev.fingerprint.split(":")[0]}\` repeated ${ev.occurrences} times. Asking the model to change approach.`);
                         break;
+                    case "egress_denied": {
+                        idRef.current += 1;
+                        sessionRef.current.append({
+                            type: "egress_denied",
+                            outlet: ev.outlet,
+                            target: ev.target,
+                            rule: ev.rule,
+                            mode: ev.mode,
+                            wouldBlock: ev.wouldBlock,
+                            code: ev.code,
+                            reason: ev.reason,
+                        });
+                        const target = ev.target ? ` target=${JSON.stringify(ev.target)}` : "";
+                        setTranscript((prev) => [
+                            ...prev,
+                            { id: idRef.current, role: "system", content: `[egress] ${ev.mode} rule=${ev.rule}${target} would_block=${ev.wouldBlock}\n${ev.reason}`, markdown: true },
+                        ]);
+                        break;
+                    }
                     case "notice":
                         pushSystem(ev.text);
                         break;

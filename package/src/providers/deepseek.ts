@@ -9,7 +9,7 @@ export const deepseekProvider = {
     label: "DeepSeek",
     authEnv: ["DEEPSEEK_API_KEY"],
     baseUrl: BASE,
-    defaultModel: "deepseek-v4-pro",
+    defaultModel: "deepseek-flash",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC }),
     stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC, reasoning: "openai" }),
     supportsReasoning: () => true,

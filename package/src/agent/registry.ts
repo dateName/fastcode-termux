@@ -10,10 +10,55 @@ import {
 import { approvalKey, isPreApproved, rememberApproval } from "./approval-store.js";
 import { evaluateShellCommand } from "./guards.js";
 import { TOOLS } from "./tools/index.js";
-import type { RevalidateKey, StateScope, Tool, ToolCall, ToolCtx, ToolResult } from "./tools/types.js";
+import type { RevalidateKey, SideEffects, StateScope, Tool, ToolCall, ToolCtx, ToolErrorCode, ToolResult } from "./tools/types.js";
+import { loadConfig } from "../config/store.js";
+import {
+    egressAudit,
+    evaluateEgressCall,
+    evaluateEgressOutput,
+    formatEgressDenial,
+    normalizeEgressConfig,
+} from "./policy/egress.js";
 
 const STATE_SCOPES = new Set<StateScope>(["call", "turn", "session"]);
 const REVALIDATE_KEYS = new Set<RevalidateKey>(["trust", "sandboxRoots", "schema", "modelCaps"]);
+const TOOL_ERROR_CODES = new Set<ToolErrorCode>([
+    "ENOENT", "EACCES", "EEXIST", "ENOTDIR", "EISDIR", "EXDEV", "INVALID_ARGS",
+    "SANDBOX_DENY", "APPROVAL_DENY", "EGRESS_DENY", "NOT_FOUND", "ABORTED", "UNKNOWN",
+]);
+
+function errorCode(error: any): ToolErrorCode {
+    const code = String(error?.code ?? "");
+    if (TOOL_ERROR_CODES.has(code as ToolErrorCode))
+        return code as ToolErrorCode;
+    const message = String(error?.message ?? error ?? "");
+    if (/outside sandbox/i.test(message))
+        return "SANDBOX_DENY";
+    if (/not trusted/i.test(message))
+        return "APPROVAL_DENY";
+    if (/aborted/i.test(message))
+        return "ABORTED";
+    return "UNKNOWN";
+}
+
+function unique(values: string[] | undefined): string[] {
+    return Array.from(new Set((values ?? []).filter(Boolean)));
+}
+
+function normalizeSideEffects(sideEffects: SideEffects | undefined): SideEffects | undefined {
+    if (!sideEffects)
+        return undefined;
+    const touched = unique(sideEffects.touched);
+    const created = unique(sideEffects.created);
+    const removed = unique(sideEffects.removed);
+    if (touched.length === 0 && created.length === 0 && removed.length === 0)
+        return undefined;
+    return {
+        ...(touched.length > 0 ? { touched } : {}),
+        ...(created.length > 0 ? { created } : {}),
+        ...(removed.length > 0 ? { removed } : {}),
+    };
+}
 
 export function assertToolContract(tools: Tool[] = TOOLS): void {
     const names = new Set<string>();
@@ -69,7 +114,7 @@ export class ToolRegistry {
         if (tool.name === "shell") {
             const verdict = evaluateShellCommand(call.command);
             if (verdict.action === "hard_block")
-                return { kind: "deny", reason: verdict.output };
+                return { kind: "deny", reason: verdict.output, code: verdict.code, target: verdict.target };
             if (verdict.action === "soft_gate") {
                 const key = approvalKey(tool.name, call, ctx.cwd);
                 if (isPreApproved(key, this.catalogHash))
@@ -90,37 +135,106 @@ export class ToolRegistry {
     async execute(call: ToolCall, ctx: ToolCtx): Promise<ToolResult> {
         const tool = this.get(call.tool);
         if (!tool)
-            return { ok: false, output: `unknown tool: ${String(call.tool)}` };
+            return { ok: false, output: `unknown tool: ${String(call.tool)}`, code: "INVALID_ARGS" };
         const toolCtx: ToolCtx = { ...ctx, catalogHash: this.catalogHash };
         const prepared = tool.prepare(call, toolCtx);
         if (prepared.ok === false)
-            return { ok: false, output: prepared.output };
+            return { ok: false, output: prepared.output, code: prepared.code ?? "INVALID_ARGS", hint: prepared.hint };
+        const egressConfig = normalizeEgressConfig(loadConfig().egress);
+        const preEgress = evaluateEgressCall(call, ctx.cwd, egressConfig);
+        if (preEgress.action === "deny") {
+            const egressDecision = preEgress.decision!;
+            return {
+                ok: false,
+                output: formatEgressDenial(egressDecision),
+                code: "EGRESS_DENY",
+                hint: "Egress policy blocked this call before execution; no approval request was created.",
+                egress: egressAudit(egressDecision),
+            };
+        }
+        const preAudit = preEgress.decision ? egressAudit(preEgress.decision) : undefined;
         const decision = this.approve(call, toolCtx);
-        if (decision.kind === "deny")
-            return { ok: false, output: decision.reason ?? "denied by approval policy" };
+        if (decision.kind === "deny") {
+            const output = decision.reason ?? "denied by approval policy";
+            if (tool.name === "shell" && (decision.code === "sensitive_file_egress" || decision.code === "credential_read")) {
+                return {
+                    ok: false,
+                    output,
+                    code: "EGRESS_DENY",
+                    egress: {
+                        outlet: "shell.command",
+                        ...(decision.target ? { target: decision.target } : {}),
+                        rule: decision.code,
+                        mode: "block",
+                        wouldBlock: true,
+                        code: "EGRESS_DENY",
+                        reason: decision.code,
+                    },
+                };
+            }
+            return { ok: false, output, code: "APPROVAL_DENY" };
+        }
         if (decision.kind === "pending") {
             if (!ctx.requestApproval)
-                return { ok: false, output: "approval required, but no approval resolver is registered (fail closed)" };
+                return { ok: false, output: "approval required, but no approval resolver is registered (fail closed)", code: "APPROVAL_DENY" };
             let resolved: ApprovalDecision | undefined;
             try {
                 resolved = await ctx.requestApproval(decision.request);
             }
             catch (err: any) {
-                return { ok: false, output: `approval failed (fail closed): ${err?.message ?? String(err)}` };
+                return { ok: false, output: `approval failed (fail closed): ${err?.message ?? String(err)}`, code: "APPROVAL_DENY" };
             }
             if (!resolved || resolved.kind === "pending")
-                return { ok: false, output: "approval unresolved; nothing was executed (fail closed)" };
+                return { ok: false, output: "approval unresolved; nothing was executed (fail closed)", code: "APPROVAL_DENY" };
             if (resolved.kind !== "allow") {
                 const reason = resolved.kind === "deny" ? resolved.reason : resolved.kind === "feedback" ? resolved.text : `decision ${resolved.kind} requires a later batch`;
-                return { ok: false, output: `approval denied: ${reason ?? "no reason"}` };
+                return { ok: false, output: `approval denied: ${reason ?? "no reason"}`, code: "APPROVAL_DENY" };
             }
             rememberApproval(approvalKey(tool.name, call, ctx.cwd), this.catalogHash, resolved.scope);
         }
         try {
-            return await tool.execute(call, toolCtx);
+            let result: ToolResult = await tool.execute(call, toolCtx);
+            result = {
+                ...result,
+                sideEffects: normalizeSideEffects(result.sideEffects),
+                ...(preAudit && !result.egress ? { egress: preAudit } : {}),
+            };
+            const postEgress = evaluateEgressOutput(call.tool, result.output, egressConfig);
+            if (postEgress.action === "deny") {
+                const egressDecision = postEgress.decision!;
+                return {
+                    ok: false,
+                    output: formatEgressDenial(egressDecision),
+                    code: "EGRESS_DENY",
+                    hint: "Egress policy blocked this tool output before it reached the model.",
+                    sideEffects: result.sideEffects,
+                    egress: egressAudit(egressDecision),
+                };
+            }
+            if (postEgress.decision)
+                result = { ...result, egress: egressAudit(postEgress.decision) };
+            return result;
         }
         catch (err: any) {
-            return { ok: false, output: err?.message ?? String(err) };
+            const output = err?.message ?? String(err);
+            const postEgress = evaluateEgressOutput(call.tool, output, egressConfig);
+            if (postEgress.action === "deny") {
+                const egressDecision = postEgress.decision!;
+                return {
+                    ok: false,
+                    output: formatEgressDenial(egressDecision),
+                    code: "EGRESS_DENY",
+                    hint: "Egress policy blocked this error output before it reached the model.",
+                    egress: egressAudit(egressDecision),
+                };
+            }
+            return {
+                ok: false,
+                output,
+                code: errorCode(err),
+                ...(preAudit ? { egress: preAudit } : {}),
+                ...(postEgress.decision ? { egress: egressAudit(postEgress.decision) } : {}),
+            };
         }
     }
 }

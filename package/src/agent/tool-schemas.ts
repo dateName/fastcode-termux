@@ -11,8 +11,15 @@ export function toolSchemas(): ToolSchema[] {
             waitMs: { type: "number", description: "Milliseconds to wait for new session output." },
         }),
         schema("pwd", "Print the current working directory.", {}),
-        schema("read_file", CWD_NOTE, { path: { type: "string" } }, ["path"]),
-        schema("read_many", CWD_NOTE, { paths: { type: "array", items: { type: "string" } } }, ["paths"]),
+        schema("read_file", "Read a file. Use offset/limit (1-based lines) for a targeted range in large files.", {
+            path: { type: "string" },
+            offset: { type: "number", minimum: 1, description: "First line to return (1-based)." },
+            limit: { type: "number", minimum: 1, maximum: 2000, description: "Maximum lines to return (default 2000)." },
+        }, ["path"]),
+        schema("read_many", "Read several files under a shared byte budget.", {
+            paths: { type: "array", items: { type: "string" } },
+            maxBytes: { type: "number", minimum: 1, description: "Total output budget across all files." },
+        }, ["paths"]),
         schema("write_file", "Replace a file with full contents.", {
             path: { type: "string" },
             content: { type: "string" },
@@ -24,8 +31,15 @@ export function toolSchemas(): ToolSchema[] {
         schema("apply_patch", "Apply a multi-file patch (*** Begin Patch ... *** End Patch).", {
             patch: { type: "string" },
         }, ["patch"]),
-        schema("copy_file", CWD_NOTE, { from: { type: "string" }, to: { type: "string" } }, ["from", "to"]),
-        schema("delete_file", "Delete a file or directory.", { path: { type: "string" } }, ["path"]),
+        schema("copy_file", CWD_NOTE, {
+            from: { type: "string" },
+            to: { type: "string" },
+            overwrite: { type: "boolean", description: "Replace an existing target explicitly (default false)." },
+        }, ["from", "to"]),
+        schema("delete_file", "Delete a file, or a directory with recursive:true.", {
+            path: { type: "string" },
+            recursive: { type: "boolean", description: "Required for directories (default false)." },
+        }, ["path"]),
         schema("list_files", "List files under a directory.", {
             path: { type: "string" },
             maxDepth: { type: "number" },
@@ -39,12 +53,17 @@ export function toolSchemas(): ToolSchema[] {
         schema("grep", "Search file contents with a regular expression.", {
             pattern: { type: "string" },
             path: { type: "string" },
-            maxDepth: { type: "number" },
+            maxDepth: { type: "number", minimum: 1, maximum: 20 },
+            caseSensitive: { type: "boolean", description: "Match case exactly (default false)." },
+            glob: { type: "string", description: "Only search files matching this glob, e.g. *.ts." },
+            context: { type: "number", minimum: 0, maximum: 10, description: "Context lines before/after each match." },
+            maxResults: { type: "number", minimum: 1, maximum: 5000, description: "Stop after this many matching lines." },
         }, ["pattern"]),
-        schema("replace_in_file", "Replace an exact text occurrence.", {
+        schema("replace_in_file", "Replace exact text occurrences; expectedMatches makes the count explicit.", {
             path: { type: "string" },
             find: { type: "string" },
             replace: { type: "string" },
+            expectedMatches: { type: "number", minimum: 1, description: "Fail without writing unless this exact count is found." },
         }, ["path", "find", "replace"]),
         schema("stat_path", "Show file metadata.", { path: { type: "string" } }, ["path"]),
     ];

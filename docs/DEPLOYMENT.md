@@ -3,8 +3,8 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
-> 当前工作树版本：**0.1.7-beta（开发版，未发布）**。本地 `release/` 已生成
-> 0.1.7-beta 的 portable tar.gz/zip、npm tarball 与 SHA256SUMS；
+> 当前工作树版本：**0.1.7（未发布）**。本地 `release/` 仍是 **0.1.7-beta 旧归档**；
+> 正式发布 0.1.7 前需重新生成 portable tar.gz/zip、npm tarball 与 SHA256SUMS（下方资产名以 0.1.7 为目标名）。
 > GitHub Release 与 npm 上仍是历史 **0.1.6-beta**。tag/Release/npm 发布仍需另行执行。
 
 ## 0. 先确认 Node 与 git
@@ -40,12 +40,12 @@ Termux 安装依赖：
 ## 方式 B：免安装便携包（Release 附件）
 
 运行时 `dist/cli.js` 已自包含，解压后不需要 npm install。到 Release 页面下载
-`fastcode-portable-0.1.7-beta.tar.gz`（或 `.zip`，校验见 `SHA256SUMS`）。
+`fastcode-portable-0.1.7.tar.gz`（或 `.zip`，校验见 `SHA256SUMS`）。
 注意：若要运行真机 smoke，需要把 `bash-parser` 及其依赖闭包一并放入 `package/node_modules`；否则 smoke 直接加载 dist 模块会报模块缺失（见 `RUNBOOK.md`）。
 
 发布包结构：
 
-    fastcode-portable-0.1.7-beta/
+    fastcode-portable-0.1.7/
       fastcode            启动脚本（Linux/macOS/Termux）
       fastcode.cmd        Windows 启动脚本
       package/            程序本体；运行时只需 dist/cli.js，smoke 需 bash-parser 依赖闭包
@@ -53,10 +53,10 @@ Termux 安装依赖：
 
 使用步骤：
 
-    1) 把 fastcode-portable-0.1.7-beta.tar.gz 传到设备
+    1) 把 fastcode-portable-0.1.7.tar.gz 传到设备
     2) 解压
-         tar -xzf fastcode-portable-0.1.7-beta.tar.gz
-         cd fastcode-portable-0.1.7-beta
+         tar -xzf fastcode-portable-0.1.7.tar.gz
+         cd fastcode-portable-0.1.7
     3) 直接运行
          ./fastcode --version
          ./fastcode doctor
@@ -94,7 +94,7 @@ Windows：
 
 用本地 tarball 安装：
 
-    npm install -g ./datename-fastcode-termux-0.1.7-beta.tgz
+    npm install -g ./datename-fastcode-termux-0.1.7.tgz
 
 临时试用（不安装）：
 
@@ -108,9 +108,9 @@ Windows：
 
 产物在 `release/`：
 
-    fastcode-portable-0.1.7-beta.tar.gz       免安装便携包
-    fastcode-portable-0.1.7-beta.zip          同上（需系统有 zip）
-    datename-fastcode-termux-0.1.7-beta.tgz   npm 包（npm pack）
+    fastcode-portable-0.1.7.tar.gz       免安装便携包
+    fastcode-portable-0.1.7.zip          同上（需系统有 zip）
+    datename-fastcode-termux-0.1.7.tgz   npm 包（npm pack）
     SHA256SUMS                           以上文件的校验和
 
 脚本步骤：复制 bin/dist 与元数据 ->（若含自包含的 dist/cli.js 则跳过依赖安装）
@@ -120,9 +120,9 @@ Windows：
 
 发布：
 
-    gh release create v0.1.7-beta -t "FastCode 0.1.7-beta" \
-      release/fastcode-portable-0.1.7-beta.tar.gz \
-      release/datename-fastcode-termux-0.1.7-beta.tgz \
+    gh release create v0.1.7 -t "FastCode 0.1.7" \
+      release/fastcode-portable-0.1.7.tar.gz \
+      release/datename-fastcode-termux-0.1.7.tgz \
       release/SHA256SUMS
 
     cd package && npm publish --access public --tag beta
@@ -149,12 +149,12 @@ Windows：
 ## 选择主模型（三种等效）
 
     nano ~/.fastcode/config.json      # 方式一：改文件
-    fastcode model deepseek-chat      # 方式二：命令行
-    /model deepseek-chat              # 方式三：TUI 内
+    fastcode model deepseek-flash      # 方式二：命令行
+    /model deepseek-flash              # 方式三：TUI 内
 
 ## 安装后校验
 
-    fastcode --version      # 应输出 0.1.7-beta
+    fastcode --version      # 应输出 0.1.7
     fastcode doctor         # 检查 Node、平台、TTY、config/keys 路径、缺哪个 Key
 
 ## 更新

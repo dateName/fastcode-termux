@@ -2,18 +2,35 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.7-beta（开发版，未发布）
+## 0.1.7（当前工作树，未发布）
 
-> 状态：`package.json` = `0.1.7-beta`。npm 与 GitHub Release 上的资产仍为 0.1.6-beta，尚未发布 0.1.7-beta。
-> 本版本重点：三态 Guardrails、AST 第二意见、审批闭环、模型配置 TUI、会话 manifest、配置缓存、技能完整性。
+> 状态：`package.json` = `0.1.7`。npm 与 GitHub Release 上的资产仍为 0.1.6-beta，尚未发布 0.1.7。
+> 本版本重点：三态 Guardrails、egress 策略、AST 第二意见、审批闭环、模型配置 TUI、会话 manifest、配置缓存、技能完整性。
 
-**FastCode 0.1.7-beta 已从“单体 TUI”演进为：事件化 runner + 15 工具契约 + 三态 Guardrails + AST 第二意见 + 可审批/可回滚的 tool 执行 + 事实流/投影恢复 + 多 provider + Termux 单文件分发。**
+**FastCode 0.1.7 已从“单体 TUI”演进为：事件化 runner + 15 工具契约 + 三态 Guardrails + Egress 策略 + AST 第二意见 + 可审批/可回滚的 tool 执行 + 事实流/投影恢复 + 多 provider + Termux 单文件分发。**
 
 ### Guardrails
 - Hard Block / Soft Gate / allow 三态；Hard Block 不受 `FASTCODE_ALLOW_DANGEROUS`、trust、session/always 影响。
-- `.env` 删除为 Soft Gate，截断/覆盖为 Hard Block；裸 `printenv`/`env` 为 Soft Gate，定向 grep/外发为 Hard Block。
+- `.env` 家族写入/删除/重命名/外发为 Hard Block；普通敏感文件读取为 allow/Soft，关键凭据（`id_*`、`/etc/shadow`、`/etc/sudoers`）读取即 Hard Block。
+- 敏感文件外传采用 basename + 路径段双黑名单：管道到网络 sink、上传参数、`scp`/`rsync`、`base64`/`tar` 间接外带、共享存储重定向均返回 `sensitive_file_egress`。
+- 裸 `printenv`/`env` 为 Soft Gate，定向 grep/外发为 Hard Block。
 - 纯 JS `bash-parser` AST 第二意见：只升不降，覆盖 `-c`、`find -exec`、`eval/source/.`、同段一次赋值。
 - `nc -e`、`/dev/tcp`、非字面量 `eval/source/-c` 纳入 Hard Block。
+
+### 工具契约与精准读写
+- `read_file` 支持 `offset/limit`（1-based 行区间），返回 `totalLines/returnedLines/truncated`；超出 EOF 返回 `NOT_FOUND`。
+- `read_many` 受 `FASTCODE_READ_MANY_MAX_BYTES` 总预算约束，返回 `filesRead/filesSkipped/returnedBytes`。
+- `grep` 支持 `caseSensitive/glob/context/maxResults`；非法正则在 prepare 期返回 `INVALID_ARGS`，pattern 长度上限 1000。
+- `ToolResult` 新增 `code/hint/truncated/totalLines/returnedLines/totalBytes/returnedBytes/filesRead/filesSkipped/matches`；registry 统一映射 `ENOENT/EEXIST/EISDIR/SANDBOX_DENY/APPROVAL_DENY` 等错误码。
+- 写删移：`replace_in_file` 支持 `expectedMatches` 与计数回执；`copy_file` 默认拒绝已存在目标，`overwrite:true` 显式覆盖；`delete_file` 目录需 `recursive:true`；`move_path` 在 `EXDEV` 时回退 copy+remove；write/append/make_dir 区分 `created`/`touched`。
+- headless NDJSON 增加 `v/seq/ts`、`tool_call`、`tool_result` 的 `output/side_effects/code/truncated` 与行/字节统计、`usage`、`error.code`。
+
+### Egress 策略
+- 新增纯策略模块 `agent/policy/egress.ts`，在 `registry.execute()` 的 prepare 后、approve 前判定；默认 `enabled:false + mode:"audit"`，只记录不拦截。
+- `mode:"block"` 时敏感写入/删除/复制/移动、关键凭据读取、内容标记、超预算 outbound 输出返回 `code:"EGRESS_DENY"`；不生成审批请求，不写 `trusted.json`。
+- 内置敏感 basename/路径、共享存储、内容标记不可由用户配置删除；`denyPaths`/`denyGlobs` 只能追加。`FASTCODE_ALLOW_DANGEROUS`、`FASTCODE_TRUST_ALL`、`sharedDirs` 不能覆盖。
+- 工具输出在返回模型前扫描 `denyContentMarkers`；`maxScanBytes` 控制 outbound 扫描预算，超预算在 block 态 fail-closed。
+- NDJSON/TUI/session 增加 `egress_denied` 事件；projection 将其保留为 system 消息；`doctor` 输出 egress 段。配置变更即时生效；`mode:"off"` 为完整 kill switch。
 
 ### 审批与交互
 - Soft Gate 和大 patch 生成 pending；once/session/always、catalogHash 失效、`trust --forget`。
@@ -24,18 +41,31 @@
 ### 模型配置 TUI
 - `/provider`、`/model`、`/login` 无参数统一进入 provider → model → key 向导。
 - 带参数快捷路径保留；支持方向键/数字/Enter、离线模型列表、手动 model ID、key 掩码、keyless provider 跳过 key。
+- DeepSeek 默认模型改为 `deepseek-flash`；内置列表仍含 `deepseek-v4-pro` / `deepseek-flash`。
 - Esc 取消不提交未完成配置。
+
+### Provider 请求协议参数化
+- 新增 `providers/spec.ts`：URL 模板、`pathParams`/`query`、auth 头纯函数；占位符缺失时抛错、不发请求。
+- `openaiCompatible.ts` 的 `StreamOptions` 增加 `chatPath/modelsPath/query/pathParams/authHeaderName/authPrefix`；默认值与旧行为一致。
+- 现有 13 个 provider 的请求 URL/header 快照不变；`modelsPath:null` 跳过在线列表；legacy `authHeader` 仍按前缀处理。
 
 ### 可靠性与会话
 - `timeoutMs` 钳位与 debug 可见性；后台任务转后台保留超时，SIGTERM → grace → SIGKILL。
 - 配置缓存使用 mtime/size/ctime 指纹；save/verify 失效。
 - projection 保存 manifest（contentHash/sessionHash/lastFactSeq）；剪枝 → 回收 → 恢复保持工具配对。
+- `lib/lifecycle.ts` 统一安装 SIGTERM/SIGHUP/uncaughtException/unhandledRejection 兜底；headless 同时响应 SIGTERM/SIGHUP 中止。
+- 流式重试通过 `notice` 事件可见（TUI + headless JSON；plain 写 stderr）；`doctor --net` 增加 registry 连通性结论。
+- `/jobs` 显示会话年龄与 10 分钟回收提示；projection 保留 `notice` 与 `egress_denied` system 消息。
+- 真机测试发现的 G1 已修复：`headless.ts` 的 json/plain 分支补 `notice` 映射（JSON 发 `{event:"notice"}`，plain 写 stderr）。
+- 新增 `npm run bench`：冷启动、200KB 写入、10×200KB read_many、1000 文件 list/grep。
 - 技能目录 sha256 完整性锁定；`/skills verify --confirm` 重新基线。
 - 语法高亮裁剪常用语言，冷门语言纯文本回退 + 提示。
 
 ### 验证
-- PC：typecheck/lint/build 通过，smoke 207/207。
-- Termux：真机 smoke 212/212（0.1.6-beta 同源构建；0.1.7-beta 版本号变更后未重新部署）。
+- PC：typecheck/lint/build 通过，smoke 275/275（Windows，HEAD ddcdfc7 + 守卫重建 + 工具契约 + egress 策略 + 运维/兼容 + provider 协议 + G1）。
+- 回滚演练：`git archive HEAD` 到临时目录后旧 `bin/fastcode.mjs --version` 正常启动。
+- bench（Windows / Node v24.20.0）：cold start 143.74ms、write 200KB 8.86ms、read_many 10×200KB 26.04ms、list 1000 68.19ms、grep 1000 630.06ms。
+- Termux 真机（本次，G1 修复后）：smoke **281/281**；G1 修复前为 279/279。历史 212/212 仅作 0.1.6-beta 记录。
 - 真机已验证 TUI、审批 Esc/allow once、模型配置向导取消不改配置。
 
 ## 0.1.6-beta（测试版）

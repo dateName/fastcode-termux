@@ -36,6 +36,32 @@
 | contextBudgetChars | 旧字符预算（阶段 4 起由 token 阈值取代，保留但不再参与压缩） | 400000 |
 | reasoningEffort | 思考强度 auto/low/medium/high/max | auto |
 | capabilities | 缓存的 provider/model 能力；`toolCalling` 记 `native` / `pseudo` | `{ "toolCalling": {} }` |
+| egress | 应用层 egress 策略；见 §2.1 | `{ "enabled": false, "mode": "audit", ... }` |
+
+### 2.1 egress 策略
+
+```json
+{
+  "egress": {
+    "enabled": false,
+    "mode": "audit",
+    "denyPaths": [],
+    "denyGlobs": [],
+    "denyContentMarkers": ["AKIA[0-9A-Z]{16}", "-----BEGIN [A-Z ]*PRIVATE KEY-----"],
+    "maxScanBytes": 1000000,
+    "scanToolOutput": true
+  }
+}
+```
+
+- `enabled`：是否执行 block 拦截；`false` 时只审计。
+- `mode`：`off` / `audit` / `block`。`off` 是完整 kill switch；默认 `audit` 只发 `egress_denied`，不改变工具结果；`enabled:true + mode:"block"` 才拒绝执行。
+- `denyPaths` / `denyGlobs`：追加到内置敏感路径规则，不能删除内置规则；deny 恒胜于任何 allow。
+- `denyContentMarkers`：正则字符串，追加到内置标记；非法正则会忽略。内置标记与 `.env.example`/`.envrc` 放行规则不可由配置删除。
+- `maxScanBytes`：outbound 内容/工具输出扫描预算；block 态超预算返回 `EGRESS_DENY`（`scan_budget_exceeded`），audit 态只记录。
+- `scanToolOutput`：是否在工具输出返回模型前扫描内容标记。
+- block 拒绝返回 `code:"EGRESS_DENY"`，不生成审批请求，不写 `trusted.json`；`FASTCODE_ALLOW_DANGEROUS`、`FASTCODE_TRUST_ALL`、`sharedDirs` 不能覆盖。
+- 配置变更通过 config 指纹缓存即时生效。首版默认 audit，建议 soak 1–2 周后再切 block。
 
 SSE 连接另有一层 25s「无数据」超时（抛 `NetworkStallError`，已收到的文本保留）；
 `requestIdleTimeoutMs` 是外层兜底（默认 60s），两者可以独立触发。
@@ -57,7 +83,7 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
 
     {
       "providerId": "deepseek",
-      "model": "deepseek-chat"
+      "model": "deepseek-flash"
     }
 
 ## 3. auth.json：Key 绑定到「服务商」
@@ -69,7 +95,7 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
       "keys": {
         "deepseek": {
           "provider": "deepseek",
-          "model": "deepseek-v4-pro",
+          "model": "deepseek-flash",
           "key": "sk-...",
           "addedAt": "2026-10-18T00:00:00.000Z"
         }
@@ -111,8 +137,8 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
     /model                                      # 当前服务商/模型 → 按需输入 Key
     /login                                      # 选择服务商 → 模型 → 按需输入 Key
     /login deepseek                             # 从模型选择继续
-    /login deepseek deepseek-chat               # 从掩码 Key 输入继续
-    /login deepseek deepseek-chat sk-xxxx       # 一行完成
+    /login deepseek deepseek-flash               # 从掩码 Key 输入继续
+    /login deepseek deepseek-flash sk-xxxx       # 一行完成
 
 保存成功后回显：服务商、作用域（该 provider 的全部模型）、Key 尾号、保存位置。
 Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作选择器；Esc 取消且不提交未完成的 provider/model 配置。
@@ -176,7 +202,9 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_SHELL_ALLOWLIST | 只允许匹配这些正则的命令，分号分隔 |
 | FASTCODE_SHELL_DENY_EXTRA | 追加的危险命令正则，分号分隔 |
 | FASTCODE_RESTRICT_TO_WORKSPACE | 设为 1 额外拒绝 ../ 路径穿越 |
-| FASTCODE_READ_MAX_BYTES | read_file/read_many 单文件上限，默认 200000 |
+| FASTCODE_READ_MAX_BYTES | read_file 单次读取上限；read_many 的单文件读取上限，默认 200000 |
+| FASTCODE_READ_SCAN_MAX_BYTES | read_file offset/limit 统计总行数时的扫描上限，默认 8000000；超出时 totalLines 为下界并标记 truncated |
+| FASTCODE_READ_MANY_MAX_BYTES | read_many 的总输出字节预算，默认 400000；超出后跳过剩余文件并给出 hint |
 | FASTCODE_GREP_MAX_BYTES | grep 单文件上限，默认 1000000 |
 | FASTCODE_SPINNER_MS | spinner 帧间隔（毫秒，≥60）；默认 stable 120 / 普通 80 |
 | FASTCODE_TOKEN_BUDGET | 单次用户请求累计输入 token 预算；耗尽时返回错误并保留已生成文本；不设或 0 关闭 |
@@ -254,13 +282,13 @@ shell 工具在执行前先过三态判定：`allow` / `soft_gate` / `hard_block
   `find -exec rm …` 等。返回 `[guardrails] HARD_BLOCK action=… target=… reason=…`，
   不受 `FASTCODE_ALLOW_DANGEROUS`、trust、session/always 或配置影响。
 - **Soft Gate**：裸 `printenv`/`env`（可审查输出）、普通文件删除、可重建目录删除、
-  `.env` 删除/移动、`git reset --hard`（含 `HEAD~N`，reflog 可恢复）、`git clean -fd`、
+  `git reset --hard`（含 `HEAD~N`，reflog 可恢复）、`git clean -fd`、
   feature 分支 force-push、`kubectl delete ns` / `scale --replicas=0`、普通 `truncate`/`shred` 等；
   审批 resolver 尚未接线时 fail-closed 拒绝。
 - 历史 `DEFAULT_DENY` 与 `FASTCODE_SHELL_ALLOWLIST` 拒绝也归入 Soft Gate，不再保留“普通 deny”第四态。
 
 `FASTCODE_ALLOW_DANGEROUS=1` 只绕过 Soft Gate，不能让 Hard Block 通过。
-`.env` 删除（soft）与截断/覆盖（hard）已按操作语义拆分；`>> .env` 追加不拦。
+敏感文件（`.env` 家族、`auth.json`/`trust.json`、`id_*`、`*.pem`/`*.key`、sessions、`.ssh`/`.aws`/`.gnupg`/`.fastcode` 等）写入/删除/重命名/外发均为 Hard Block；普通敏感文件读取允许，关键凭据（`id_*`、`/etc/shadow`、`/etc/sudoers`）读取即 Hard Block。外传统一按 basename + 路径段黑名单判定，命中返回 `sensitive_file_egress`；`>>`/`>|` 追加重定向、`tee`/`sed -i`/`cp`/`install` 写入、共享存储重定向同样覆盖。`.env.example` 与 `.envrc` 显式放行。
 
 AST 第二意见（纯 JS `bash-parser`）只做“升级到 hard_block”，不会把形状匹配的 hard 降级；
 只解析 `-c`、`find -exec`、`eval/source/.` 三类入口和同段一次变量赋值。解析失败时保留形状匹配结果。
@@ -290,9 +318,9 @@ Tier 3 不给默认 yes；本批未接备份，因此 Tier 3 破坏性动作 fai
 每轮工具执行后追加一条 `type:"checkpoint"`（turn / cwd / providerId / model / activeFiles / lastFactSeq）。
 启动时若最近的会话没有 `session_end`，会提示上次会话未正常结束并给出 resume 命令。
 
-事实流（`.jsonl`）只追加：`user` / `assistant_raw` / `tool_call` / `tool_result` / `checkpoint` /
-`session_end`；UI 提示写 `notice`，不进入投影。旁边的 `<id>.projection.json` 是模型实际看到的
-工作集（<20KB），带 `toolCatalogHash + providerId::model + cwdDigest` 指纹，不匹配时从事实流重建。
+事实流（`.jsonl`）只追加：`user` / `assistant_raw` / `tool_call` / `tool_result` / `notice` / `egress_denied` / `checkpoint` /
+`session_end`；`notice` 与 `egress_denied` 在 projection 中作为 system 消息保留。旁边的 `<id>.projection.json` 是模型实际看到的
+工作集（<20KB），带 `toolCatalogHash + modelId + cwdDigest + compactionSource` 指纹，不匹配时从事实流重建。
 `fastcode resume` 会恢复到会话记录的 cwd / provider / model，并提示目录或 model 不兼容。
 
 缓存上限默认 256MB（FASTCODE_SESSION_CACHE_MB 可调）。剪枝前会先把旧会话摘要写入
@@ -303,16 +331,17 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
 ## 5. 三种改主模型的方式（等价）
 
 1. 改文件：nano ~/.fastcode/config.json
-2. 命令行：fastcode provider deepseek / fastcode model deepseek-chat
-3. 界面内：/provider deepseek / /model deepseek-chat
+2. 命令行：fastcode provider deepseek / fastcode model deepseek-flash
+3. 界面内：/provider deepseek / /model deepseek-flash
 
 查看当前值与文件位置：
 
     fastcode config         # 打印两个文件路径与 config 内容
     fastcode config path    # 只打印 config.json 路径
     fastcode doctor         # 环境 + 缺哪个 Key
+    fastcode doctor --net   # 额外探测 registry 连通性
 
-## 6. 交互选择器与思考强度（0.1.7-beta）
+## 6. 交互选择器与思考强度（0.1.7）
 
 ### 6.1 /model 与 /provider
 
@@ -322,7 +351,7 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
     /model        # 当前 provider 的 model 选择；当前 model 默认预选
     /login        # 从 provider 选择开始
     /login deepseek                 # 从 model 选择继续
-    /login deepseek deepseek-chat   # 从 masked key 输入继续
+    /login deepseek deepseek-flash   # 从 masked key 输入继续
 
 - Provider/model picker 支持 ↑/↓、Enter、`1`–`9` 编号选择、Esc 取消；新 provider 默认预选其 defaultModel。
 - 模型列表由 `provider.listModels()` 返回，provider 离线时使用内置/缓存列表并明确标记 `(offline)`；列表仍支持手动输入 model ID。
@@ -345,7 +374,7 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
 - 若模型返回 400 且错误提到 reasoning/thinking/unsupported，
   客户端会去掉该参数重试一次。
 
-## 7. 长任务相关配置（0.1.7-beta）
+## 7. 长任务相关配置（0.1.7）
 
 | 字段 | 作用 | 默认 |
 |---|---|---|

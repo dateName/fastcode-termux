@@ -16,7 +16,7 @@
 </p>
 
 ```bash
-npm install -g @datename/fastcode-termux@0.1.7-beta
+npm install -g @datename/fastcode-termux@0.1.6-beta
 fastcode
 ```
 
@@ -26,8 +26,8 @@ Short alias included:
 fc
 ```
 
-This tree is **0.1.7-beta**. The npm registry / GitHub Release assets remain
-**0.1.6-beta** until 0.1.7-beta is published. Use the repo/portable build for
+This tree is **0.1.7**. The npm registry / GitHub Release assets remain
+**0.1.6-beta** until 0.1.7 is published. Use the repo/portable build for
 the current working tree, or the published beta package.
 
 ---
@@ -84,7 +84,7 @@ npm link
 ### Global install
 
 ```bash
-npm install -g @datename/fastcode-termux@0.1.7-beta
+npm install -g @datename/fastcode-termux@0.1.6-beta
 fastcode
 ```
 
@@ -137,7 +137,7 @@ fastcode
 | `google` | `gemini-1.5-flash` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
 | `openrouter` | `anthropic/claude-3.5-sonnet` | `OPENROUTER_API_KEY` |
 | `groq` | `llama-3.3-70b-versatile` | `GROQ_API_KEY` |
-| `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| `deepseek` | `deepseek-flash` | `DEEPSEEK_API_KEY` |
 | `mistral` | `mistral-small-latest` | `MISTRAL_API_KEY` |
 | `ollama` | `llama3.2` | Local, no API key required |
 
@@ -309,7 +309,7 @@ Install Node.js first:
 
 ```bash
 pkg install nodejs
-npm install -g @datename/fastcode-termux@0.1.7-beta
+npm install -g @datename/fastcode-termux@0.1.6-beta
 fastcode
 ```
 
@@ -394,12 +394,13 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits (0.1.7-beta)
+## Safety, sessions and limits (0.1.7)
 
 | Feature | Behaviour | Override |
 | --- | --- | --- |
 | Project trust | First run in a folder asks before agent tools load; the list lives in ~/.fastcode/trusted.json | fastcode trust / untrust / trusted, FASTCODE_TRUST_ALL=1 |
-| Dangerous-command guard | rm -rf, del /f, rmdir /s, format / mkfs / diskpart, dd if=, writes to /dev/sd, shutdown / reboot / poweroff and fork bombs are refused before execution | FASTCODE_ALLOW_DANGEROUS=1, FASTCODE_SHELL_ALLOWLIST, FASTCODE_SHELL_DENY_EXTRA |
+| Dangerous-command guard | Hard Block for destructive/system/sensitive-file commands and credential exfil; `.env` writes/deletes/moves, critical credential reads and egress are non-overridable | FASTCODE_ALLOW_DANGEROUS=1 only for Soft Gate |
+| Egress policy | application-layer tool/payload/output policy; default audit-only, `enabled:true + mode:"block"` returns `EGRESS_DENY` | `config.egress`: enabled, mode, denyPaths, denyGlobs, denyContentMarkers, maxScanBytes |
 | Unified tool-output cap | Output is truncated while it is produced, not sliced afterwards (default 30000 characters) | FASTCODE_TOOL_OUTPUT_LIMIT |
 | Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash (cache cap 256MB by default) | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
 | Checkpoints/projection | `*.projection.json` (<20KB) with tool/model/cwd fingerprint; unpaired tool calls are completed on resume | FASTCODE_FSYNC, FASTCODE_SESSION_LOG |

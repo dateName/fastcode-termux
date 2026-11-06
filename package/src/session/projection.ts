@@ -155,6 +155,10 @@ export function factsToMessages(facts: any[]): ChatMessage[] {
         else if (fact.type === "tool_call") {
             calls.set(String(fact.id ?? ""), fact.args ?? { tool: fact.tool });
         }
+        else if (fact.type === "notice") {
+            if (typeof fact.content === "string" && fact.content)
+                messages.push({ role: "system", content: fact.content });
+        }
         else if (fact.type === "tool_result") {
             const id = String(fact.id ?? "");
             const call = calls.get(id) ?? { tool: fact.tool ?? "unknown" };
@@ -169,6 +173,11 @@ export function factsToMessages(facts: any[]): ChatMessage[] {
                     output: String(fact.output ?? ""),
                 });
             }
+        }
+        else if (fact.type === "egress_denied") {
+            const target = fact.target ? ` target=${JSON.stringify(fact.target)}` : "";
+            const content = `[egress] ${fact.mode ?? "audit"} rule=${fact.rule ?? "unknown"}${target} would_block=${Boolean(fact.wouldBlock)}\n${fact.reason ?? ""}`;
+            messages.push({ role: "system", content });
         }
     }
     flush();

@@ -1,7 +1,42 @@
 import { fetchJson, streamSSE } from "../lib/http.js";
 import { finalizeToolCalls, mergeToolCallDelta, type ToolCallAccumulator } from "../lib/native-tools.js";
+import { buildHeaders, buildRequestUrl, type RequestSpec } from "./spec.js";
+
+export interface ModelInfo {
+    id: string;
+    label?: string;
+    [key: string]: any;
+}
+
+export interface StreamOptions {
+    baseUrl: string;
+    apiKey?: string;
+    chatPath?: string;
+    modelsPath?: string | null;
+    query?: Record<string, string>;
+    pathParams?: Record<string, string>;
+    authHeaderName?: string;
+    authPrefix?: string;
+    staticModels?: ModelInfo[];
+    extraHeaders?: Record<string, string>;
+    /** Legacy auth prefix, e.g. "Bearer". Prefer authPrefix for new callers. */
+    authHeader?: string;
+    reasoning?: "openai" | "openrouter" | "none" | string;
+}
+
+export function toRequestSpec(opts: StreamOptions): RequestSpec {
+    return {
+        baseUrl: trim(opts.baseUrl),
+        chatPath: opts.chatPath,
+        modelsPath: opts.modelsPath,
+        query: opts.query,
+        pathParams: opts.pathParams,
+        authHeaderName: opts.authHeaderName,
+        authPrefix: opts.authPrefix ?? (opts.authHeader !== undefined ? `${opts.authHeader} ` : undefined),
+    };
+}
 /** Build a chat-completions body in the classic or the newer (compat) dialect. */
-function buildBody(req, compat, opts, includeReasoning = true) {
+function buildBody(req: any, compat: boolean, opts: StreamOptions, includeReasoning = true) {
     const messages = [];
     if (req.system)
         messages.push({ role: "system", content: req.system });
@@ -46,19 +81,20 @@ function buildBody(req, compat, opts, includeReasoning = true) {
     }
     return body;
 }
-export async function* streamChatCompletion(req, opts) {
+export async function* streamChatCompletion(req: any, opts: StreamOptions) {
     const hasReasoning = Boolean(req.reasoningEffort && req.reasoningEffort !== "auto" && opts.reasoning && opts.reasoning !== "none");
+    const spec = toRequestSpec(opts);
     const send = async (compat, includeReasoning = hasReasoning) => {
-        const headers = {
+        const headers: Record<string, string> = {
             "content-type": "application/json",
             accept: "text/event-stream",
             ...(opts.extraHeaders ?? {}),
         };
         if (opts.apiKey)
-            headers["authorization"] = (opts.authHeader ?? "Bearer") + " " + opts.apiKey;
+            Object.assign(headers, buildHeaders(spec, opts.apiKey));
         if (req.clientRequestId)
             headers["idempotency-key"] = req.clientRequestId;
-        return await fetch(trim(opts.baseUrl) + "/chat/completions", {
+        return await fetch(buildRequestUrl(spec, opts.chatPath ?? "/chat/completions"), {
             method: "POST",
             headers,
             body: JSON.stringify(buildBody(req, compat, opts, includeReasoning)),
@@ -128,15 +164,16 @@ export async function* streamChatCompletion(req, opts) {
     const calls = finalizeToolCalls(toolCalls);
     yield calls.length > 0 ? { delta: "", done: true, usage, toolCalls: calls } : { delta: "", done: true, usage };
 }
-export async function listModelsHttp(opts) {
+export async function listModelsHttp(opts: StreamOptions) {
     const staticModels = opts.staticModels ?? [];
+    if (opts.modelsPath === null)
+        return staticModels;
     if (!opts.apiKey && staticModels.length)
         return staticModels;
     try {
-        const headers = {};
-        if (opts.apiKey)
-            headers["authorization"] = (opts.authHeader ?? "Bearer") + " " + opts.apiKey;
-        const json = await fetchJson(trim(opts.baseUrl) + "/models", { headers });
+        const spec = toRequestSpec(opts);
+        const headers = opts.apiKey ? buildHeaders(spec, opts.apiKey) : {};
+        const json = await fetchJson(buildRequestUrl(spec, opts.modelsPath ?? "/models"), { headers });
         const ids = (json.data ?? [])
             .map((m) => m.id)
             .filter((id) => typeof id === "string" && id.length > 0);

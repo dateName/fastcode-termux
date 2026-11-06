@@ -1,6 +1,6 @@
 {
   "name": "@datename/fastcode-termux",
-  "version": "0.1.7-beta",
+  "version": "0.1.7",
   "description": "FastCode — a blazing-fast TUI coding assistant. Multi-LLM, skills.sh skills, slash commands. Works on Termux, Linux, Windows, and macOS.",
   "type": "module",
   "bin": {

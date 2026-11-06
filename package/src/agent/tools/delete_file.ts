@@ -1,13 +1,14 @@
-import { rm } from "node:fs/promises";
+import { lstat, rm } from "node:fs/promises";
 import { resolvePath } from "./paths.js";
 import type { Tool } from "./types.js";
-import { invalid, preparePath, requiredString } from "./validate.js";
+import { booleanOption, invalid, preparePath, requiredString } from "./validate.js";
 
 export const deleteFileTool: Tool = {
     name: "delete_file",
     requiresTrust: true,
     stateScope: "turn",
     revalidate: ["trust", "sandboxRoots"],
+    approvalHints: { mayRequireApproval: true },
     prepare(call, ctx) {
         let path: string;
         try {
@@ -20,7 +21,25 @@ export const deleteFileTool: Tool = {
     },
     async execute(call, ctx) {
         const file = resolvePath(ctx.cwd, call);
-        await rm(file, { recursive: true, force: true });
+        const recursive = booleanOption(call.recursive);
+        let info;
+        try {
+            info = await lstat(file);
+        }
+        catch (err: any) {
+            if (err?.code === "ENOENT")
+                return { ok: false, output: `path does not exist: ${file}`, code: "ENOENT", hint: "Check the path before deleting." };
+            throw err;
+        }
+        if (info.isDirectory() && !recursive) {
+            return {
+                ok: false,
+                output: `refusing to delete a directory without recursive:true: ${file}`,
+                code: "EISDIR",
+                hint: "Pass recursive:true to delete a directory tree.",
+            };
+        }
+        await rm(file, { recursive, force: false });
         return { ok: true, output: `deleted ${file}`, sideEffects: { removed: [file] } };
     },
 };

@@ -20,6 +20,8 @@ import { findUnclosedSessions, fsyncMode, loggingEnabled, listSessions, sessionC
 import { isTrusted } from "../config/trust.js";
 import { DEFAULT_DENY_PATTERNS, loopExemptTools } from "../agent/guards.js";
 import { toolOutputLimit } from "../agent/limits.js";
+import { grepMaxBytes, readManyMaxBytes, readMaxBytes, readScanMaxBytes } from "../agent/tools/readers.js";
+import { normalizeEgressConfig } from "../agent/policy/egress.js";
 import { compactionConfigFromEnv, heapExceeded } from "../agent/compaction.js";
 import { shellPoolStats } from "../agent/shell-session.js";
 import { resolveToolProtocol, toolCapabilityKey } from "../agent/protocol-mode.js";
@@ -35,6 +37,7 @@ function nodeIsSupported() {
 }
 export function collectDiagnostics() {
     const config = loadConfig();
+    const egress = normalizeEgressConfig(config.egress);
     let paths;
     try {
         paths = getPaths();
@@ -114,6 +117,19 @@ export function collectDiagnostics() {
         shellDenyPatterns: DEFAULT_DENY_PATTERNS.length,
         allowDangerous: ["1", "true", "yes", "on"].includes((process.env["FASTCODE_ALLOW_DANGEROUS"] ?? "").trim().toLowerCase()),
         toolOutputLimit: toolOutputLimit(),
+        readMaxBytes: readMaxBytes(),
+        readScanMaxBytes: readScanMaxBytes(),
+        readManyMaxBytes: readManyMaxBytes(),
+        grepMaxBytes: grepMaxBytes(),
+        egress: {
+            enabled: egress.enabled,
+            mode: egress.mode,
+            maxScanBytes: egress.maxScanBytes,
+            denyPaths: egress.denyPaths.length,
+            denyGlobs: egress.denyGlobs.length,
+            denyContentMarkers: egress.denyContentMarkers.length,
+            scanToolOutput: egress.scanToolOutput,
+        },
         tokenBudget: positiveEnv("FASTCODE_TOKEN_BUDGET"),
         costBudgetUsd: positiveEnv("FASTCODE_COST_BUDGET_USD"),
         compactionEnabled: compaction.enabled,
@@ -163,6 +179,8 @@ export function formatDiagnostics(info) {
     lines.push("  session fsync " + info.sessionFsync + "   unclosed " + info.unclosedSessions + "   " + (info.sessionsDir ?? "(unavailable)"));
     lines.push("  shell guard   " + info.shellDenyPatterns + " legacy soft patterns" + (info.allowDangerous ? "   [FASTCODE_ALLOW_DANGEROUS is ON]" : ""));
     lines.push("  tool output   " + info.toolOutputLimit + " chars max (streaming cap)");
+    lines.push(`  read limits   read ${info.readMaxBytes}B · scan ${info.readScanMaxBytes}B · read_many ${info.readManyMaxBytes}B · grep ${info.grepMaxBytes}B`);
+    lines.push(`  egress        ${info.egress.enabled ? "enforce" : "audit-only"} · mode ${info.egress.mode} · scan ${info.egress.maxScanBytes}B · paths ${info.egress.denyPaths} · globs ${info.egress.denyGlobs} · markers ${info.egress.denyContentMarkers}`);
     lines.push(`  budgets       ${info.tokenBudget > 0 ? "tokens ≤ " + info.tokenBudget : "token budget off"} · ${info.costBudgetUsd > 0 ? "$" + info.costBudgetUsd : "cost budget off"}`);
     lines.push(`  compaction    ${info.compactionEnabled ? "on" : "off"} · ${Math.round(info.compactionRatio * 100)}% · heap ${info.compactionHeapUsedMb.toFixed(1)}/${info.compactionHeapMb}MB${info.compactionForced ? " [FORCED]" : ""}${info.serverCompactionAware ? " · server-aware" : ""}`);
     lines.push(`  shell pool    ${info.shellActive} active · ${info.shellPool} resident · ${info.shellSpawns} spawns · cap ${info.shellMaxSpawn}/turn`);

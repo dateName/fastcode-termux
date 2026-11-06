@@ -12,6 +12,7 @@ import { loadConfig, saveConfig, resolveProviderKey } from "./config/store.js";
 import { getPaths } from "./config/paths.js";
 import { PROVIDERS, getProvider } from "./providers/index.js";
 import { collectDiagnostics, formatDiagnostics } from "./lib/diagnostics.js";
+import { probeConnectivity } from "./lib/http.js";
 import { existsSync } from "node:fs";
 import { latestSessionFile, listSessions, projectionPath, readSession, resolveSessionFile } from "./session/log.js";
 import { readProjection, sessionMetaFromFile } from "./session/projection.js";
@@ -48,6 +49,7 @@ const HELP = [
     "    $ fastcode skills uninstall <id> Remove an installed skill",
     "    $ fastcode skills search <q>     Search the registry",
     "    $ fastcode doctor                Environment diagnostics (Termux/mobile)",
+    "    $ fastcode doctor --net          Also probe registry connectivity",
     "    $ fastcode update                Check for a newer release",
     "",
     "  Options",
@@ -74,6 +76,7 @@ export async function parseCli(): Promise<any> {
             version: { type: "boolean", shortFlag: "v" },
             ui: { type: "string", default: "tty" },
             forget: { type: "string" },
+            net: { type: "boolean", default: false },
         },
         autoHelp: true,
         autoVersion: true,
@@ -305,6 +308,11 @@ export async function parseCli(): Promise<any> {
     }
     if (first === "doctor") {
         console.log(formatDiagnostics(collectDiagnostics()));
+        if (cli.flags.net === true) {
+            const url = "https://registry.npmjs.org/";
+            const reachable = await probeConnectivity(url);
+            console.log(`  network       ${reachable ? "reachable" : "unreachable"} (${url})`);
+        }
         return { done: true };
     }
     if (first === "update") {

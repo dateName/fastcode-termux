@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { resolvePath } from "./paths.js";
@@ -19,8 +20,9 @@ export const appendFileTool = {
     },
     async execute(call, ctx) {
         const file = resolvePath(ctx.cwd, call);
+        const existed = existsSync(file);
         await mkdir(dirname(file), { recursive: true });
         await appendFile(file, requiredString(call, "content"), "utf8");
-        return { ok: true, output: `appended ${file}`, sideEffects: { touched: [file] } };
+        return { ok: true, output: `appended ${file}`, sideEffects: existed ? { touched: [file] } : { created: [file] } };
     },
 };

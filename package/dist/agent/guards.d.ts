@@ -32,6 +32,9 @@ export interface ShellGuardVerdict {
 export declare function evaluateShellCommand(command: any): ShellGuardVerdict;
 export declare const READ_ONLY_TOOLS: Set<string>;
 export declare function splitCommandSegments(command: any): any[];
+export declare function isSharedStoragePath(target: string): boolean;
+export declare function isCriticalReadTarget(target: string): boolean;
+export declare function isSensitiveTarget(target: string): boolean;
 export declare function isReadOnlyCommand(command: any): boolean;
 export declare function isReadOnlyToolCall(call: any): boolean;
 export declare function loopExemptTools(): Set<string>;

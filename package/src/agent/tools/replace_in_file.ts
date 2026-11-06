@@ -1,7 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolvePath } from "./paths.js";
 import type { Tool } from "./types.js";
-import { invalid, preparePath, requiredString } from "./validate.js";
+import { invalid, optionalNumber, preparePath, requiredString } from "./validate.js";
+
+function countOccurrences(source: string, find: string): number {
+    if (!find)
+        return 0;
+    return source.split(find).length - 1;
+}
 
 export const replaceInFileTool: Tool = {
     name: "replace_in_file",
@@ -11,8 +17,13 @@ export const replaceInFileTool: Tool = {
     prepare(call, ctx) {
         try {
             requiredString(call, "path");
-            requiredString(call, "find");
+            const find = requiredString(call, "find");
             requiredString(call, "replace");
+            if (!find)
+                return invalid("find must not be empty");
+            const expected = optionalNumber(call, "expectedMatches");
+            if (expected !== undefined && (expected < 1 || !Number.isInteger(expected)))
+                return invalid("expectedMatches must be a positive integer");
         }
         catch (err: any) {
             return invalid(err.message);
@@ -23,10 +34,33 @@ export const replaceInFileTool: Tool = {
         const file = resolvePath(ctx.cwd, call);
         const find = requiredString(call, "find");
         const replacement = requiredString(call, "replace");
+        const expected = optionalNumber(call, "expectedMatches");
         const source = await readFile(file, "utf8");
-        if (!source.includes(find))
-            return { ok: false, output: `text not found in ${file}` };
+        const count = countOccurrences(source, find);
+        if (count === 0) {
+            return {
+                ok: false,
+                output: `text not found in ${file}`,
+                code: "NOT_FOUND",
+                hint: "Read the file first and pass the exact current text.",
+                matches: 0,
+            };
+        }
+        if (expected !== undefined && count !== expected) {
+            return {
+                ok: false,
+                output: `expected ${expected} match(es) but found ${count} in ${file}; file unchanged`,
+                code: "INVALID_ARGS",
+                hint: "Update find or expectedMatches so the replacement is explicit.",
+                matches: count,
+            };
+        }
         await writeFile(file, source.split(find).join(replacement), "utf8");
-        return { ok: true, output: `replaced text in ${file}`, sideEffects: { touched: [file] } };
+        return {
+            ok: true,
+            output: `replaced ${count} occurrence(s) in ${file}`,
+            matches: count,
+            sideEffects: { touched: [file] },
+        };
     },
 };

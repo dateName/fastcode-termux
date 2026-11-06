@@ -74,6 +74,25 @@ export type AgentEvent = {
     ok: boolean;
     output: string;
     sideEffects?: SideEffects;
+    code?: string;
+    hint?: string;
+    truncated?: boolean;
+    totalLines?: number;
+    returnedLines?: number;
+    totalBytes?: number;
+    returnedBytes?: number;
+    filesRead?: number;
+    filesSkipped?: number;
+    matches?: number;
+} | {
+    type: "egress_denied";
+    outlet: string;
+    target?: string;
+    rule: string;
+    mode: "audit" | "block";
+    wouldBlock: boolean;
+    code: "EGRESS_DENY";
+    reason: string;
 } | {
     type: "usage";
     usage: NonNullable<ChatChunk["usage"]>;

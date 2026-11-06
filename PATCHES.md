@@ -121,7 +121,7 @@
 - Termux 真机已验证（LG V409N / Android 12 / Termux 0.118.2）；剩余限制：Ink 5.x IME 光标定位、
   3 个 string-width 版本、approval pending UI 未实现。详见 `docs/DEVLOG.md`。
 
-## 0.1.7-beta 追加（2026-10-30，未发布）
+## 0.1.7 追加（2026-10-30，开发期）
 
 - Guardrails 三态/Hard Block 优先级、AST 第二意见、printenv 与 .env 分级。
 - 审批 resolver（tty/native/plain/json）、once/session/always、catalogHash、trust --forget。
@@ -129,3 +129,72 @@
 - 会话 projection manifest、剪枝后恢复、tool_call/result 配对修复。
 - 配置 stat 指纹缓存、技能目录 sha256、构建产物防 tsc 覆盖。
 - 验证：PC smoke 207/207；Termux 真机 smoke 212/212（0.1.6-beta 同源构建）。
+
+## 守卫敏感文件重建（阶段 1，2026-11-06，未发布）
+
+- 依据 `fastcode-bug-report.md` / `fastcode-guards-report.md` 在当前仓库重建 7 类守卫，不移植 Termux 本地补丁。
+- 修复 `>>` / `>|` / fd 追加重定向目标解析；`.env` 家族、敏感文件名、敏感目录、共享存储重定向纳入 Hard Block。
+- 新增 `credential_read`（`critical-credential-read`）与 `sensitive_file_egress`（含 `sensitive-file-upload`）；非重定向写入（tee/sed -i/cp/install）与 mv 敏感文件 Hard Block。
+- `package/dist/agent/guards.js` 与 `package/dist/cli.js` 由 `npm run build` 同源重建；新增 `npm run verify:artifacts` 检查运行时字符串标记。
+- 验证：Windows `npm test` 212/212；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验。
+- 待授权：PR CI workflow（typecheck/lint/smoke/build/产物一致性）尚未新增，按裁决 5 需单独授权。
+
+## 精准读写与结构化工具契约（阶段 2，2026-11-06，未发布）
+
+- `read_file` 增加 `offset/limit`（1-based）与 `totalLines/returnedLines/truncated`；超出 EOF 返回 `NOT_FOUND`。
+- `read_many` 增加总字节预算（`FASTCODE_READ_MANY_MAX_BYTES`）与 `filesRead/filesSkipped/returnedBytes`。
+- `grep` 增加 `caseSensitive/glob/context/maxResults`，prepare 期编译正则并限制 pattern 长度；非法正则返回 `INVALID_ARGS`。
+- `ToolResult` 增加 `code/hint/truncated/行字节统计/matches`；registry 统一映射 `ENOENT/EEXIST/EISDIR/SANDBOX_DENY/APPROVAL_DENY`。
+- `replace_in_file` 增加 `expectedMatches` 与计数回执；`copy_file` 默认拒绝已存在目标（`overwrite:true` 显式覆盖）；`delete_file` 目录需 `recursive:true`；`move_path` 增加 EXDEV copy+remove 回退；write/append/make_dir 区分 created/touched。
+- headless NDJSON 增加 `v/seq/ts`、`tool_call`、`tool_result` 的 output/side_effects/code/truncated、usage、error.code；TUI session JSONL 同步追加可选字段。
+- 验证：Windows `npm test` 235/235；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验。
+
+## Egress 策略与审批隔离（阶段 3，2026-11-06，未发布）
+
+- 新增 `package/src/agent/policy/egress.ts` 纯策略模块；`registry.execute()` 在 prepare 后、approve 前判定。
+- 默认 `enabled:false + mode:"audit"`：只记录 `egress_denied`，不改变工具结果；`mode:"off"` 为 kill switch；`enabled:true + mode:"block"` 才拦截。
+- block 态返回 `code:"EGRESS_DENY"`；不生成审批请求、不写 `trusted.json`；`ALLOW_DANGEROUS`/`TRUST_ALL`/`sharedDirs` 不能覆盖。
+- 覆盖：工具路径读写/删/复制/移动/patch、payload、shell command 内容标记、工具输出回模型前的标记扫描、NDJSON/TUI/session 事件。
+- 内置敏感 basename/路径、共享存储、内容标记不可删除；`denyPaths`/`denyGlobs` 只追加；`maxScanBytes` 超预算 block 态 fail-closed。
+- 配置指纹缓存即时生效；`doctor` 增加 egress 段；projection 将 `egress_denied` 保留为 system 消息。
+- 未覆盖：provider 网络请求正文、session JSONL 落盘正文、CLI 子命令输出、skills/plugins prompt 注入、TTS/share/clipboard（本轮无工具）、debug 日志。
+- 验证：Windows `npm test` 255/255；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验。
+
+## 事件/会话兼容与运维验收（阶段 4，2026-11-06，未发布）
+
+- 新增 `package/src/lib/lifecycle.ts`：SIGTERM/SIGHUP/uncaughtException/unhandledRejection 兜底并调用 `shutdownShells()`；headless 同时响应 SIGTERM/SIGHUP 中止。
+- 流式重试通过 `notice` 事件可见；`doctor --net` 输出 registry 连通性结论；`/jobs` 增加会话年龄与 10 分钟回收提示。
+- projection 保留 `notice` 与 `egress_denied` system 消息；新增真实 session JSONL 往返、旧 JSONL 无新字段 resume、旧 4 字段 projection fingerprint 测试。
+- 新增 `package/scripts/bench.mjs` 与 `npm run bench`；记录 Windows 基线。
+- 回滚演练：`git archive HEAD` 到临时目录后旧 `bin/fastcode.mjs --version` 正常启动。
+- 验证：Windows `npm test` 263/263；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验；TUI egress 渲染路径仅代码检查，未在 smoke 中启动 Ink。
+
+## DeepSeek 默认模型调整（2026-11-06）
+
+- `package/src/providers/deepseek.ts`：`defaultModel` 从 `deepseek-v4-pro` 改为 `deepseek-flash`。
+- 内置模型列表保持 `deepseek-v4-pro` / `deepseek-flash` 两项；显式 `/model deepseek-v4-pro` 仍可用。
+- 示例文档中的 DeepSeek 当前模型同步为 `deepseek-flash`；历史 CHANGELOG/DEVLOG 不改写。
+- 验证：新增 “DeepSeek defaults to deepseek-flash” 回归；Windows `npm test` 263/263；typecheck/lint/build/verify:artifacts 通过。
+
+## Provider 请求协议参数化（2026-11-06）
+
+- 新增 `package/src/providers/spec.ts`：`resolveBaseUrl` / `buildRequestUrl` / `buildHeaders` 三个纯函数；占位符缺失时抛错，不发出请求。
+- `package/src/providers/openaiCompatible.ts` 的 `StreamOptions` 增加 `chatPath/modelsPath/query/pathParams/authHeaderName/authPrefix`；`toRequestSpec` 保留 baseUrl trim 与 legacy `authHeader` 前缀语义。
+- 现有 13 个 provider 不传新字段，默认 URL/header 快照不变；`modelsPath:null` 直接返回静态模型。
+- 刻意保留 models 请求旧行为（不附加 `extraHeaders`），以满足现有 provider 快照一致；chat 请求仍按旧顺序应用 extraHeaders 后 auth。
+- 验证：新增 10 项协议回归；Windows `npm test` 273/273；typecheck/lint/build/verify:artifacts 通过。Termux 真机未复验。
+
+## G1 修复：headless notice 映射（2026-11-06）
+
+- 真机测试报告 G1：`runner.ts` 会 yield 重试 `notice`，但 `headless.ts` 的 json/plain 分支未映射。
+- 修复：JSON 分支输出 `{"event":"notice","text":...}`；plain 分支把 `[fastcode] ...` 写到 stderr，保持 stdout 只输出回答。
+- 新增 2 项回归：假 provider 首次断流后重试，`--ui json` 出现 notice 事件；`--ui plain` stderr 出现重试提示且 stdout 保留回答。
+- 验证：Windows `npm test` **275/275**；Termux 真机（同步修复后）**281/281**，exit 0；typecheck/lint/build/verify:artifacts 通过。
+- 手机备份：`~/opt/fc-backup-20261106-232535-g1`（修复前）；证据 `/sdcard/Download/fc_smoke_phone_g1.txt`。
+
+## 0.1.7 定版（2026-11-06）
+
+- `package/package.json`、`package/package-lock.json`：`0.1.7-beta` → `0.1.7`。
+- `README.md` / `README.zh.md` / `package/README.md` / `docs/*` / `脑图.md` / `RUNBOOK.md` / `AGENTS.md` 同步当前版本；历史 0.1.6-beta 记录保留。
+- 验证：Windows `npm test` 275/275；Termux 真机 281/281；typecheck/lint/build/verify:artifacts 通过。
+- 发布态仍未变：`release/` 是 0.1.7-beta 旧归档；GitHub Release/npm 仍为 0.1.6-beta；发布 0.1.7 前重新打包并单独授权 tag/release/npm publish。

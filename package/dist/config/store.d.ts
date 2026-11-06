@@ -26,6 +26,19 @@ export declare const DEFAULT_CONFIG: {
     capabilities: {
         toolCalling: {};
     };
+    /**
+     * Application-layer egress policy. Default is audit-only; set
+     * enabled:true + mode:"block" to enforce. See docs/CONFIGURATION.md.
+     */
+    egress: {
+        enabled: boolean;
+        mode: import("../agent/policy/defaults.js").EgressMode;
+        denyPaths: string[];
+        denyGlobs: string[];
+        denyContentMarkers: string[];
+        maxScanBytes: number;
+        scanToolOutput: boolean;
+    };
 };
 export interface StoredCredential {
     provider: string;

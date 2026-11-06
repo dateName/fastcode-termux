@@ -40,6 +40,19 @@ export declare function collectDiagnostics(): {
     shellDenyPatterns: number;
     allowDangerous: boolean;
     toolOutputLimit: number;
+    readMaxBytes: number;
+    readScanMaxBytes: number;
+    readManyMaxBytes: number;
+    grepMaxBytes: number;
+    egress: {
+        enabled: boolean;
+        mode: import("../agent/policy/defaults.js").EgressMode;
+        maxScanBytes: number;
+        denyPaths: number;
+        denyGlobs: number;
+        denyContentMarkers: number;
+        scanToolOutput: boolean;
+    };
     tokenBudget: number;
     costBudgetUsd: number;
     compactionEnabled: boolean;

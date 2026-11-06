@@ -1,7 +1,7 @@
 import { debugLog } from "../../lib/debug.js";
 import { sandboxPath } from "./paths.js";
-export function invalid(output) {
-    return { ok: false, output };
+export function invalid(output, code = "INVALID_ARGS", hint) {
+    return { ok: false, output, code, ...(hint ? { hint } : {}) };
 }
 export function requiredString(call, key) {
     const value = call[key];
@@ -18,6 +18,22 @@ export function stringArray(call, key) {
 }
 export function numberOption(value, fallback) {
     return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+export function optionalNumber(call, key) {
+    const value = call[key];
+    if (value === undefined || value === null)
+        return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value))
+        throw new Error(`${key} must be a finite number`);
+    return value;
+}
+export function clampInt(value, fallback, min, max) {
+    if (value === undefined)
+        return fallback;
+    return Math.min(max, Math.max(min, Math.floor(value)));
+}
+export function booleanOption(value, fallback = false) {
+    return typeof value === "boolean" ? value : fallback;
 }
 export const MAX_TIMEOUT_MS = 2147483647;
 /**
@@ -69,6 +85,8 @@ export function preparePath(cwd, raw) {
         return { ok: true };
     }
     catch (err) {
-        return invalid(err?.message ?? String(err));
+        const message = err?.message ?? String(err);
+        const code = /outside sandbox/i.test(message) ? "SANDBOX_DENY" : "INVALID_ARGS";
+        return invalid(message, code, /outside sandbox/i.test(message) ? "Use a path inside the project or an allowed root." : undefined);
     }
 }

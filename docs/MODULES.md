@@ -29,7 +29,9 @@
 | 文件 | 职责 | 依赖 |
 |---|---|---|
 | src/agent/runner.ts | 纯 async generator：压缩、预算、协议选择、工具执行、loop detection、checkpoint、abort | stream, registry, guards, compaction, model-meta, net, tools |
-| src/agent/registry.ts | 工具注册表；startup 契约断言；prepare → approve → execute；toolCatalogHash | config/trust, guards, tools/index |
+| src/agent/registry.ts | 工具注册表；startup 契约断言；prepare → egress → approve → execute；toolCatalogHash | config/trust, guards, tools/index, policy/egress |
+| src/agent/policy/egress.ts | 纯 egress 策略：敏感路径/内容标记/预算；audit/block/off；denyPaths/denyGlobs；registry 出口判定 | guards, tools/types |
+| src/agent/policy/defaults.ts | egress 默认值/类型；供 config/store 使用，避免加载 guards | 无 |
 
 ## 领域层：agent / 工具
 
@@ -37,13 +39,13 @@
 |---|---|---|
 | src/agent/tools.ts | 兼容门面：re-export registry/runAgentTool/类型 | registry |
 | src/agent/tools/index.ts | 15 个工具注册 | 各工具 |
-| src/agent/tools/types.ts | Tool/ToolCtx/ToolResult/StateScope/Revalidate/SideEffects | 无 |
+| src/agent/tools/types.ts | Tool/ToolCtx/ToolResult/StateScope/Revalidate/SideEffects/ToolErrorCode；结构化 code/hint/truncated/行字节统计 | 无 |
 | src/agent/tools/paths.ts | sandboxPath、allowedRoots、realpathOf、sharedDirs | config/store, lib/platform |
-| src/agent/tools/readers.ts | read/list/grep/walk 与读取上限 | ignore, limits |
+| src/agent/tools/readers.ts | read/list/grep/walk；行区间读取、read_many 总预算、grep glob/context/maxResults、读取上限 | ignore, limits |
 | src/agent/tools/validate.ts | 参数校验与 preparePath | paths |
 | src/agent/tools/shell.ts | shell 工具 + 后台 session 轮询 | shell-session |
 | src/agent/tools/apply_patch.ts | 调用 patch 三阶段；review pending 时 fail closed | patch/* |
-| src/agent/tools/{read_file,read_many,write_file,append_file,copy_file,delete_file,list_files,make_dir,move_path,grep,replace_in_file,stat_path,pwd}.ts | 单工具实现；声明 stateScope/revalidate；副作用返回 sideEffects | paths/readers/validate |
+| src/agent/tools/{read_file,read_many,write_file,append_file,copy_file,delete_file,list_files,make_dir,move_path,grep,replace_in_file,stat_path,pwd}.ts | 单工具实现；声明 stateScope/revalidate；结构化错误码与 sideEffects；read_file offset/limit、read_many 预算、grep 过滤、replace 计数、copy overwrite、delete recursive、move EXDEV 回退 | paths/readers/validate |
 | src/agent/protocol.ts | `<fastcode_tool>`/DSML 解析与剥离；formatToolResults；AGENT_SYSTEM_PROMPT | 无 |
 | src/agent/protocol-mode.ts | legacy/native/auto 选择；能力缓存；400 降级判定 | model-meta |
 | src/agent/tool-schemas.ts | 原生 function-calling JSON schema（15 工具） | types |
@@ -53,7 +55,7 @@
 | src/agent/approval-store.ts | once/session/always 作用域；session 内存；always 绑 catalogHash | approval, trust, guards |
 | src/agent/approval-native.ts | termux-dialog sheet resolver；code/index 严格映射，缺失/超时回落 | approval |
 | src/agent/approval-json.ts | NDJSON gate:ask/decision schema、版本与错 id/畸形校验 | approval |
-| src/headless.ts | `--ui json` / 非 TTY plain 的无线程 TUI 运行器 | runner, providers, approval-json |
+| src/headless.ts | `--ui json` / 非 TTY plain 的无线程 TUI 运行器；NDJSON v/seq/ts、tool_call/tool_result、egress_denied、notice（plain 写 stderr） | runner, providers, approval-json |
 | src/agent/limits.ts | 边产边截断的工具输出缓冲 | 无 |
 | src/agent/stream.ts | runStream：idle 超时、retryStream、incomplete、toolCalls | lib/net, types |
 | src/agent/context.ts | 旧版字符压缩（兼容保留） | types |
@@ -82,7 +84,8 @@
 | 文件 | 职责 | 依赖 |
 |---|---|---|
 | src/providers/index.ts | PROVIDERS 注册与 probe | 各 provider |
-| src/providers/openaiCompatible.ts | chat/completions 流；方言重试；tool_calls 归并；idempotency-key | lib/http, lib/native-tools |
+| src/providers/spec.ts | URL 模板、pathParams/query、auth 头纯函数；占位符缺失抛错 | 无 |
+| src/providers/openaiCompatible.ts | chat/completions 流；URL/头经 spec 参数化；方言重试；tool_calls 归并；idempotency-key | lib/http, lib/native-tools, spec |
 | src/providers/anthropic.ts | Claude Messages API（伪协议工具） | lib/http |
 | src/providers/{openai,google,deepseek,openrouter,groq,mistral,xai,moonshot,zhipu,qwen,ollama,custom}.ts | 13 provider 配置 | openaiCompatible |
 
@@ -120,6 +123,7 @@
 | src/config/trust.ts | trust v1（paths/tools）；realpath；mtime memo；旧 trusted[] 迁移 | config/paths |
 | src/lib/http.ts | fetchJson、streamSSE（CRLF/UTF-8/idle/NetworkStall）、probeConnectivity | 无 |
 | src/lib/net.ts | retryRequest、retryStream（前缀去重）、QuotaError | types |
+| src/lib/lifecycle.ts | SIGTERM/SIGHUP + fatal 兜底；shutdownShells 幂等清理 | agent/shell-session |
 | src/lib/native-tools.ts | tool_calls index 归并与 finalize | types |
 | src/lib/model-meta.ts | 13 provider 元数据；用户覆盖；estTokens | 无 |
 | src/lib/markdown.ts | Markdown → ANSI；常用语言高亮，冷门语言纯文本回退 + 轻提示 | marked, marked-terminal, highlight-subset |

@@ -226,19 +226,21 @@ Available tools:
   Polling returns only new output; use waitMs to wait briefly for more.
 - pwd: {"tool":"pwd"}
 - read_file: {"tool":"read_file","path":"path/to/file"}
-- read_many: {"tool":"read_many","paths":["file1","file2"]}
+- read_file range: {"tool":"read_file","path":"large.ts","offset":800,"limit":50}
+  offset is 1-based; use it instead of reading a large file from the start.
+- read_many: {"tool":"read_many","paths":["file1","file2"],"maxBytes":300000}
 - write_file: {"tool":"write_file","path":"path/to/file","content":"full file contents"}
 - append_file: {"tool":"append_file","path":"path/to/file","content":"text to append"}
 - apply_patch: {"tool":"apply_patch","patch":"*** Begin Patch\\n*** Update File: path\\n@@\\n-old\\n+new\\n*** End Patch\\n"}
 - list_files: {"tool":"list_files","path":"optional/path","maxDepth":2,"detail":false}
 - read_file is capped (default 200KB); grep skips files over 1MB. .fastcodeignore is honored.
-- grep: {"tool":"grep","pattern":"text or regex","path":"optional/path"}
-- replace_in_file: {"tool":"replace_in_file","path":"path/to/file","find":"exact text","replace":"replacement"}
+- grep: {"tool":"grep","pattern":"text or regex","path":"optional/path","caseSensitive":false,"glob":"*.ts","context":2,"maxResults":200}
+- replace_in_file: {"tool":"replace_in_file","path":"path/to/file","find":"exact text","replace":"replacement","expectedMatches":1}
 - stat_path: {"tool":"stat_path","path":"path/to/file"}
 - make_dir: {"tool":"make_dir","path":"path/to/dir"}
-- copy_file: {"tool":"copy_file","from":"src","to":"dest"}
+- copy_file: {"tool":"copy_file","from":"src","to":"dest","overwrite":false}
 - move_path: {"tool":"move_path","from":"src","to":"dest"}
-- delete_file: {"tool":"delete_file","path":"path/to/file"}
+- delete_file: {"tool":"delete_file","path":"path/to/file","recursive":false}
 
 Rules:
 - Prefer inspecting files before editing.

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import type { ChatChunk, ChatMessage, NativeToolCall, Provider, ReasoningEffort, ToolSchema } from "../types.js";
 import type { ActiveFile } from "../session/log.js";
-import type { SideEffects } from "./tools/types.js";
+import type { SideEffects, ToolResult } from "./tools/types.js";
 import { estMessagesTokens, estTokens, getModelMeta } from "../lib/model-meta.js";
 import { compactMessages, DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
 import { isLoopExempt, isReadOnlyToolCall, toolCallFingerprint } from "./guards.js";
@@ -81,7 +81,8 @@ export type AgentEvent =
     | { type: "assistant_raw"; text: string; toolCalls?: NativeToolCall[] }
     | { type: "assistant_text"; text: string }
     | { type: "tool_call"; id: string; call: ToolCall; native?: boolean }
-    | { type: "tool_result"; id: string; call: ToolCall; ok: boolean; output: string; sideEffects?: SideEffects }
+    | { type: "tool_result"; id: string; call: ToolCall; ok: boolean; output: string; sideEffects?: SideEffects; code?: string; hint?: string; truncated?: boolean; totalLines?: number; returnedLines?: number; totalBytes?: number; returnedBytes?: number; filesRead?: number; filesSkipped?: number; matches?: number }
+    | { type: "egress_denied"; outlet: string; target?: string; rule: string; mode: "audit" | "block"; wouldBlock: boolean; code: "EGRESS_DENY"; reason: string }
     | { type: "usage"; usage: NonNullable<ChatChunk["usage"]> }
     | { type: "loop_detected"; fingerprint: string; occurrences: number; warned: boolean }
     | { type: "notice"; text: string }
@@ -260,6 +261,8 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
         }
         if (resetNotice)
             yield { type: "notice", text: resetNotice };
+        if (streamed.retried > 0)
+            yield { type: "notice", text: `Network stream was interrupted; retried ${streamed.retried} time(s).` };
         if (streamed.usage) {
             consumedInput += streamed.usage.inputTokens ?? promptTokens;
             spentCost += streamed.usage.costUsd ?? 0;
@@ -325,7 +328,9 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                     ? { ok: false, output: parseError }
                     : await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
                 trackSideEffects(activeFiles, result.sideEffects);
-                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects };
+                if (result.egress)
+                    yield { type: "egress_denied", ...result.egress };
+                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result) };
                 history = [...history, { role: "tool", toolCallId: id, content: String(result.output ?? "") }];
             }
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
@@ -351,7 +356,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                     "Re-emit a complete <fastcode_tool>{\"tool\":...}</fastcode_tool> block.\n" +
                     parsed.errors.join("\n");
                 yield { type: "tool_call", id, call };
-                yield { type: "tool_result", id, call, ok: false, output };
+                yield { type: "tool_result", id, call, ok: false, output, code: "INVALID_ARGS", hint: "Re-emit a complete tool call." };
                 history = [...history, { role: "user", content: formatToolResults([{ call, ok: false, output }]) }];
                 yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
                 continue;
@@ -390,7 +395,9 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             const result: any = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
             results.push({ call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects });
             trackSideEffects(activeFiles, result.sideEffects);
-            yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects };
+            if (result.egress)
+                yield { type: "egress_denied", ...result.egress };
+            yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result) };
         }
         if (results.length > 0)
             history = [...history, { role: "user", content: formatToolResults(results) }];
@@ -433,6 +440,22 @@ function positive(value: number | undefined, fallback: number): number {
 
 function optionalPositive(value: number | undefined): number | undefined {
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function toolResultMeta(result: ToolResult) {
+    return {
+        sideEffects: result.sideEffects,
+        ...(result.code ? { code: result.code } : {}),
+        ...(result.hint ? { hint: result.hint } : {}),
+        ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+        ...(result.totalLines !== undefined ? { totalLines: result.totalLines } : {}),
+        ...(result.returnedLines !== undefined ? { returnedLines: result.returnedLines } : {}),
+        ...(result.totalBytes !== undefined ? { totalBytes: result.totalBytes } : {}),
+        ...(result.returnedBytes !== undefined ? { returnedBytes: result.returnedBytes } : {}),
+        ...(result.filesRead !== undefined ? { filesRead: result.filesRead } : {}),
+        ...(result.filesSkipped !== undefined ? { filesSkipped: result.filesSkipped } : {}),
+        ...(result.matches !== undefined ? { matches: result.matches } : {}),
+    };
 }
 
 function trackSideEffects(activeFiles: Map<string, ActiveFile>, sideEffects: SideEffects | undefined): void {
