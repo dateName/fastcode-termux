@@ -9,7 +9,7 @@
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> 当前工作树为 **0.1.8-beta.0**，基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复（shell 安全、`/threads`、退出保护、审批 feedback、压缩/投影、TUI effort、版权）；**已在本地 build 并打包**（`release/` 现为 0.1.8-beta.0 资产），**尚未发布**；npm registry 截至 2026-11-09 仍显示 `latest=0.1.6` / `beta=0.1.6-beta`。
+> 当前工作树为 **0.1.8-beta.0**，基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复（shell 安全、`/threads`、退出保护、审批 feedback、压缩/投影、TUI effort、版权）；**已在本地 build 并打包**（`release/` 现为 0.1.8-beta.0 资产），**尚未发布**；npm registry 截至 2026-11-09 为`latest=0.1.6` / `beta=0.1.8-beta.0`。
 
 **English → [README.md](README.md)**
 
