@@ -5,8 +5,9 @@ import { toolCatalogHash } from "../agent/registry.js";
 import { projectionPath, readSession } from "./log.js";
 const READ_ONLY_TOOLS = new Set(["read_file", "read_many", "grep", "list_files", "stat_path", "pwd"]);
 const IDEMPOTENT_TOOLS = new Set(["write_file"]);
-const MAX_MESSAGE_CHARS = 4000;
-const MAX_PROJECTION_BYTES = 19_000;
+const MAX_MESSAGE_CHARS = 8_000;
+const MAX_PROJECTION_BYTES = 200_000;
+const TOOL_FOLD_CHARS = 600;
 export function unpairedToolNotice(tool) {
     if (READ_ONLY_TOOLS.has(tool))
         return "执行中断（只读工具，可安全重试）。";
@@ -33,8 +34,21 @@ export function sessionMetaFromFacts(facts) {
     let cwd = "";
     let providerId = "";
     let model = "";
+    let sawStart = false;
     for (const fact of facts) {
-        if (fact?.type === "session_start" || fact?.type === "checkpoint") {
+        // Only the first session_start defines the session. A resume appends
+        // another session_start with the current cwd/model, which must not
+        // change the fingerprint of the stored projection.
+        if (fact?.type === "session_start" && !sawStart) {
+            sawStart = true;
+            if (typeof fact.cwd === "string" && fact.cwd)
+                cwd = fact.cwd;
+            if (typeof fact.providerId === "string" && fact.providerId)
+                providerId = fact.providerId;
+            if (typeof fact.model === "string" && fact.model)
+                model = fact.model;
+        }
+        else if (fact?.type === "checkpoint") {
             if (typeof fact.cwd === "string" && fact.cwd)
                 cwd = fact.cwd;
             if (typeof fact.providerId === "string" && fact.providerId)
@@ -44,6 +58,13 @@ export function sessionMetaFromFacts(facts) {
         }
     }
     return { cwd, providerId, model };
+}
+function factsAfterClear(facts) {
+    for (let index = facts.length - 1; index >= 0; index -= 1) {
+        if (facts[index]?.type === "cleared")
+            return facts.slice(index + 1);
+    }
+    return facts;
 }
 export function sessionMetaFromFile(file) {
     return sessionMetaFromFacts(readSession(file));
@@ -149,7 +170,10 @@ function applySummary(messages, facts) {
         return [marker, ...tail];
     }
     catch {
-        return messages;
+        return [
+            ...messages,
+            { role: "system", content: "[projection] Summary file could not be read; resumed without the summary marker." },
+        ];
     }
 }
 export function projectionContentHash(projection) {
@@ -238,13 +262,17 @@ export function buildProjection(facts, metaOverride) {
         providerId: metaOverride?.providerId || detected.providerId,
         model: metaOverride?.model || detected.model,
     };
-    const messages = pairToolMessages(clampMessages(applySummary(factsToMessages(facts), facts))).messages;
-    const source = compactionSourceFromFacts(facts);
+    const threadFacts = factsAfterClear(facts);
+    const folded = foldToolMessages(applySummary(factsToMessages(threadFacts), threadFacts));
+    const messages = pairToolMessages(clampMessages(folded)).messages;
+    const source = compactionSourceFromFacts(threadFacts);
     let activeFiles = [];
     let lastFactSeq = 0;
     for (const fact of facts) {
         if (typeof fact?.seq === "number" && fact.seq > lastFactSeq)
             lastFactSeq = fact.seq;
+    }
+    for (const fact of threadFacts) {
         if (fact?.type === "checkpoint" && Array.isArray(fact.activeFiles))
             activeFiles = fact.activeFiles;
     }
@@ -261,23 +289,130 @@ export function buildProjection(facts, metaOverride) {
     };
     return projection;
 }
+function clipProjection(text, max) {
+    const oneLine = String(text).replace(/\s+/g, " ").trim();
+    return oneLine.length > max ? oneLine.slice(0, Math.max(1, max - 1)) + "…" : oneLine;
+}
+function toolTarget(args) {
+    if (!args || typeof args !== "object")
+        return "";
+    const value = args.path ?? args.from ?? args.to ?? args.command ?? args.pattern;
+    return typeof value === "string" ? clipProjection(value, 160) : "";
+}
+function firstImportantLine(text) {
+    const lines = String(text)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !/^```/.test(line) && line !== "output:");
+    const important = lines.find((line) => /error|failed|not found|denied|timed out|exit/i.test(line)) ?? lines[0] ?? "";
+    return clipProjection(important, 200);
+}
+/** Keep the edit fact (tool + target + outcome), not the full tool payload. */
+function foldToolMessages(messages) {
+    const calls = new Map();
+    const out = [];
+    for (const message of messages) {
+        if (message.role === "assistant" && Array.isArray(message.toolCalls)) {
+            for (const call of message.toolCalls) {
+                let args = {};
+                try {
+                    args = JSON.parse(call.arguments || "{}");
+                }
+                catch {
+                    args = {};
+                }
+                calls.set(String(call.id), { name: String(call.name ?? "tool"), args });
+            }
+            out.push(message);
+            continue;
+        }
+        if (message.role === "tool") {
+            const call = message.toolCallId ? calls.get(String(message.toolCallId)) : undefined;
+            const target = toolTarget(call?.args);
+            const status = /error|failed|not found|denied|timed out/i.test(message.content) ? "error" : "ok";
+            const detail = firstImportantLine(message.content);
+            out.push({
+                ...message,
+                content: clipProjection(`${call?.name ?? "tool"}${target ? ` ${target}` : ""} → ${status}${detail ? `: ${detail}` : ""}`, TOOL_FOLD_CHARS),
+            });
+            continue;
+        }
+        if (message.role === "user" && message.content.startsWith("FastCode executed the requested local tools.")) {
+            out.push({ ...message, content: foldLegacyToolResults(message.content) });
+            continue;
+        }
+        out.push(message);
+    }
+    return out;
+}
+function foldLegacyToolResults(content) {
+    const header = "FastCode executed the requested local tools.";
+    const body = content.slice(content.indexOf(header) + header.length).trim();
+    const blocks = body.split(/\n\n(?=Tool result \d+ \()/);
+    const folded = [header];
+    for (const block of blocks) {
+        const statusMatch = block.match(/^Tool result \d+ \((ok|error)\)/);
+        if (!statusMatch)
+            continue;
+        const callMatch = block.match(/^call:\s*(\{.*\})$/m);
+        let call = {};
+        try {
+            call = callMatch ? JSON.parse(callMatch[1]) : {};
+        }
+        catch {
+            call = {};
+        }
+        const output = block.includes("output:") ? block.slice(block.indexOf("output:") + "output:".length) : block;
+        const target = toolTarget(call);
+        const detail = firstImportantLine(output);
+        folded.push(`- ${String(call.tool ?? "tool")}${target ? ` ${target}` : ""} → ${statusMatch[1]}${detail ? `: ${detail}` : ""}`);
+    }
+    return folded.length > 1 ? folded.join("\n") : clipProjection(content, TOOL_FOLD_CHARS);
+}
+function truncateMessageContent(content) {
+    if (content.length <= MAX_MESSAGE_CHARS)
+        return content;
+    const head = Math.floor(MAX_MESSAGE_CHARS * 0.6);
+    const tail = Math.max(0, MAX_MESSAGE_CHARS - head);
+    return `${content.slice(0, head)}\n[...truncated in projection...]\n${content.slice(-tail)}`;
+}
+function protectedMessage(message) {
+    return message.role === "system" && /^\[(context summary|context compacted|projection)/.test(message.content);
+}
 function clampMessages(messages) {
-    const list = messages.map((message) => {
-        const content = message.content.length > MAX_MESSAGE_CHARS
-            ? message.content.slice(0, MAX_MESSAGE_CHARS) + "\n[...truncated in projection...]"
-            : message.content;
-        return {
-            role: message.role,
-            content,
-            ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
-            ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+    const list = messages.map((message) => ({
+        role: message.role,
+        content: truncateMessageContent(message.content),
+        ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+        ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+    }));
+    let dropped = 0;
+    const overBudget = () => list.length > 1 && Buffer.byteLength(JSON.stringify(list), "utf8") > MAX_PROJECTION_BYTES;
+    const dropOldest = (marker) => {
+        for (let index = 0; index < list.length; index += 1) {
+            const message = list[index];
+            if (index === 0 && message.role === "user")
+                continue;
+            if (message === marker || protectedMessage(message))
+                continue;
+            list.splice(index, 1);
+            dropped += 1;
+            return true;
+        }
+        return false;
+    };
+    while (overBudget() && dropOldest())
+        ;
+    if (dropped > 0) {
+        const marker = {
+            role: "system",
+            content: `[projection] ${dropped} earlier message(s) dropped to fit ${MAX_PROJECTION_BYTES} bytes.`,
         };
-    });
-    while (list.length > 1 && Buffer.byteLength(JSON.stringify(list), "utf8") > MAX_PROJECTION_BYTES) {
-        if (list.length > 2 && list[0].role === "user")
-            list.splice(1, 1);
-        else
-            list.shift();
+        const insertAt = list[0]?.role === "user" ? 1 : 0;
+        list.splice(insertAt, 0, marker);
+        while (overBudget() && dropOldest(marker)) {
+            marker.content = `[projection] ${dropped} earlier message(s) dropped to fit ${MAX_PROJECTION_BYTES} bytes.`;
+        }
     }
     return list;
 }
@@ -333,7 +468,7 @@ export function resumeSession(file, currentCwd = process.cwd()) {
         providerId: detected.providerId || stored?.providerId || "",
         model: detected.model || stored?.model || "",
     };
-    const expected = projectionFingerprint(meta, hasFacts ? compactionSourceFromFacts(facts) : (stored?.fingerprint.compactionSource ?? "none"));
+    const expected = projectionFingerprint(meta, hasFacts ? compactionSourceFromFacts(factsAfterClear(facts)) : (stored?.fingerprint.compactionSource ?? "none"));
     const warnings = [];
     let projection;
     let rebuilt = false;

@@ -2,9 +2,41 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.7
+## 0.1.8-beta.0（开发版，未发布）
 
-> 本版本重点：三态 Guardrails、egress 策略、AST 第二意见、审批闭环、模型配置 TUI、会话 manifest、配置缓存、技能完整性。
+> 状态：`package/package.json` = `0.1.8-beta.0`；工作树基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复；已在本地 build/打包，尚未发布。
+> `release/` 已含 0.1.8-beta.0 tar.gz/zip/tgz/SHA256SUMS；npm registry 最近查询仍为 `0.1.6` / `0.1.6-beta`。
+> 本版本重点：shell 会话安全与 resident 并发、Esc/Ctrl+C//exit 中断保护、审批 feedback 输入、工具压缩流/投影恢复、版权合规、TUI effort 修复。
+
+### Shell / 并发 / 退出
+- resident 池默认 **2**，`/threads <1-6>`（别名 `/pool`）可调大、上限 6；one-shot 由 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮）单独限制，不排队；两套预算不共享。
+- `close` 退出码 0 记为 `done`；resident 命令在子 shell 中执行，`export`/`umask`/`set -e`/`exit` 不跨命令；含后台操作符的命令完成后回收 resident。
+- `/exit` 在 run 中需 5s 内二次确认；`Esc` 取消并保留部分输出；run 中 `Ctrl+C` 第一次取消、第二次退出。确认后最多等 1000ms 落最终 facts，`shutdownShellsAsync`（SIGTERM → 等待 → SIGKILL）停止 resident/one-shot，再写 `session_end{reason,compaction}` + projection 并 best-effort fsync。
+
+### 审批
+- `Deny with feedback` 现在等待用户输入原因：TUI/plain 文本模式、JSON 要求 `input`、native 用 `termux-dialog text`；空输入/缺失输入 fail-closed，不再把提示语当反馈。
+
+### 工具压缩流 / 投影恢复
+- `/compact` 写 `compacted` fact（含 `summaryRef`）；`/clear` 写 `cleared` fact；resume 不再复活旧历史。
+- 摘要顺序 Notes → Outcomes → Files → Requests → Actions；超限条目带 marker；新压缩清理本会话旧 `summary-*.md`。
+- 投影约 200KB、单条 8000 字符保留头尾；工具载荷折叠为「tool + target + ok/error + 关键错误」事实；裁剪插入 dropped marker 并保护 summary marker。
+- `sessionMetaFromFacts` 采用首个 `session_start`；`/context` 使用实际 env 配置；新增 `FASTCODE_COMPACTION_RATIO` / `KEEP_TURNS` / `SUMMARY_TOKENS`。
+
+### TUI / 版权 / 文档
+- compact 状态栏 `effort` 重复渲染修复，只显示一次。
+- 根 `LICENSE` 与 `package/LICENSE` 保留原始 `Copyright (c) 2026 SimpleLittleDev` + MIT 全文，并补 FastCode-Termux 自有版权行、上游来源与修改说明；README / package README 增加 License 段。
+- README / README.zh / package README 补齐 CLI 子命令、TUI 斜杠命令与设置入口；`docs/CONFIGURATION.md` §8 为完整命令速查（含 `/threads`、`/steer`、trust/skills/sessions/doctor/update 等）。
+
+### 验证与未完成
+- `typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过。
+- 已生成 `release/` 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`；尚未发布到 GitHub/npm。Termux 真机未复跑。
+- 仍未完成：跨会话孤儿 summary 全局 GC、全局并发上限/统一排队、`contextBudgetChars` 死字段、server-aware 实际接线、Termux 真机复跑。
+
+## 0.1.7（2026-11-07 发布）
+
+> 状态：`package.json` = `0.1.7`；本地 git tag `v0.1.7` 指向 `be6e604`。当时的 0.1.7 `release/` 资产已被 0.1.8-beta.0 本地打包替换（仍可从 tag/历史取回）。
+> npm 状态：2026-11-09 查询 registry 仍返回 `latest=0.1.6`、`beta=0.1.6-beta`；npm 侧同步需再次核对，不能仅凭 tag 判定。
+> 本版本重点：三态 Guardrails、egress 策略、AST 第二意见、审批闭环、工具契约与精准读写、模型配置 TUI、会话 manifest、配置缓存、技能完整性。
 
 **FastCode 0.1.7 已从“单体 TUI”演进为：事件化 runner + 15 工具契约 + 三态 Guardrails + Egress 策略 + AST 第二意见 + 可审批/可回滚的 tool 执行 + 事实流/投影恢复 + 多 provider + Termux 单文件分发。**
 
@@ -56,16 +88,24 @@
 - 流式重试通过 `notice` 事件可见（TUI + headless JSON；plain 写 stderr）；`doctor --net` 增加 registry 连通性结论。
 - `/jobs` 显示会话年龄与 10 分钟回收提示；projection 保留 `notice` 与 `egress_denied` system 消息。
 - 真机测试发现的 G1 已修复：`headless.ts` 的 json/plain 分支补 `notice` 映射（JSON 发 `{event:"notice"}`，plain 写 stderr）。
-- 新增 `npm run bench`：冷启动、200KB 写入、10×200KB read_many、1000 文件 list/grep。
+- 新增 `package/scripts/bench.mjs` 与 `package/scripts/verify-artifacts.mjs`（文件已入库；`package.json` 的 `bench` / `verify:artifacts` 脚本注册仍待补，当前需直接 `node` 调用）。
 - 技能目录 sha256 完整性锁定；`/skills verify --confirm` 重新基线。
 - 语法高亮裁剪常用语言，冷门语言纯文本回退 + 提示。
 
 ### 验证
-- PC：typecheck/lint/build 通过，smoke 275/275（Windows，HEAD ddcdfc7 + 守卫重建 + 工具契约 + egress 策略 + 运维/兼容 + provider 协议 + G1）。
+- PC：2026-11-09 在 `HEAD=be6e604` 复跑 `npm test`，`ALL PASS (275 checks)`，exit 0；`node package/scripts/verify-artifacts.mjs` 通过（`dist/cli.js` 与 `dist/agent/guards.js` 各 5 个守卫标记，bundle 2,138,499 B）。
+- 构建态记录：`typecheck` / `lint` / `build` 通过；Termux 真机（LG V409N / Android 12 / arm64）smoke **281/281**（2026-11-06，G1 修复后；修复前 279/279）。
 - 回滚演练：`git archive HEAD` 到临时目录后旧 `bin/fastcode.mjs --version` 正常启动。
 - bench（Windows / Node v24.20.0）：cold start 143.74ms、write 200KB 8.86ms、read_many 10×200KB 26.04ms、list 1000 68.19ms、grep 1000 630.06ms。
-- Termux 真机（本次，G1 修复后）：smoke **281/281**；G1 修复前为 279/279。历史 212/212 仅作 0.1.6-beta 记录。
 - 真机已验证 TUI、审批 Esc/allow once、模型配置向导取消不改配置。
+
+### 发布状态与已知限制（0.1.7）
+- 发布：本地 tag `v0.1.7` 与 `release/` 0.1.7 资产已就位；GitHub Release / npm 的实际同步以外部查询为准。
+- 未覆盖的 egress 出口：provider 请求正文、session JSONL 落盘正文、CLI 子命令输出、skills/plugins prompt、TTS/share/clipboard、debug 日志；shell 路径仍依赖启发式 guards。
+- 尚未接入：`/egress list|add|test` 命令；`doctor` 仅输出 egress 计数，无 `recentDenied`；`HTTPS_PROXY`/`ALL_PROXY`（ProxyAgent）代理；Tier 3 备份前置；写路径 realpath/lstat 的 TOCTOU 复核；ReDoS 执行超时/子进程隔离。
+- CI：`.github/workflows/release.yml` 仍只在 `v*` tag / 手动触发，未加 PR 门禁（typecheck/lint/smoke/产物一致性）。
+- 脚本：`bench.mjs` / `verify-artifacts.mjs` 已存在，但 `package.json` 未注册 `bench` / `verify:artifacts`；`npm test` 指向上级 `../scripts/smoke-test.mjs`，安装态/发布包不可用。
+- 运维入口：`doctor --json`、`sessions export/rm/prune`、TUI `/sessions`、子命令 `--json` 尚未补齐；现有 `sessions` / `sessions show` / `resume` / `doctor --net`。
 
 ## 0.1.6-beta（测试版）
 

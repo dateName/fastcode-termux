@@ -35,6 +35,18 @@ export interface SessionSummary {
     lastTs: number;
 }
 
+/** Reserved slot for conversation compaction at the exit save point. */
+export interface SessionCompactionSlot {
+    source?: "local" | "server" | "none";
+    summaryRef?: string | null;
+    pending?: boolean;
+}
+
+export interface SessionCloseInfo {
+    reason?: "exit" | "signal" | "fatal" | "close";
+    compaction?: SessionCompactionSlot;
+}
+
 export function sessionCacheLimitBytes(): number {
     const mb = Number(process.env["FASTCODE_SESSION_CACHE_MB"]);
     return (Number.isFinite(mb) && mb > 0 ? mb : 256) * 1024 * 1024;
@@ -91,6 +103,24 @@ function writeLine(file: string, line: string, type: string): void {
     }
 }
 
+function fsyncPath(file: string): void {
+    if (!existsSync(file))
+        return;
+    try {
+        const fd = openSync(file, "r");
+        try {
+            fsyncSync(fd);
+        }
+        finally {
+            closeSync(fd);
+        }
+    }
+    catch {
+        // FUSE / read-only filesystems may reject fsync; the append is still
+        // best effort and the caller already caught close-level failures.
+    }
+}
+
 function countLines(file: string): number {
     if (!existsSync(file))
         return 0;
@@ -131,13 +161,25 @@ function openLog(id: string | undefined, file: string, meta: Record<string, any>
         count() {
             return seq;
         },
-        close() {
-            append({ type: "session_end" });
+        close(info: SessionCloseInfo = {}) {
+            append({
+                type: "session_end",
+                reason: info.reason ?? "close",
+                // Reserved extension point: future compaction can fill this
+                // slot without changing the session_end event shape.
+                compaction: {
+                    source: info.compaction?.source ?? "none",
+                    summaryRef: info.compaction?.summaryRef ?? null,
+                    pending: info.compaction?.pending ?? false,
+                },
+            });
             closed = true;
             try {
                 // Snapshot + manifest are written while the facts still exist;
                 // pruning later keeps this verified copy.
                 ensureProjection(file);
+                fsyncPath(file);
+                fsyncPath(projectionPath(file));
                 pruneSessions();
             }
             catch {
@@ -145,6 +187,22 @@ function openLog(id: string | undefined, file: string, meta: Record<string, any>
             }
         },
     };
+}
+
+/** Summary files referenced by older compacted facts in this session. */
+export function staleSummaryRefs(file: string): string[] {
+    let facts: any[];
+    try {
+        facts = readSession(file);
+    }
+    catch {
+        return [];
+    }
+    const compacted = facts.filter((fact) => fact?.type === "compacted");
+    const latest = compacted.at(-1)?.summaryRef;
+    return Array.from(new Set(compacted
+        .map((fact) => fact.summaryRef)
+        .filter((ref): ref is string => typeof ref === "string" && ref.length > 0 && ref !== latest)));
 }
 
 export function createSessionLog(meta: Record<string, any> = {}) {

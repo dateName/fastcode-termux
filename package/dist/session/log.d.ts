@@ -14,24 +14,36 @@ export interface SessionSummary {
     messages: number;
     lastTs: number;
 }
+/** Reserved slot for conversation compaction at the exit save point. */
+export interface SessionCompactionSlot {
+    source?: "local" | "server" | "none";
+    summaryRef?: string | null;
+    pending?: boolean;
+}
+export interface SessionCloseInfo {
+    reason?: "exit" | "signal" | "fatal" | "close";
+    compaction?: SessionCompactionSlot;
+}
 export declare function sessionCacheLimitBytes(): number;
 export declare function loggingEnabled(): boolean;
 export declare function projectionPath(file: string): string;
 export declare function fsyncMode(): "on" | "off" | "auto";
 export declare function fsyncEnabled(type?: string): boolean;
+/** Summary files referenced by older compacted facts in this session. */
+export declare function staleSummaryRefs(file: string): string[];
 export declare function createSessionLog(meta?: Record<string, any>): {
     id: string;
     file: string;
     append: (entry: Record<string, any>) => number;
     count(): number;
-    close(): void;
+    close(info?: SessionCloseInfo): void;
 };
 export declare function openSessionLog(file: string, meta?: Record<string, any>): {
     id: string;
     file: string;
     append: (entry: Record<string, any>) => number;
     count(): number;
-    close(): void;
+    close(info?: SessionCloseInfo): void;
 };
 export declare function listSessions(): {
     id: string;

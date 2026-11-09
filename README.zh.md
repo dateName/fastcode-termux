@@ -4,12 +4,12 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.7**（当前工作树） |
+| 版本 | **0.1.8-beta.0**（工作树；tag `v0.1.7` 资产；截至 2026-11-09 npm registry 仍显示 0.1.6） |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> 0.1.7 是当前工作树版本；npm 与 GitHub Release 上的资产在正式发布前仍是 0.1.6-beta。
+> 当前工作树为 **0.1.8-beta.0**，基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复（shell 安全、`/threads`、退出保护、审批 feedback、压缩/投影、TUI effort、版权）；**已在本地 build 并打包**（`release/` 现为 0.1.8-beta.0 资产），**尚未发布**；npm registry 截至 2026-11-09 仍显示 `latest=0.1.6` / `beta=0.1.6-beta`。
 
 **English → [README.md](README.md)**
 
@@ -41,8 +41,8 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 💰 用量统计 | 状态栏显示 token 与成本 |
 | 🤖 模型支持 | **DeepSeek / OpenAI / Anthropic**，以及 Gemini、通义千问、GLM、Kimi、Grok、OpenRouter、Ollama 等 |
 | 💾 恢复 | 事实流 + `*.projection.json`；resume 恢复 cwd/provider/model 与未配对 tool_call |
-| 🧠 上下文 | `/context`、`/compact`；token/heap 触发本地压缩并落盘 `summary-*.md` |
-| 🖥️ 后台 shell | 长命令返回 session id；`/jobs` `/attach` `/kill`；POSIX 常驻 `sh -s` 池 |
+| 🧠 上下文 | `/context`、`/compact`、`/clear`；token/heap 触发本地压缩并落盘 `summary-*.md`；`/compact`/`/clear` 会写事实，旧摘要会清理 |
+| 🖥️ 后台 shell | 长命令返回 session id；`/jobs` `/attach` `/kill`；POSIX 常驻 `sh -s` 池默认 2，可用 `/threads` 调至 6；one-shot 命令走独立每轮 spawn 预算 |
 | 🧰 双轨协议 | 伪协议 `<fastcode_tool>` 或原生 `tool_calls`；`FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
 | 📱 手机命令 | `/cancel` `/steer` `/expand` `/edit`（外部编辑器绕开 IME 问题） |
 
@@ -50,8 +50,8 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 
 | 键 | 作用 |
 |---|---|
-| `Ctrl+C` | 退出（按两次；单按只提示，不会误退） |
-| `Esc` | 终止当前思考 / 流式输出 |
+| `Ctrl+C` | 运行中：第一次取消并保留部分输出，第二次退出；空闲：单按提示，再按退出 |
+| `Esc` | 终止当前思考 / 流式输出，保留已生成的部分输出 |
 
 ---
 
@@ -66,16 +66,17 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
 | 🧾 补丁事务 | parse → plan → apply；保持 CRLF/mode；拒绝符号链接；move 不覆盖 | `/expand` 查看完整 diff |
-| 🛑 进程树/退出 | abort/`/kill` 杀子进程与孙进程；SIGTERM/SIGHUP/fatal 清理 resident shell | POSIX 进程组；`lib/lifecycle.ts`；Windows `taskkill /T` |
+| 🛑 进程树/退出 | abort/`/kill` 杀子进程与孙进程；`/exit` 中止当前运行并清理所有 resident shell；SIGTERM/SIGHUP/fatal 同样清理 | POSIX 进程组；`lib/lifecycle.ts`；Windows `taskkill /T` |
 | 🔐 审批钩子 | Soft Gate 与敏感/大补丁生成 pending 请求；无 resolver 时 **拒绝**（fail closed） | `--ui tty\|native\|plain\|json`；once/session/always；`fastcode trust --forget <key>` |
 
-### 已知限制（0.1.7）
+### 已知限制（0.1.8-beta.0）
 
 - Ink 5.x 的 IME 光标定位未彻底修复；Termux pty 尺寸异常时可能裁切/乱序（`abcdef` → `bcdefa`）。
   用 `stty` 修正 pty，或用 `/edit`；彻底修需 Ink ≥6.7。
 - 进程内有 3 个 `string-width` 版本，歧义宽度字符可能列宽不一致。
 - 原生 tools 只覆盖 OpenAI 兼容服务商，其余走伪协议。
 - approval pending 已接入 tty/native/plain/json resolver；Tier 3 的执行前备份仍属第三批，当前破坏性动作 fail-closed。
+- `/threads` 只限制 **resident** shell 池（默认 2，最大 6）。one-shot 命令走独立的 `FASTCODE_MAX_SPAWN_PER_TURN` 预算（默认 8/轮），满额立即失败，且可跨 turn 累积；这不是全局并发上限。
 
 ---
 
@@ -102,7 +103,7 @@ termux-setup-storage     # 让 agent 能访问 ~/storage/shared（手机项目/�
 
 按推荐优先级排列。仓库内已提交 **自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等依赖全部打进单文件），因此克隆后**无需 `npm install`** 即可运行。
 
-从 npm 安装：`npm install -g @datename/fastcode-termux@0.1.7`（0.1.7 发布后可用；在此之前使用 `@0.1.6-beta`，dist-tag `beta`）。
+从 npm 安装：registry 显示 `0.1.8-beta.0` 后即可 `npm install -g @datename/fastcode-termux@0.1.8-beta.0`；在此之前已发布的是 `0.1.6`（dist-tag `latest`）与 `0.1.6-beta`（`beta`）。`release/` 已是 0.1.8-beta.0 资产。
 
 > ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 
@@ -119,15 +120,15 @@ fastcode          # 直接可用（短别名 fc）
 
 ### 方式二：便携版（无需 npm）
 
-到 Releases 页面下载最新 `fastcode-portable-0.1.7.tar.gz`（校验见 `SHA256SUMS`），解压即用：
+0.1.8-beta.0 发布构建后，到 Releases 下载 `fastcode-portable-0.1.8-beta.0.tar.gz`（校验见 `SHA256SUMS`），解压即用：
 
 ```bash
-tar -xzf fastcode-portable-0.1.7.tar.gz
-cd fastcode-portable-0.1.7
+tar -xzf fastcode-portable-0.1.8-beta.0.tar.gz
+cd fastcode-portable-0.1.8-beta.0
 ./fastcode
 ```
 
-> 当前工作树对应的 `release/` 仍是 0.1.7-beta 旧归档；正式发布 0.1.7 前用 `sh scripts/build-portable.sh` 重新打包。GitHub Release 与 npm 在 0.1.7 发布前仍是 0.1.6-beta。
+> `release/` 已含 0.1.8-beta.0 资产（`fastcode-portable-0.1.8-beta.0.tar.gz|zip`、`datename-fastcode-termux-0.1.8-beta.0.tgz`、`SHA256SUMS`），由 `npm run build` + `sh scripts/build-portable.sh` 生成。
 
 ### 方式三：从源码运行（仅在你要改源码 / 重新构建时）
 
@@ -213,17 +214,27 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 
 | 命令 | 作用 |
 |---|---|
-| `fastcode` | 进入 TUI |
-| `fastcode "解释这个仓库"` | 带初始问题启动 |
-| `fastcode doctor` / `fastcode doctor --net` | 环境自检；`--net` 额外探测 registry 连通性 —— **排障先跑这个** |
-| `fastcode provider` / `fastcode model` | 列出 / 切换服务商与模型 |
-| `fastcode config` | 查看配置内容与文件路径 |
-| `fastcode sessions` / `fastcode resume latest` | 历史会话 / 恢复上次会话 |
-| `fastcode trust` / `untrust` / `trusted` | 管理信任目录 |
+| `fastcode` / `fastcode "解释这个仓库"` | 进入 TUI / 带初始问题启动 |
+| `fastcode --version` / `-v` / `--help` / `-h` | 版本 / 全部命令 |
+| `fastcode provider [id]` / `model [id]` | 列出或设置默认 provider / 模型 |
+| `fastcode config` / `config path` | 查看配置与路径 / 只打印 config.json |
+| `fastcode sessions` / `sessions show <id>` / `resume [id\|latest]` | 列出 / 查看 / 恢复会话 |
+| `fastcode trust [dir]` / `untrust [dir]` / `trusted` / `trust --forget <key>` | 信任目录与记住的审批 |
+| `fastcode skills list\|install <id>\|uninstall <id>\|search <q>` | 技能管理 |
+| `fastcode doctor` / `doctor --net` | 环境自检；`--net` 额外探测 registry 连通性 —— **排障先跑这个** |
 | `fastcode update` | 检查新版本 |
-| `fastcode --help` | 查看全部命令 |
+| `--ui tty\|native\|plain\|json` | 审批/渲染后端（默认 tty；plain/json 用于无 TTY） |
 
-界面内常用：`/help` · `/model` · `/provider` · `/effort` · `/login` · `/agent` · `/theme` · `/clear` · `/exit`
+`fastcode "prompt"` 和 `resume` 会进入对话；上面的子命令本身不发送模型请求。
+
+**TUI 斜杠命令（不发模型请求）：**
+- 配置/信息：`/help` `/about` `/config` `/theme` `/system` `/reset` `/whoami`
+- 模型/Key：`/provider` `/model` `/effort` `/login` `/logout`
+- 上下文/运行：`/clear` `/compact` `/context` `/cost` `/expand` `/cancel` `/steer` `/exit`
+- Agent/后台：`/agent` `/tools` `/cwd` `/jobs` `/attach` `/kill` `/bg` `/threads`（`/pool`）
+- 扩展/输入：`/skills` `/plugin` `/edit`
+
+完整命令与设置说明见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
 
 ---
 
@@ -239,7 +250,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | 如何更新 | `cd ~/fastcode && git pull && bash scripts/install.sh`（单跑 install.sh 不会拉取） |
 | npm 安装后行为旧 / 报错 | npm registry 可能落后于仓库 —— 暂时优先用克隆或便携版；`fastcode update` 会比较版本 |
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
-| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.7） |
+| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.8-beta.0） |
 | 命令被拦截 | 那是危险命令保护；确认无误可临时 `export FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -287,10 +298,10 @@ sh scripts/build-portable.sh
 产物在 `release/`：
 
 ```text
-fastcode-portable-0.1.7.tar.gz       免安装便携包（自包含单文件）
-fastcode-portable-0.1.7.zip          同上（需系统有 zip）
-datename-fastcode-termux-0.1.7.tgz   npm 包（npm pack）
-SHA256SUMS                           以上文件的校验和
+fastcode-portable-0.1.8-beta.0.tar.gz       免安装便携包（自包含单文件）
+fastcode-portable-0.1.8-beta.0.zip          同上（需系统有 zip）
+datename-fastcode-termux-0.1.8-beta.0.tgz   npm 包（npm pack）
+SHA256SUMS                                  以上文件的校验和
 ```
 
 ### 发布 npm
@@ -308,16 +319,16 @@ npm publish --access public --tag beta
 推荐用 CI 自动发布（`.github/workflows/release.yml`）：打 tag 即可
 
 ```bash
-git tag v0.1.7
-git push origin v0.1.7        # 触发 Actions：构建 + 打包 + 上传 Release
+git tag v0.1.8-beta.0
+git push origin v0.1.8-beta.0        # 触发 Actions：构建 + 打包 + 上传 Release
 ```
 
 也可手动：
 
 ```bash
-gh release create v0.1.7 -t "FastCode 0.1.7" \
-  release/fastcode-portable-0.1.7.tar.gz \
-  release/datename-fastcode-termux-0.1.7.tgz \
+gh release create v0.1.8-beta.0 -t "FastCode 0.1.8-beta.0" \
+  release/fastcode-portable-0.1.8-beta.0.tar.gz \
+  release/datename-fastcode-termux-0.1.8-beta.0.tgz \
   release/SHA256SUMS
 ```
 
@@ -339,10 +350,10 @@ gh release create v0.1.7 -t "FastCode 0.1.7" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块、数据流 |
 | [docs/MODULES.md](docs/MODULES.md) | 每个文件干什么 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 安全审计结论 |
-| [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.6-beta 改动日志、迁移、风险与回滚 |
-| [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta 交接报告 |
-| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.6-beta） |
-| [PATCHES.md](PATCHES.md) | 36 项上游修复 + 0.1.6-beta harness 改造 |
+| [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.8-beta.0 改动日志、迁移、风险与回滚 |
+| [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta 交接报告（历史） |
+| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.8-beta.0；0.1.7 / 0.1.6-beta 为历史） |
+| [PATCHES.md](PATCHES.md) | 上游修复 + 0.1.8-beta.0 harness 改造 |
 
 ---
 
@@ -365,4 +376,10 @@ gh release create v0.1.7 -t "FastCode 0.1.7" \
 
 原始作者署名与上游项目名称、版权归各自所有；本仓库仅做修复与 Termux 适配。
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.7</sub>
+## 📜 许可证
+
+MIT。原始 FastCode © 2026 SimpleLittleDev；本修复/Termux 适配 © 2026 FastCode-Termux contributors。
+本项目基于 `SimpleLittleDev/FastCode`（`@simplelittledev/fastcode` 0.1.3），原项目采用 MIT。
+完整文本见 [LICENSE](LICENSE)。
+
+<sub>Made for Termux 🐧📱 · FastCode 0.1.8-beta.0</sub>

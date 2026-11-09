@@ -124,6 +124,16 @@ export interface SlashCommand {
     /** Execute the command. Return text to render, or undefined for no output. */
     run(ctx: CommandContext): Promise<CommandResult> | CommandResult;
 }
+export interface CommandCompaction {
+    summaryRef?: string;
+    source: "local" | "server" | "none";
+    beforeTokens: number;
+    afterTokens: number;
+    droppedMessages: number;
+    keepMessages: number;
+    reason?: "threshold" | "heap" | "manual";
+}
+
 export interface CommandResult {
     /** Text rendered as a system message in the transcript. */
     message?: string;
@@ -133,6 +143,10 @@ export interface CommandResult {
     quit?: boolean;
     /** Open an interactive picker after the command runs. */
     picker?: PickerRequest;
+    /** Manual /compact result; the app appends the matching compacted fact. */
+    compacted?: CommandCompaction;
+    /** /clear result; the app appends a cleared fact so resume does not resurrect history. */
+    cleared?: boolean;
 }
 export interface CommandContext {
     args: string[];
@@ -166,6 +180,7 @@ export interface AppActions {
     setSystemPrompt(prompt: string): void;
     setSkillsRegistry(url: string): void;
     setReasoningEffort(effort: ReasoningEffort): void;
+    setShellPoolSize(size: number): void;
     enableSkill(name: string): void;
     disableSkill(name: string): void;
     enablePlugin(name: string): void;

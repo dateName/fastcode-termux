@@ -1,4 +1,4 @@
-# FastCode 0.1.3 → 0.1.7 修复清单
+# FastCode 0.1.3 → 0.1.8-beta.0 修复清单
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
@@ -121,25 +121,25 @@
 - Termux 真机已验证（LG V409N / Android 12 / Termux 0.118.2）；剩余限制：Ink 5.x IME 光标定位、
   3 个 string-width 版本、approval pending UI 未实现。详见 `docs/DEVLOG.md`。
 
-## 0.1.7 追加（2026-10-30，开发期）
+## 0.1.7 追加（2026-10-30，已随 0.1.7 发布）
 
 - Guardrails 三态/Hard Block 优先级、AST 第二意见、printenv 与 .env 分级。
 - 审批 resolver（tty/native/plain/json）、once/session/always、catalogHash、trust --forget。
 - `/provider`、`/model`、`/login` 无参数统一模型配置 TUI；取消不提交、key 掩码。
 - 会话 projection manifest、剪枝后恢复、tool_call/result 配对修复。
 - 配置 stat 指纹缓存、技能目录 sha256、构建产物防 tsc 覆盖。
-- 验证：PC smoke 207/207；Termux 真机 smoke 212/212（0.1.6-beta 同源构建）。
+- 验证：开发期基线 PC smoke 207/207；Termux 真机 smoke 212/212（0.1.6-beta 同源构建）。收口后数据见下方 275/281。
 
-## 守卫敏感文件重建（阶段 1，2026-11-06，未发布）
+## 守卫敏感文件重建（阶段 1，2026-11-06，已随 0.1.7 发布）
 
 - 依据 `fastcode-bug-report.md` / `fastcode-guards-report.md` 在当前仓库重建 7 类守卫，不移植 Termux 本地补丁。
 - 修复 `>>` / `>|` / fd 追加重定向目标解析；`.env` 家族、敏感文件名、敏感目录、共享存储重定向纳入 Hard Block。
 - 新增 `credential_read`（`critical-credential-read`）与 `sensitive_file_egress`（含 `sensitive-file-upload`）；非重定向写入（tee/sed -i/cp/install）与 mv 敏感文件 Hard Block。
-- `package/dist/agent/guards.js` 与 `package/dist/cli.js` 由 `npm run build` 同源重建；新增 `npm run verify:artifacts` 检查运行时字符串标记。
-- 验证：Windows `npm test` 212/212；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验。
-- 待授权：PR CI workflow（typecheck/lint/smoke/build/产物一致性）尚未新增，按裁决 5 需单独授权。
+- `package/dist/agent/guards.js` 与 `package/dist/cli.js` 由 `npm run build` 同源重建；新增 `node package/scripts/verify-artifacts.mjs` 检查运行时字符串标记。
+- 验证：Windows `npm test` 212/212；`npm run typecheck` / `lint` / `build` / `verify-artifacts` 通过。Termux 真机未复验。
+- 未完成：PR CI workflow（typecheck/lint/smoke/build/产物一致性）尚未新增；`release.yml` 仍只在 `v*` tag / 手动触发。
 
-## 精准读写与结构化工具契约（阶段 2，2026-11-06，未发布）
+## 精准读写与结构化工具契约（阶段 2，2026-11-06，已随 0.1.7 发布）
 
 - `read_file` 增加 `offset/limit`（1-based）与 `totalLines/returnedLines/truncated`；超出 EOF 返回 `NOT_FOUND`。
 - `read_many` 增加总字节预算（`FASTCODE_READ_MANY_MAX_BYTES`）与 `filesRead/filesSkipped/returnedBytes`。
@@ -147,9 +147,9 @@
 - `ToolResult` 增加 `code/hint/truncated/行字节统计/matches`；registry 统一映射 `ENOENT/EEXIST/EISDIR/SANDBOX_DENY/APPROVAL_DENY`。
 - `replace_in_file` 增加 `expectedMatches` 与计数回执；`copy_file` 默认拒绝已存在目标（`overwrite:true` 显式覆盖）；`delete_file` 目录需 `recursive:true`；`move_path` 增加 EXDEV copy+remove 回退；write/append/make_dir 区分 created/touched。
 - headless NDJSON 增加 `v/seq/ts`、`tool_call`、`tool_result` 的 output/side_effects/code/truncated、usage、error.code；TUI session JSONL 同步追加可选字段。
-- 验证：Windows `npm test` 235/235；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验。
+- 验证：Windows `npm test` 235/235；`npm run typecheck` / `lint` / `build` / `verify-artifacts` 通过。Termux 真机未复验。
 
-## Egress 策略与审批隔离（阶段 3，2026-11-06，未发布）
+## Egress 策略与审批隔离（阶段 3，2026-11-06，已随 0.1.7 发布）
 
 - 新增 `package/src/agent/policy/egress.ts` 纯策略模块；`registry.execute()` 在 prepare 后、approve 前判定。
 - 默认 `enabled:false + mode:"audit"`：只记录 `egress_denied`，不改变工具结果；`mode:"off"` 为 kill switch；`enabled:true + mode:"block"` 才拦截。
@@ -158,23 +158,23 @@
 - 内置敏感 basename/路径、共享存储、内容标记不可删除；`denyPaths`/`denyGlobs` 只追加；`maxScanBytes` 超预算 block 态 fail-closed。
 - 配置指纹缓存即时生效；`doctor` 增加 egress 段；projection 将 `egress_denied` 保留为 system 消息。
 - 未覆盖：provider 网络请求正文、session JSONL 落盘正文、CLI 子命令输出、skills/plugins prompt 注入、TTS/share/clipboard（本轮无工具）、debug 日志。
-- 验证：Windows `npm test` 255/255；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验。
+- 验证：Windows `npm test` 255/255；`npm run typecheck` / `lint` / `build` / `verify-artifacts` 通过。Termux 真机未复验。
 
-## 事件/会话兼容与运维验收（阶段 4，2026-11-06，未发布）
+## 事件/会话兼容与运维验收（阶段 4，2026-11-06，已随 0.1.7 发布）
 
 - 新增 `package/src/lib/lifecycle.ts`：SIGTERM/SIGHUP/uncaughtException/unhandledRejection 兜底并调用 `shutdownShells()`；headless 同时响应 SIGTERM/SIGHUP 中止。
 - 流式重试通过 `notice` 事件可见；`doctor --net` 输出 registry 连通性结论；`/jobs` 增加会话年龄与 10 分钟回收提示。
 - projection 保留 `notice` 与 `egress_denied` system 消息；新增真实 session JSONL 往返、旧 JSONL 无新字段 resume、旧 4 字段 projection fingerprint 测试。
-- 新增 `package/scripts/bench.mjs` 与 `npm run bench`；记录 Windows 基线。
+- 新增 `package/scripts/bench.mjs`（直接 `node` 调用；`package.json` 未注册 `bench` 脚本）；记录 Windows 基线。
 - 回滚演练：`git archive HEAD` 到临时目录后旧 `bin/fastcode.mjs --version` 正常启动。
-- 验证：Windows `npm test` 263/263；`npm run typecheck` / `lint` / `build` / `verify:artifacts` 通过。Termux 真机未复验；TUI egress 渲染路径仅代码检查，未在 smoke 中启动 Ink。
+- 验证：Windows `npm test` 263/263；`npm run typecheck` / `lint` / `build` / `verify-artifacts` 通过。Termux 真机未复验；TUI egress 渲染路径仅代码检查，未在 smoke 中启动 Ink。
 
 ## DeepSeek 默认模型调整（2026-11-06）
 
 - `package/src/providers/deepseek.ts`：`defaultModel` 从 `deepseek-v4-pro` 改为 `deepseek-flash`。
 - 内置模型列表保持 `deepseek-v4-pro` / `deepseek-flash` 两项；显式 `/model deepseek-v4-pro` 仍可用。
 - 示例文档中的 DeepSeek 当前模型同步为 `deepseek-flash`；历史 CHANGELOG/DEVLOG 不改写。
-- 验证：新增 “DeepSeek defaults to deepseek-flash” 回归；Windows `npm test` 263/263；typecheck/lint/build/verify:artifacts 通过。
+- 验证：新增 “DeepSeek defaults to deepseek-flash” 回归；Windows `npm test` 263/263；typecheck/lint/build/verify-artifacts 通过。
 
 ## Provider 请求协议参数化（2026-11-06）
 
@@ -182,19 +182,54 @@
 - `package/src/providers/openaiCompatible.ts` 的 `StreamOptions` 增加 `chatPath/modelsPath/query/pathParams/authHeaderName/authPrefix`；`toRequestSpec` 保留 baseUrl trim 与 legacy `authHeader` 前缀语义。
 - 现有 13 个 provider 不传新字段，默认 URL/header 快照不变；`modelsPath:null` 直接返回静态模型。
 - 刻意保留 models 请求旧行为（不附加 `extraHeaders`），以满足现有 provider 快照一致；chat 请求仍按旧顺序应用 extraHeaders 后 auth。
-- 验证：新增 10 项协议回归；Windows `npm test` 273/273；typecheck/lint/build/verify:artifacts 通过。Termux 真机未复验。
+- 验证：新增 10 项协议回归；Windows `npm test` 273/273；typecheck/lint/build/verify-artifacts 通过。Termux 真机未复验。
 
 ## G1 修复：headless notice 映射（2026-11-06）
 
 - 真机测试报告 G1：`runner.ts` 会 yield 重试 `notice`，但 `headless.ts` 的 json/plain 分支未映射。
 - 修复：JSON 分支输出 `{"event":"notice","text":...}`；plain 分支把 `[fastcode] ...` 写到 stderr，保持 stdout 只输出回答。
 - 新增 2 项回归：假 provider 首次断流后重试，`--ui json` 出现 notice 事件；`--ui plain` stderr 出现重试提示且 stdout 保留回答。
-- 验证：Windows `npm test` **275/275**；Termux 真机（同步修复后）**281/281**，exit 0；typecheck/lint/build/verify:artifacts 通过。
+- 验证：Windows `npm test` **275/275**；Termux 真机（同步修复后）**281/281**，exit 0；typecheck/lint/build/verify-artifacts 通过。
 - 手机备份：`~/opt/fc-backup-20261106-232535-g1`（修复前）；证据 `/sdcard/Download/fc_smoke_phone_g1.txt`。
 
-## 0.1.7 定版（2026-11-06）
+## 0.1.7 定版与发布（2026-11-07）
 
 - `package/package.json`、`package/package-lock.json`：`0.1.7-beta` → `0.1.7`。
 - `README.md` / `README.zh.md` / `package/README.md` / `docs/*` / `脑图.md` / `RUNBOOK.md` / `AGENTS.md` 同步当前版本；历史 0.1.6-beta 记录保留。
-- 验证：Windows `npm test` 275/275；Termux 真机 281/281；typecheck/lint/build/verify:artifacts 通过。
-- 发布态仍未变：`release/` 是 0.1.7-beta 旧归档；GitHub Release/npm 仍为 0.1.6-beta；发布 0.1.7 前重新打包并单独授权 tag/release/npm publish。
+- 发布：本地 tag `v0.1.7` 指向 `be6e604`；当时 `release/` 为 0.1.7 便携包 tar.gz/zip、npm tgz 与 `SHA256SUMS`（现已被 0.1.8-beta.0 本地打包替换，可从 tag/历史取回）。
+- 验证：Windows `npm test` 275/275（2026-11-09 复跑，HEAD `be6e604`）；Termux 真机 281/281（2026-11-06）；typecheck/lint/build 通过；verify-artifacts 脚本通过。
+- npm：2026-11-09 查询 registry 仍为 `latest=0.1.6` / `beta=0.1.6-beta`；npm 侧同步待再次核对。
+- 未完成：PR CI 门禁、`/egress` 命令、ProxyAgent 代理、Tier 3、写路径 TOCTOU 复核、ReDoS 隔离；`bench` / `verify:artifacts` 脚本未注册到 `package.json`。
+
+## 0.1.8-beta.0（2026-11-09，未发布）
+
+> 基于 0.1.7 tag 之后的工作树修复；已本地 build/打包，尚未发布。包含 shell 会话、并发、退出保护、审批 feedback、压缩/投影、TUI 与版权。
+
+### 常驻 shell 会话修复（0.1.7 tag 之后）
+
+依据 `config/fast_其他.txt` 的六项问题修复 `src/agent/shell-session.ts`：
+
+- ① `close` 退出码 0 记为 `done`，不再无条件 `failed`。
+- ② 每条命令包进子 shell，隔离 `export`/函数/`umask`/`set -e`/`exit`。
+- ③ `exit`/`set -e` 不再杀死常驻 shell，避免 spawn 预算级联耗尽。
+- ④ 含后台操作符的命令完成后回收 resident，残留输出丢弃，不再串到下一条命令。
+- ⑤ 两个 resident 都忙时排队等待空闲 shell，不再立即 `busy` 失败。
+- ⑥ `needsOneShot` 改用 `bash-parser` AST；`echo top` 不再误判为交互式 one-shot。
+- ⑦ resident 池默认 **2**（安全默认），`/threads <1-6>` 可调大、上限 6；resident 满载后新命令排队。one-shot 路径由 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮）单独限制，满额立即失败；两套预算不共享。
+- ⑧ `/exit`（`/quit`、`/q`）在运行中需要二次确认：第一次提示停止并保留部分输出，5s 内第二次才 abort → `shutdownShellsAsync` → 关闭 session → 退出；`Esc` 取消并保留部分输出，`Ctrl+C` 在 run 中第一次取消、第二次退出。
+- ⑨ 退出保存口：`session.close({reason})` 写 `session_end` + projection，并对 JSONL/projection best-effort fsync。
+- ⑩ 安全停止：`shutdownShellsAsync` 采用 SIGTERM → 等待 close → 强制 SIGKILL，避免退出后残留子进程。
+- ⑪ 压缩承接位：`session_end.compaction` 预留 `source` / `summaryRef` / `pending`，当前默认 `none/null/false`；JSONL 全量事实保留。
+- ⑫ TUI compact 状态栏 `effort` 重复渲染修复（`src/ui/StatusBar.ts`），只显示一次。
+- ⑬ 新增 `/threads`（别名 `/pool`）与 `config.shellPoolSize`；TUI/headless 启动时应用，命令数 30 → 31。
+- ⑭ 审批 “Deny with feedback” 输入修复：TUI/plain 选择后进入文本等待（Enter 提交、Esc 取消、空输入不提交）；JSON gate feedback 要求 `input`；native 用 `termux-dialog text`，不可用回落 TUI；无输入 `decisionForOption` fail-closed，不再把提示语当反馈。
+- 纠偏（依据 `config/sj.txt`）：`shellPoolSize`/`/threads` 只限制 **resident** 池，不是全局并发上限；one-shot 走独立 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮）预算，满额立即失败不排队；`active` 统计 resident + one-shot，`pool/maxPool` 只算 resident；跨 turn 未结束的 one-shot 仍占并发。旧“常驻 export 会泄漏到后续命令”的观察在子 shell 修复后已不成立。
+- ⑮ `/compact` 写 `compacted` fact（含 summaryRef/token/dropped/keep），修复手动压缩后 resume 复活全量历史。
+- ⑯ `/clear` 写 `cleared` fact；投影只重建最后一次 cleared 之后的事实。
+- ⑰ 摘要顺序 Notes → Outcomes → Files → Requests → Actions；limit marker；伪文件名过滤；新压缩清理本会话旧 summary。
+- ⑱ 投影工具载荷折叠为编辑事实；单条 8000 字符保留头尾；总上限约 200KB；dropped marker；保护 summary/compaction marker；sessionMeta 取首个 session_start。
+- ⑲ `/context` 使用实际 env 配置；新增 `FASTCODE_COMPACTION_RATIO` / `KEEP_TURNS` / `SUMMARY_TOKENS`。
+- ⑳ 版权合规：根 `LICENSE` + `package/LICENSE` 保留原始 `Copyright (c) 2026 SimpleLittleDev` 与 MIT 全文，补 FastCode-Termux 自有版权行、上游来源与修改说明；README/package README 增加 License 段。
+- ㉑ 文档补全：README / README.zh / package README 增加完整 CLI 子命令、TUI 斜杠命令与设置入口；`docs/CONFIGURATION.md` §8 为速查（含 `/threads`、`/steer`、trust/skills/sessions/doctor/update）。
+- 验证：`typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`。
+- 额外手工核对：审批 feedback 源码逻辑、压缩/投影（`/compact` 元数据、摘要顺序、cleared、工具折叠、summary 安全删除）、`session_end` 保存口、Windows one-shot 异步停止、one-shot `active=1/pool=0/maxPool=2/maxSpawnPerTurn=8`、第 9 个 one-shot spawn limit、msys `sh -s` 的 `exit 0`/状态隔离/`set -e`。Termux 真机待复跑。

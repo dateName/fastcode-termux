@@ -35,6 +35,7 @@
 | requestIdleTimeoutMs | 流式空闲超时（毫秒） | 60000 |
 | contextBudgetChars | 旧字符预算（阶段 4 起由 token 阈值取代，保留但不再参与压缩） | 400000 |
 | reasoningEffort | 思考强度 auto/low/medium/high/max | auto |
+| shellPoolSize | **resident** shell 池并发数；安全默认 2，最大 6；`/threads <1-6>` 修改；不限制 one-shot 路径 | 2 |
 | capabilities | 缓存的 provider/model 能力；`toolCalling` 记 `native` / `pseudo` | `{ "toolCalling": {} }` |
 | egress | 应用层 egress 策略；见 §2.1 | `{ "enabled": false, "mode": "audit", ... }` |
 
@@ -73,11 +74,17 @@ SSE 连接另有一层 25s「无数据」超时（抛 `NetworkStallError`，已�
 
 ### 本地压缩
 
-默认在 `estTokens > 0.7 × model-meta.contextWindow` 时压缩：保留首条 user 消息和最近 6 轮，
-中间区生成 < 1.5k token 的摘要并写入 `~/.fastcode/sessions/summary-*.md`。
+默认在 `estTokens > 0.7 × model-meta.contextWindow` 时压缩：保留首条 user 消息和最近 6 轮（12 条消息），
+中间区生成摘要并写入 `~/.fastcode/sessions/summary-*.md`。
 heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也会强制压缩。
-`serverCompactionAware` 且收到服务端 opaque state 时不生成本地摘要，避免两份历史混用。
-随时用 `/context` 查看 token 估算、阈值与 heap。
+`serverCompactionAware` 且收到服务端 opaque state 时不生成本地摘要，避免两份历史混用。当前运行链路未传
+`serverOpaqueState`，因此 `FASTCODE_SERVER_COMPACTION=1` 实际不会改变压缩行为（仅为实验性预留）。
+摘要 section 顺序为 Notes → Outcomes → Files touched → Requests → Actions；条目超限会追加
+`(N more … not listed)`，摘要文件写入失败会留下无 `summaryRef` 的 `compacted` fact，恢复时跳过摘要。
+`/compact` 是手动压缩：现在会追加 `compacted` fact（含 `summaryRef`），并在下一条新压缩时清理本会话旧的
+`summary-*.md`；`/context` 显示 `compactionConfigFromEnv()` 的实际配置。
+`/clear` 会追加 `cleared` fact；恢复时只重建最后一次 `cleared` 之后的事实。
+可用 `FASTCODE_COMPACTION_RATIO` / `FASTCODE_COMPACTION_KEEP_TURNS` / `FASTCODE_COMPACTION_SUMMARY_TOKENS` 调整参数。
 
 最小改法（只写想改的字段即可，其余用默认值）：
 
@@ -168,9 +175,9 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | Groq | GROQ_API_KEY |
 | Mistral | MISTRAL_API_KEY |
 | xAI | XAI_API_KEY 或 GROK_API_KEY |
-| Moonshot | MOONSHOT_API_KEY |
-| 智谱 | ZHIPUAI_API_KEY 或 GLM_API_KEY 或 ZHIPU_API_KEY |
-| 通义千问 | DASHSCOPE_API_KEY 或 QWEN_API_KEY |
+| Moonshot | MOONSHOT_API_KEY；可用 `MOONSHOT_BASE_URL` 覆盖基地址 |
+| 智谱 | ZHIPUAI_API_KEY 或 GLM_API_KEY 或 ZHIPU_API_KEY；可用 `ZHIPU_BASE_URL` 覆盖 |
+| 通义千问 | DASHSCOPE_API_KEY 或 QWEN_API_KEY；可用 `DASHSCOPE_BASE_URL` 覆盖 |
 | Ollama | 不需要 Key，可用 OLLAMA_HOST |
 | 自定义 | FASTCODE_BASE_URL + FASTCODE_API_KEY + FASTCODE_MODEL |
 
@@ -190,11 +197,14 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_TOOL_OUTPUT_LIMIT | 工具输出上限（字符），默认 30000，边产边截断 |
 | FASTCODE_SESSION_LOG | 设为 0 关闭 JSONL 会话落盘 |
 | FASTCODE_SESSION_CACHE_MB | 会话缓存上限 MB，默认 256，超出先删最旧 |
-| FASTCODE_FSYNC | 1 强制 checkpoint 后 fsync；0 关闭；不设时仅在 `$FASTCODE_HOME` 位于 `/sdcard`、`/storage/emulated` 下启用 |
+| FASTCODE_FSYNC | 1 强制 checkpoint 后 fsync；0 关闭；不设时仅在 `$FASTCODE_HOME` 位于 `/sdcard`、`/storage/emulated` 下启用。会话 close（含 `/exit`）仍会对 JSONL 与 projection 做 best-effort fsync |
 | FASTCODE_COMPACTION | 设为 0 关闭本地历史压缩 |
+| FASTCODE_COMPACTION_RATIO | 本地 token 阈值比例，默认 0.7（取值 0–1） |
+| FASTCODE_COMPACTION_KEEP_TURNS | 压缩后保留的“轮”数，默认 6（实际按 2×N 条消息） |
+| FASTCODE_COMPACTION_SUMMARY_TOKENS | 摘要 token 预算，默认 1500；超出时按行截断并保留 marker |
 | FASTCODE_HEAP_LIMIT_MB | heap 强制压缩阈值（MB），默认 220 |
-| FASTCODE_SERVER_COMPACTION | 设为 1 启用 server-aware 互斥（有 opaque state 时跳过本地摘要）；实验性 |
-| FASTCODE_MAX_SPAWN_PER_TURN | 每轮最多新建 shell 进程数，默认 8；超过时提示批处理或轮询已有 session |
+| FASTCODE_SERVER_COMPACTION | 实验性 server-aware 预留；当前调用方未传 opaque state，实际不改变本地压缩 |
+| FASTCODE_MAX_SPAWN_PER_TURN | 每轮最多新建 shell 进程数（resident + one-shot 共用），默认 8；这是每轮新建速率，不是全局并发上限。达上限时 one-shot 立即失败，resident 路径可能排队等已有 shell |
 | FASTCODE_TOOL_PROTOCOL | `legacy`（默认）/ `native` / `auto`；原生 tools 返回 400 时自动降级并缓存 `pseudo` |
 | FASTCODE_SSE_IDLE_MS | SSE 无数据超时（毫秒），默认 25000；推理型模型首 token 很慢时可调大 |
 | FASTCODE_TRUST_ALL | 设为 1 跳过项目信任确认 |
@@ -319,8 +329,17 @@ Tier 3 不给默认 yes；本批未接备份，因此 Tier 3 破坏性动作 fai
 启动时若最近的会话没有 `session_end`，会提示上次会话未正常结束并给出 resume 命令。
 
 事实流（`.jsonl`）只追加：`user` / `assistant_raw` / `tool_call` / `tool_result` / `notice` / `egress_denied` / `checkpoint` /
-`session_end`；`notice` 与 `egress_denied` 在 projection 中作为 system 消息保留。旁边的 `<id>.projection.json` 是模型实际看到的
-工作集（<20KB），带 `toolCatalogHash + modelId + cwdDigest + compactionSource` 指纹，不匹配时从事实流重建。
+`compacted` / `cleared` / `session_end`；`notice` 与 `egress_denied` 在 projection 中作为 system 消息保留。旁边的 `<id>.projection.json` 是模型实际看到的
+工作集（上限约 200KB；单条上限 8000 字符，保留头尾），带 `toolCatalogHash + modelId + cwdDigest + compactionSource` 指纹，不匹配时从事实流重建。
+投影前会把工具载荷折叠成“工具 + 目标 + ok/error + 关键错误”事实，不保留完整 output；需要裁掉旧消息时插入
+`[projection] N earlier message(s) dropped …`，并保护 `[context summary]`/`[context compacted]` marker 不被优先删除。
+
+退出保存口：`/exit`（以及 `Ctrl+C` 两次）会先尝试中止当前 run，最多等 1000ms 让最终 facts 落盘，
+再等待 shell 安全停止，随后写 `session_end{reason:"exit"}` + projection，并对 JSONL 与 projection 做 best-effort fsync。
+运行中直接输入 `/exit` 会先提示“将停止当前 run、保留部分输出并保存”，需要在 5s 内再输入一次 `/exit` 确认；
+也可先 `/cancel` 或按 Esc 停止当前 run。
+`session_end.compaction` 是预留给对话压缩的字段（`source` / `summaryRef` / `pending`），当前为
+`{source:"none", summaryRef:null, pending:false}`；后续压缩可填充而不改变事件形状。
 `fastcode resume` 会恢复到会话记录的 cwd / provider / model，并提示目录或 model 不兼容。
 
 缓存上限默认 256MB（FASTCODE_SESSION_CACHE_MB 可调）。剪枝前会先把旧会话摘要写入
@@ -341,7 +360,7 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
     fastcode doctor         # 环境 + 缺哪个 Key
     fastcode doctor --net   # 额外探测 registry 连通性
 
-## 6. 交互选择器与思考强度（0.1.7）
+## 6. 交互选择器与思考强度（0.1.8-beta.0）
 
 ### 6.1 /model 与 /provider
 
@@ -374,17 +393,20 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
 - 若模型返回 400 且错误提到 reasoning/thinking/unsupported，
   客户端会去掉该参数重试一次。
 
-## 7. 长任务相关配置（0.1.7）
+## 7. 长任务相关配置（0.1.8-beta.0）
 
 | 字段 | 作用 | 默认 |
 |---|---|---|
 | maxAgentTurns | 单次请求最多工具轮次；到上限提示“输入 继续” | 24 |
 | requestIdleTimeoutMs | 流式空闲超时；每次收到 chunk 重置 | 60000 |
 | contextBudgetChars | 旧字符预算（阶段 4 起由 token 阈值取代，保留但不再参与压缩） | 400000 |
+| shellPoolSize | **resident** shell 池并发数；默认 2，最大 6，可用 `/threads` 调整；不限制 one-shot 路径 | 2 |
 
 达到轮次上限或断流时历史不会丢：直接输入 `继续` 即可接着做。
-历史压缩会保留首条请求与最近 6 轮，把中间区写入 `summary-*.md` 并插入 `[context compacted …]` 标记；
-`/context` 可查看当前 token 估算与压缩阈值。
+历史压缩保留首条请求与最近 6 轮（按 2×N 条消息，即默认 12 条），把中间区写入 `summary-*.md` 并插入 `[context compacted …]` 标记；
+摘要优先 Notes/Outcomes/Files，超限条目带 marker，新压缩会清理本会话旧摘要。
+`/compact` 现在会写 `compacted` fact；`/clear` 会写 `cleared` fact，resume 只重建 cleared 之后的事实。
+`/context` 可查看当前 token 估算、实际 env 阈值与 heap。
 
 ### 双轨工具协议
 
@@ -398,5 +420,71 @@ Anthropic / Google / 未知 provider 自动用伪协议（fail closed）。
 
 执行超过约 2s 的 shell 命令不再阻塞：工具立即返回 `session id` 与当前输出。
 模型用 `{"tool":"shell","session_id":"sh_..."}` 轮询增量输出；每次只返回新输出，退避从 1s 到 30s。
-POSIX 上最多保留 2 个常驻 `sh -s`（减少 Android phantom 进程），Windows 退化为独立进程。
-`/jobs` 列出 session，`/kill <id>` 杀整棵进程树；`FASTCODE_MAX_SPAWN_PER_TURN` 限制每轮新建进程数。
+shell 工具有两条执行路径，预算互不共享：
+
+| 路径 | 触发 | 限制 / 预算 | 满载行为 |
+|---|---|---|---|
+| resident | POSIX 且命令未被判定为交互/REPL | `shellPoolSize`：默认 **2**，`/threads <1-6>` 最大 6（仅 resident） | 排队等待空闲 resident（受命令 timeout 限制） |
+| one-shot | Windows，或命令命中交互/REPL 判定 | `FASTCODE_MAX_SPAWN_PER_TURN`：默认 **8/轮**（每轮新建速率，不是全局并发上限） | 立即返回 `spawn limit reached`，**不排队** |
+
+- `/threads` 只调整 resident 池，不影响 one-shot，也不构成“全局最多 2/6 个进程”的承诺。
+- `FASTCODE_MAX_SPAWN_PER_TURN` 同时计入新建 resident 和 one-shot；同一轮若新建 2 个 resident，本轮只剩 6 次 one-shot 配额。
+- `shellPoolStats().active` 和 `doctor` 的 `active` 统计所有仍在运行的 shell job（resident + one-shot）；`pool/maxPool` 只统计 resident。二者会不一致。
+- 同轮默认最多约 8 个新进程（2 resident + 6 one-shot，或 0 resident + 8 one-shot）；跨 turn 时 resident 池保留、one-shot 预算重置，未结束的旧 one-shot 仍占并发（例如既有 2 resident + 本轮 8 one-shot = 10；`/threads 6` 时为 14），长期未结束的 one-shot 没有全局回收上限。
+- 命令内部再启动的后台进程不计入上述两个预算；`setsid` 逃逸的后代即使 `shutdownShellsAsync` 也可能清不掉。
+- resident 超时/被杀会销毁该 resident，下一条 resident 命令需要新建并消耗本轮 spawn 预算；one-shot 超时同样消耗预算，但不占 resident 池。
+- 每条命令在子 shell（resident）或独立进程（one-shot）中执行，`export`/`umask`/`set -e`/`exit` **不跨命令泄漏**。旧观察“常驻 `export` 会让后续命令看见”在 2026-11-09 子 shell 修复后已不成立。
+- `needsOneShot` 是 AST 命令名启发式，不是完整 shell 语义：`echo top` 走 resident，`top` 走 one-shot；`python script.py` 走 one-shot，`python -c ...` 走 resident；`node -e ...` 走 resident，`node -v` 走 one-shot。路径差异改变的是并发记账与生命周期，不是单命令状态隔离。
+- 含 `&` 等后台操作符的 resident 命令完成后会回收该 resident，防止后台输出串入下一条命令。
+- `/jobs` 列出 session，`/kill <id>` 杀整棵进程树。
+- `/exit`（`/quit`、`/q`）会中止当前运行、终止所有运行中的 shell 与常驻 shell，再退出；运行中需要二次确认。
+- `Esc` 中止当前 run 并保留已生成文本/部分输出，提示输入 `继续`；`Ctrl+C` 在 run 中第一次先中止并保留部分输出，再按一次才退出。
+
+## 8. CLI 子命令与斜杠命令速查（0.1.8-beta.0）
+
+> 原则：子命令与配置类斜杠命令本身不发送模型请求；`fastcode "prompt"`、`resume` 以及 TUI 中发送的消息才会进入对话并可能消耗 token。
+
+### 8.1 CLI 子命令（不启动对话）
+
+| 命令 | 作用 |
+|---|---|
+| `fastcode` | 启动 TUI |
+| `fastcode "prompt"` | 启动 TUI 并带初始提示（会进入对话） |
+| `fastcode --version` / `-v` | 显示版本 |
+| `fastcode --help` / `-h` | 显示全部命令与选项 |
+| `fastcode provider` / `provider <id>` | 列出 provider / 设置默认 provider |
+| `fastcode model` / `model <id>` | 列出当前 provider 的模型 / 设置默认模型 |
+| `fastcode config` / `config path` | 打印配置与数据目录 / 只打印 config.json 路径 |
+| `fastcode sessions` / `sessions show <id>` | 列出会话 / 打印某会话事实与投影摘要 |
+| `fastcode resume [id|latest]` | 在 TUI 中恢复会话（恢复后可继续对话） |
+| `fastcode trust [dir]` / `untrust [dir]` / `trusted` | 信任 / 撤销信任 / 列出信任目录 |
+| `fastcode trust --forget <key>` | 撤销某条记住的工具审批 |
+| `fastcode skills list\|install <id>\|uninstall <id>\|search <q>` | 技能管理 |
+| `fastcode doctor` / `doctor --net` | 环境诊断 / 额外探测 registry 连通性 |
+| `fastcode update` | 检查新版本 |
+| `--ui tty\|native\|plain\|json` | 审批/渲染后端（默认 tty；plain/json 用于无 TTY） |
+
+API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`OPENROUTER_API_KEY`、`GROQ_API_KEY`、`MISTRAL_API_KEY`、`XAI_API_KEY`、`MOONSHOT_API_KEY`、`ZHIPUAI_API_KEY`、`DASHSCOPE_API_KEY`。
+
+### 8.2 TUI 斜杠命令（纯客户端操作）
+
+| 命令 | 作用 |
+|---|---|
+| `/help` (`h`, `?`) / `/about` (`version`) | 命令列表 / 版本、平台、链接 |
+| `/config` / `/theme [id]` / `/system [prompt]` / `/reset` / `/whoami` | 配置、主题、系统提示词、重置（不动 key）、Key 状态 |
+| `/provider [id]` / `/model [id]` / `/effort [auto\|low\|medium\|high\|max]` | provider / 模型 / 思考强度 |
+| `/login [provider] [model] [key]` / `/logout <provider> [model\|--all]` | 绑定 / 删除 Key（auth v3 为 provider 级，model 参数仅为兼容） |
+| `/clear` (`cls`) / `/compact` / `/context` / `/cost` | 清空历史 / 强制压缩 / 上下文阈值与 heap / 本会话用量与费用 |
+| `/expand` / `/cancel` / `/steer <text>` / `/exit` (`quit`, `q`) | 展开输出 / 取消运行 / 引导当前运行 / 退出（运行中需二次确认） |
+| `/agent [on\|off\|status]` / `/tools` / `/cwd` | agent 开关 / 工具列表 / 沙箱根目录 |
+| `/jobs` / `/attach <id>` / `/kill <id>` / `/bg` | 后台会话列表 / 查看新输出 / 结束 / 后台机制说明 |
+| `/threads [1-6]` (`pool`) | 查看/调整 resident shell 并发（默认 2，最大 6；不影响 one-shot） |
+| `/skills ...` / `/plugin ...` / `/edit` | 技能 / 常驻插件 / 用 `$EDITOR` 编辑提示词 |
+
+说明：`/system` 本身不发模型请求，但会改变后续对话的系统提示词；`/agent`、`/theme`、`/config`、`/reset`、`/whoami` 等只改本地状态/配置。
+
+### 8.3 设置入口
+
+- 持久配置：`~/.fastcode/config.json`（provider/model/theme/sharedDirs/agentMode/egress/shellPoolSize 等）；`fastcode config path` 可直接定位。
+- Key：`~/.fastcode/auth.json`（0600，provider 级；v1/v2 自动迁移，见 §3）。
+- 环境变量：见 §4；新增压缩参数 `FASTCODE_COMPACTION_RATIO` / `KEEP_TURNS` / `SUMMARY_TOKENS` 与 shell `shellPoolSize` / `FASTCODE_MAX_SPAWN_PER_TURN` 见对应小节。

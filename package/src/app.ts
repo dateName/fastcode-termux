@@ -12,13 +12,13 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput } from "ink";
 import { AGENT_SYSTEM_PROMPT, stripToolCalls, } from "./agent/protocol.js";
-import { compactionConfigFromEnv } from "./agent/compaction.js";
+import { compactionConfigFromEnv, removeSummaryFile } from "./agent/compaction.js";
 import { resolveToolProtocol, withToolCapability } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
 import { decisionForOption, parseApprovalChoice, type ApprovalDecision, type ApprovalRequest } from "./agent/approval.js";
 import { nativeApproval } from "./agent/approval-native.js";
 import { toolSchemas } from "./agent/tool-schemas.js";
-import { shutdownShells } from "./agent/shell-session.js";
+import { setShellPoolSize as applyShellPoolSize, shutdownShells, shutdownShellsAsync } from "./agent/shell-session.js";
 import { Banner } from "./ui/Banner.js";
 import { Spinner } from "./ui/Spinner.js";
 import { StatusBar } from "./ui/StatusBar.js";
@@ -35,10 +35,11 @@ import { createStartupTranscript } from "./lib/startup.js";
 import { shouldUseLiveStreamingUi, shouldUseStableTerminalUi } from "./lib/uiMode.js";
 import { buildPluginsPrompt } from "./plugins/manager.js";
 import { buildSkillsPrompt } from "./skills/manager.js";
-import { createSessionLog, latestUnclosedSession, loggingEnabled, openSessionLog } from "./session/log.js";
+import { createSessionLog, latestUnclosedSession, loggingEnabled, openSessionLog, staleSummaryRefs } from "./session/log.js";
 import { resumeSession } from "./session/projection.js";
 import { isTrusted, trustProject } from "./config/trust.js";
 import { TrustGate } from "./ui/TrustGate.js";
+import type { CommandCompaction } from "./types.js";
 function positiveInt(value, fallback) {
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
@@ -170,6 +171,11 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         submit(text: string): void;
         cancel(): void;
     }>(null);
+    const [approvalFeedbackPrompt, setApprovalFeedbackPrompt] = useState<string | null>(null);
+    const approvalFeedbackRef = useRef<null | {
+        submit(text: string): void;
+        cancel(): void;
+    }>(null);
     const [busy, setBusy] = useState(false);
     const [expanded, setExpanded] = useState(false);
     const steerQueueRef = useRef([]);
@@ -182,14 +188,49 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
     const sawDeltaRef = useRef(false);
     const lastStreamFlushRef = useRef(0);
     const ctrlCRef = useRef(0);
+    const exitConfirmRef = useRef(0);
+    const busyRef = useRef(false);
     const initialPromptSubmittedRef = useRef(false);
+    const quittingRef = useRef(false);
+    const quitCleanly = useCallback(async () => {
+        if (quittingRef.current)
+            return;
+        quittingRef.current = true;
+        if (abortRef.current) {
+            abortRef.current.abort();
+            abortRef.current = null;
+        }
+        // Give the aborted run a chance to append its final facts before the
+        // session save point is closed.
+        const idleDeadline = Date.now() + 1000;
+        while (busyRef.current && Date.now() < idleDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        try {
+            await shutdownShellsAsync(400);
+        }
+        catch {
+            shutdownShells();
+        }
+        try {
+            sessionRef.current?.close?.({ reason: "exit" });
+        }
+        catch {
+            // Session close is best effort during exit.
+        }
+        exit();
+    }, [exit]);
+    useEffect(() => {
+        applyShellPoolSize(config.shellPoolSize);
+    }, [config.shellPoolSize]);
     const theme = getTheme(config.theme);
     const stableUi = useMemo(() => shouldUseStableTerminalUi(), []);
     const liveStreamingUi = useMemo(() => shouldUseLiveStreamingUi(), []);
     // The banner picks a font that fits the terminal width (see ui/Banner.ts)
     // and renders nothing when even the smallest font is too wide.
     const showBanner = transcript.length <= startup.transcript.length && !busy;
-    const promptPlaceholder = pendingLogin
+    const promptPlaceholder = approvalFeedbackPrompt
+        ? `${approvalFeedbackPrompt} · Esc to cancel`
+        : pendingLogin
         ? pendingLogin.step === "loading-models"
             ? "Loading available models…"
             : pendingLogin.step === "model-manual"
@@ -240,7 +281,11 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             }
             return;
         }
-        if (key.escape || (key.ctrl && inputChar === "c" && (plainApprovalRef.current || pendingLogin))) {
+        if (key.escape || (key.ctrl && inputChar === "c" && (approvalFeedbackRef.current || plainApprovalRef.current || pendingLogin))) {
+            if (approvalFeedbackRef.current) {
+                approvalFeedbackRef.current.cancel();
+                return;
+            }
             if (plainApprovalRef.current) {
                 plainApprovalRef.current.cancel();
                 return;
@@ -260,8 +305,19 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         }
         if (key.ctrl && inputChar === "c") {
             ctrlCRef.current += 1;
+            if (busy && ctrlCRef.current === 1) {
+                if (abortRef.current) {
+                    abortRef.current.abort();
+                    abortRef.current = null;
+                }
+                pushSystem("Cancelled current run; partial output kept. Press Ctrl+C again to quit, or type 继续 to continue.");
+                setTimeout(() => {
+                    ctrlCRef.current = 0;
+                }, 1500);
+                return;
+            }
             if (ctrlCRef.current >= 2) {
-                exit();
+                void quitCleanly();
             }
             else {
                 pushSystem("Press Ctrl+C again to quit.");
@@ -515,6 +571,23 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                             pushSystem(`Invalid approval choice. Enter 1-${request.options.length}.`);
                             return;
                         }
+                        if (option.kind === "feedback") {
+                            const prompt = option.prompt || "Why should this be denied?";
+                            pushSystem(`${prompt}\nType your reason and press Enter; Esc cancels.`);
+                            plainApprovalRef.current = {
+                                request,
+                                submit: (feedbackText) => {
+                                    const feedback = feedbackText.trim();
+                                    if (!feedback) {
+                                        pushSystem("Feedback cannot be empty. Type a reason, or Esc to cancel.");
+                                        return;
+                                    }
+                                    finish({ kind: "feedback", text: feedback });
+                                },
+                                cancel: () => finish({ kind: "deny", reason: "cancelled during feedback" }),
+                            };
+                            return;
+                        }
                         finish(decisionForOption(option));
                     },
                     cancel: () => finish({ kind: "deny", reason: "cancelled" }),
@@ -537,6 +610,10 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 if (timer)
                     clearTimeout(timer);
                 approvalSignal?.removeEventListener("abort", onAbort);
+                if (approvalFeedbackRef.current) {
+                    approvalFeedbackRef.current = null;
+                    setApprovalFeedbackPrompt(null);
+                }
                 setPicker(null);
                 resolve(decision);
             };
@@ -554,10 +631,30 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 onSelect: (value) => {
                     const index = items.findIndex((item) => item.value === value);
                     const option = request.options[index];
-                    if (option)
-                        finish(decisionForOption(option));
-                    else
+                    if (!option) {
                         finish({ kind: "deny", reason: "unknown approval option" });
+                        return;
+                    }
+                    if (option.kind === "feedback") {
+                        const prompt = option.prompt || "Why should this be denied?";
+                        setPicker(null);
+                        setInput("");
+                        setApprovalFeedbackPrompt(prompt);
+                        pushSystem(`${prompt}\nType your reason and press Enter; Esc cancels.`);
+                        approvalFeedbackRef.current = {
+                            submit: (text) => {
+                                const feedback = text.trim();
+                                if (!feedback) {
+                                    pushSystem("Feedback cannot be empty. Type a reason, or Esc to cancel.");
+                                    return;
+                                }
+                                finish({ kind: "feedback", text: feedback });
+                            },
+                            cancel: () => finish({ kind: "deny", reason: "cancelled during feedback" }),
+                        };
+                        return;
+                    }
+                    finish(decisionForOption(option));
                 },
                 onCancel: () => finish({ kind: "deny", reason: "cancelled" }),
             });
@@ -577,6 +674,10 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         setAgentMode: (enabled) => setConfig((c) => ({ ...c, agentMode: enabled })),
         setSystemPrompt: (p) => setConfig((c) => ({ ...c, systemPrompt: p })),
         setSkillsRegistry: (url) => setConfig((c) => ({ ...c, skillsRegistry: url })),
+        setShellPoolSize: (size) => {
+            const applied = applyShellPoolSize(size);
+            setConfig((c) => ({ ...c, shellPoolSize: applied }));
+        },
         enableSkill: (name) => setConfig((c) => ({
             ...c,
             enabledSkills: Array.from(new Set([...(c.enabledSkills ?? []), name])),
@@ -612,6 +713,14 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         pushSystemMessage: pushSystem,
         startLogin: (options) => startModelSetup(options),
     }), [pushSystem, startModelSetup]);
+    const appendCompactionFact = useCallback((info: CommandCompaction) => {
+        const file = sessionRef.current?.file;
+        sessionRef.current.append({ type: "compacted", ...info });
+        if (typeof file === "string") {
+            for (const ref of staleSummaryRefs(file))
+                removeSummaryFile(ref);
+        }
+    }, []);
     const runSlash = useCallback(async (raw) => {
         const parsed = parseSlash(raw);
         if (!parsed)
@@ -621,7 +730,17 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             pushSystem(`Unknown command "/${parsed.name}". Try /help.`);
             return true;
         }
-        if (busy && !["cancel", "steer", "jobs", "kill", "attach", "expand", "context"].includes(cmd.name)) {
+        if (cmd.name === "exit" && busy) {
+            const now = Date.now();
+            if (now - exitConfirmRef.current > 5000) {
+                exitConfirmRef.current = now;
+                pushSystem("A run is active. /exit will stop it, keep the partial output, and save the session. " +
+                    "Type /exit again within 5s to confirm, or /cancel to stop first.");
+                return true;
+            }
+            exitConfirmRef.current = 0;
+        }
+        if (busy && !["cancel", "steer", "jobs", "kill", "attach", "expand", "context", "threads", "exit"].includes(cmd.name)) {
             pushSystem(`/${cmd.name} is unavailable while a run is active. Try /cancel or /steer.`);
             return true;
         }
@@ -661,8 +780,12 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 setPicker(res.picker);
                 setInput("");
             }
+            if (res?.compacted)
+                appendCompactionFact(res.compacted);
+            if (res?.cleared)
+                sessionRef.current.append({ type: "cleared" });
             if (res?.quit)
-                exit();
+                void quitCleanly();
         }
         catch (err) {
             pushSystem(parsed.name === "login"
@@ -672,6 +795,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         return true;
     }, [
         actions,
+        appendCompactionFact,
         config.agentMode,
         config.enabledPlugins,
         config.enabledSkills,
@@ -682,7 +806,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         config.theme,
         busy,
         expanded,
-        exit,
+        quitCleanly,
         history,
         pushSystem,
         pushUser,
@@ -694,6 +818,11 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         const text = raw.trim();
         if (!text)
             return;
+        if (approvalFeedbackRef.current) {
+            approvalFeedbackRef.current.submit(text);
+            setInput("");
+            return;
+        }
         if (plainApprovalRef.current) {
             plainApprovalRef.current.submit(text);
             setInput("");
@@ -738,6 +867,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         lastStreamFlushRef.current = 0;
         const ctrl = new AbortController();
         abortRef.current = ctrl;
+        busyRef.current = true;
         setBusy(true);
         let receivedDone = false;
         try {
@@ -800,14 +930,14 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             })) {
                 switch (ev.type) {
                     case "compaction":
-                        sessionRef.current.append({
-                            type: "compacted",
+                        appendCompactionFact({
                             summaryRef: ev.summaryFile,
                             source: ev.source,
                             beforeTokens: ev.beforeTokens,
                             afterTokens: ev.afterTokens,
                             droppedMessages: ev.droppedMessages,
                             keepMessages: ev.keptMessages,
+                            reason: ev.reason === "heap" ? "heap" : "threshold",
                         });
                         if (!compactionNotified) {
                             compactionNotified = true;
@@ -899,7 +1029,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                         break;
                     case "error":
                         if (ev.kind === "aborted")
-                            pushSystem("Cancelled.");
+                            pushSystem("Cancelled current run; partial output kept. Type 继续 to continue.");
                         else if (ev.kind === "stream_error")
                             pushSystem(streamErrorMessage(ev.message, provider, config.model));
                         else
@@ -932,10 +1062,12 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             setStreamingText("");
             setAgentActivity(null);
             setStreamPhase("thinking");
+            busyRef.current = false;
             setBusy(false);
             abortRef.current = null;
         }
     }, [
+        appendCompactionFact,
         busy,
         config.agentMode,
         config.enabledSkills,

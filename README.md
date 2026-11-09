@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Version | **0.1.7** (current working tree) |
+| Version | **0.1.8-beta.0** (working tree; tag `v0.1.7` assets; npm registry still shows 0.1.6 as of 2026-11-09) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> 0.1.7 is the current working-tree version. npm and GitHub Release assets remain 0.1.6-beta until 0.1.7 is published.
+> **0.1.8-beta.0** is the current working tree, based on tag `v0.1.7` (`be6e604`) plus the 2026-11-09 fixes (shell safety, `/threads`, exit protection, approval feedback, compaction/projection, TUI effort, license). It is **built and packaged locally** (`release/` now contains 0.1.8-beta.0 assets) but **not published**; the npm registry still reports `latest=0.1.6` / `beta=0.1.6-beta` (checked 2026-11-09).
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
@@ -43,8 +43,8 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 💰 Usage | token and cost readout in the status bar |
 | 🤖 Model support | **DeepSeek / OpenAI / Anthropic**, plus Gemini, Qwen, GLM, Kimi, Grok, OpenRouter, Ollama |
 | 💾 Resume & facts | append-only facts + `*.projection.json`; resume restores cwd/provider/model and unpaired tool calls |
-| 🧠 Context control | `/context`, `/compact`, token/HEAP-triggered local compaction with `summary-*.md` |
-| 🖥️ Background shell | long commands return a session id; `/jobs` `/attach` `/kill`, resident `sh -s` pool |
+| 🧠 Context control | `/context`, `/compact`, `/clear`; token/heap-triggered local compaction with `summary-*.md`; `/compact`/`/clear` persist facts and old summaries are cleaned |
+| 🖥️ Background shell | long commands return a session id; `/jobs` `/attach` `/kill`; resident `sh -s` pool (default 2, up to 6 via `/threads`; one-shot commands use a separate per-turn spawn budget) |
 | 🧰 Dual tool protocol | pseudo `<fastcode_tool>` or native `tool_calls`; `FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
 | 📱 Mobile commands | `/cancel` `/steer` `/expand` `/edit` (external editor for IME issues) |
 
@@ -52,8 +52,8 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 
 | Key | Action |
 |---|---|
-| `Ctrl+C` | quit (press twice; a single press only warns) |
-| `Esc` | cancel the current thought / stream |
+| `Ctrl+C` | during a run: first cancels and keeps partial output, second quits; idle: first warns, second quits |
+| `Esc` | cancel the current thought / stream; partial output is kept |
 
 ---
 
@@ -68,16 +68,17 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
 | 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
 | 🧾 Patch transaction | parse → plan → apply; CRLF/mode preserved; symlinks refused; move never overwrites | `/expand` for full diff |
-| 🛑 Process tree | abort/`/kill` kills children and grandchildren | POSIX process group; Windows `taskkill /T` |
+| 🛑 Process tree | abort/`/kill` kills children and grandchildren; `/exit` aborts the run and kills resident shells | POSIX process group; Windows `taskkill /T` |
 | 🔐 Approval hook | Soft Gate and sensitive/large patches produce a pending request; no resolver = **deny** (fail closed) | `--ui tty\|native\|plain\|json`; once/session/always; `fastcode trust --forget <key>` |
 
-### Known limitations (0.1.7)
+### Known limitations (0.1.8-beta.0)
 
 - Ink 5.x IME cursor placement is not fully fixed; a stale Termux pty size can clip/reorder text (`abcdef` → `bcdefa`).
   Correct the pty with `stty`, or use `/edit`; a full fix needs Ink ≥6.7.
 - Three `string-width` versions may disagree on ambiguous-width characters.
 - Native tools cover OpenAI-compatible providers only; others use the pseudo protocol.
 - Approval pending is wired to tty/native/plain/json resolvers; Tier 3 backup-before-execution is still pending (third batch), so Tier 3 destructive actions fail closed.
+- `/threads` caps the **resident** shell pool only (default 2, max 6). One-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget (default 8/turn), fail immediately at the limit, and can accumulate across turns; this is not a global concurrency cap.
 
 ---
 
@@ -104,7 +105,7 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-From npm: `npm install -g @datename/fastcode-termux@0.1.7` after 0.1.7 is published; until then use `@0.1.6-beta` (dist-tag `beta`).
+From npm: install `@0.1.8-beta.0` once the registry shows it; until then the published versions are `0.1.6` (dist-tag `latest`) and `0.1.6-beta` (`beta`). The tracked `release/` now contains 0.1.8-beta.0 assets.
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
@@ -121,16 +122,15 @@ The script symlinks `package/dist/cli.js` into `$PREFIX/bin` (Termux) or `~/.loc
 
 ### 2. Portable bundle (no npm)
 
-Download the latest `fastcode-portable-0.1.7.tar.gz` (see `SHA256SUMS`) from Releases, unpack and run:
+After the 0.1.8-beta.0 release build, download `fastcode-portable-0.1.8-beta.0.tar.gz` (see `SHA256SUMS`), unpack and run:
 
 ```bash
-tar -xzf fastcode-portable-0.1.7.tar.gz
-cd fastcode-portable-0.1.7
+tar -xzf fastcode-portable-0.1.8-beta.0.tar.gz
+cd fastcode-portable-0.1.8-beta.0
 ./fastcode
 ```
 
-The current tracked `release/` directory still contains 0.1.7-beta assets; regenerate them for 0.1.7 with `sh scripts/build-portable.sh`. GitHub Release and npm remain 0.1.6-beta until 0.1.7 is published.
-Rebuild it with `sh scripts/build-portable.sh`.
+The tracked `release/` contains 0.1.8-beta.0 assets (`fastcode-portable-0.1.8-beta.0.tar.gz|zip`, `datename-fastcode-termux-0.1.8-beta.0.tgz`, `SHA256SUMS`), generated by `sh scripts/build-portable.sh` after `npm run build`.
 
 ### 3. From source (only if you want to modify or rebuild)
 
@@ -217,17 +217,27 @@ Offline model lists show built-in/cached choices with a notice; a model ID can a
 
 | Command | Purpose |
 |---|---|
-| `fastcode` | open the TUI |
-| `fastcode "explain this repo"` | start with an initial prompt |
-| `fastcode doctor` / `fastcode doctor --net` | environment self-check; `--net` adds a registry connectivity probe — **start here when debugging** |
-| `fastcode provider` / `fastcode model` | list / switch provider and model |
-| `fastcode config` | show config and file paths |
-| `fastcode sessions` / `fastcode resume latest` | list sessions / resume the last one |
-| `fastcode trust` / `untrust` / `trusted` | manage trusted folders |
+| `fastcode` / `fastcode "prompt"` | open the TUI / open it with an initial prompt |
+| `fastcode --version` / `-v` / `--help` / `-h` | version / all commands |
+| `fastcode provider [id]` / `model [id]` | list or set the default provider / model |
+| `fastcode config` / `config path` | show config + paths / print only config.json |
+| `fastcode sessions` / `sessions show <id>` / `resume [id\|latest]` | list / inspect / resume sessions |
+| `fastcode trust [dir]` / `untrust [dir]` / `trusted` / `trust --forget <key>` | trust management and remembered approvals |
+| `fastcode skills list\|install <id>\|uninstall <id>\|search <q>` | skill management |
+| `fastcode doctor` / `doctor --net` | environment self-check; `--net` adds a registry connectivity probe — **start here when debugging** |
 | `fastcode update` | check for a newer release |
-| `fastcode --help` | all commands |
+| `--ui tty\|native\|plain\|json` | approval/render backend (default `tty`; plain/json for no TTY) |
 
-Inside the TUI: `/help` · `/model` · `/provider` · `/effort` · `/login` · `/agent` · `/theme` · `/clear` · `/exit`
+`fastcode "prompt"` and `resume` enter a conversation; the subcommands above do not send a model request.
+
+**TUI slash commands (no model request):**
+- Config/info: `/help` `/about` `/config` `/theme` `/system` `/reset` `/whoami`
+- Model/key: `/provider` `/model` `/effort` `/login` `/logout`
+- Context/run: `/clear` `/compact` `/context` `/cost` `/expand` `/cancel` `/steer` `/exit`
+- Agent/background: `/agent` `/tools` `/cwd` `/jobs` `/attach` `/kill` `/bg` `/threads` (`/pool`)
+- Extensions/input: `/skills` `/plugin` `/edit`
+
+Full command and settings reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ---
 
@@ -243,7 +253,7 @@ Inside the TUI: `/help` · `/model` · `/provider` · `/effort` · `/login` · `
 | How to update | `cd ~/fastcode && git pull && bash scripts/install.sh` (install.sh alone does not pull) |
 | npm install gives old/broken behavior | the npm registry can lag the repo — prefer the clone or the portable bundle for now; `fastcode update` compares versions |
 | "requires a TTY" | run in a real terminal; pipes and some remote tools trigger this |
-| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.7) |
+| One Ctrl+C exits | fixed: it only warns, press twice to quit (make sure you're on 0.1.8-beta.0) |
 | Command blocked | check for `[guardrails] HARD_BLOCK`; Hard Block cannot be overridden. Non-hard/Soft Gate paths may be temporarily allowed with `FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -291,10 +301,10 @@ sh scripts/build-portable.sh
 Artifacts land in `release/`:
 
 ```text
-fastcode-portable-0.1.7.tar.gz       self-contained single-file bundle
-fastcode-portable-0.1.7.zip          same (needs the `zip` command)
-datename-fastcode-termux-0.1.7.tgz   npm package (npm pack)
-SHA256SUMS                           checksums
+fastcode-portable-0.1.8-beta.0.tar.gz       self-contained single-file bundle
+fastcode-portable-0.1.8-beta.0.zip          same (needs the `zip` command)
+datename-fastcode-termux-0.1.8-beta.0.tgz   npm package (npm pack)
+SHA256SUMS                                  checksums
 ```
 
 ### Publish to npm
@@ -312,16 +322,16 @@ npm publish --access public --tag beta
 CI publishes automatically (`.github/workflows/release.yml`) — just push a tag:
 
 ```bash
-git tag v0.1.7
-git push origin v0.1.7        # Actions: build + package + upload Release
+git tag v0.1.8-beta.0
+git push origin v0.1.8-beta.0        # Actions: build + package + upload Release
 ```
 
 Or manually:
 
 ```bash
-gh release create v0.1.7 -t "FastCode 0.1.7" \
-  release/fastcode-portable-0.1.7.tar.gz \
-  release/datename-fastcode-termux-0.1.7.tgz \
+gh release create v0.1.8-beta.0 -t "FastCode 0.1.8-beta.0" \
+  release/fastcode-portable-0.1.8-beta.0.tar.gz \
+  release/datename-fastcode-termux-0.1.8-beta.0.tgz \
   release/SHA256SUMS
 ```
 
@@ -343,10 +353,10 @@ gh release create v0.1.7 -t "FastCode 0.1.7" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | architecture, modules, data flow |
 | [docs/MODULES.md](docs/MODULES.md) | what every source file does |
 | [docs/AUDIT.md](docs/AUDIT.md) | security and robustness audit |
-| [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.6-beta change log: data migrations, risks, rollback |
-| [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta handover report |
-| [CHANGELOG.md](CHANGELOG.md) | release notes (0.1.6-beta) |
-| [PATCHES.md](PATCHES.md) | 36 upstream fixes + 0.1.6-beta harness |
+| [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.8-beta.0 change log: migrations, risks, rollback |
+| [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta handover report (historical) |
+| [CHANGELOG.md](CHANGELOG.md) | release notes (0.1.8-beta.0; 0.1.7 / 0.1.6-beta historical) |
+| [PATCHES.md](PATCHES.md) | upstream fixes + 0.1.8-beta.0 harness |
 
 ---
 
@@ -369,4 +379,10 @@ This project is a fix + Termux adaptation that stands on other people's work. Th
 Original author credits, upstream project names and copyrights remain the property of their
 respective owners; this repo only fixes and adapts for Termux.
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.7</sub>
+## 📜 License
+
+MIT. Original FastCode © 2026 SimpleLittleDev; this fix/Termux adaptation © 2026
+FastCode-Termux contributors. This project is based on `SimpleLittleDev/FastCode`
+(`@simplelittledev/fastcode` 0.1.3), originally licensed under MIT. See [LICENSE](LICENSE).
+
+<sub>Made for Termux 🐧📱 · FastCode 0.1.8-beta.0</sub>

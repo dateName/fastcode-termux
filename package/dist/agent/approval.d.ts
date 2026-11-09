@@ -80,4 +80,4 @@ export declare const DEFAULT_ALLOW_OPTIONS: ApprovalOption[];
 export declare function approvalRequestId(): string;
 export declare function approvalOptionForDecision(request: ApprovalRequest, decision: ApprovalDecision): ApprovalOption | undefined;
 export declare function parseApprovalChoice(request: ApprovalRequest, text: string): ApprovalOption | undefined;
-export declare function decisionForOption(option: ApprovalOption): ApprovalDecision;
+export declare function decisionForOption(option: ApprovalOption, input?: string): ApprovalDecision;

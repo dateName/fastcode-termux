@@ -7,5 +7,6 @@ export declare const clearCommand: {
     }): {
         message: string;
         silent: boolean;
+        cleared: boolean;
     };
 };

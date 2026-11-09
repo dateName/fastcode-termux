@@ -37,3 +37,5 @@ export declare function heapExceeded(config: CompactionConfig): boolean;
 export declare function shouldCompact(messages: ChatMessage[], config: CompactionConfig, options: CompactionOptions): boolean;
 export declare function compactMessages(messages: ChatMessage[], config: CompactionConfig, options: CompactionOptions): CompactionResult;
 export declare function buildSummary(messages: ChatMessage[], config: CompactionConfig, options: Pick<CompactionOptions, "providerId" | "model">): string;
+/** Delete a summary file only when it is one of our summary-*.md artifacts. */
+export declare function removeSummaryFile(file?: string): void;

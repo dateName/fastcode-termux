@@ -45,6 +45,8 @@ export function encodeGateAsk(request: ApprovalRequest): GateAskEvent {
     }));
     const defaultIndex = Math.max(0, Math.min(request.defaultIndex ?? 0, options.length - 1));
     const text = request.preview?.kind === "diff" ? request.preview.text : "";
+    const feedbackOption = request.options.find((option) => option.kind === "feedback");
+    const requireInput = request.freeInput?.prompt ?? feedbackOption?.prompt;
     return {
         event: "gate:ask",
         version: GATE_PROTOCOL_VERSION,
@@ -58,7 +60,7 @@ export function encodeGateAsk(request: ApprovalRequest): GateAskEvent {
         diffstat: { files: text ? text.split(/\r?\n/).filter(Boolean).length : 0, lines: text ? text.split(/\r?\n/).length : 0 },
         options,
         default: options[defaultIndex]?.id ?? "",
-        ...(request.freeInput?.enabled ? { require_input: request.freeInput.prompt } : {}),
+        ...(requireInput ? { require_input: requireInput } : {}),
     };
 }
 
@@ -91,5 +93,11 @@ export function parseGateDecision(request: ApprovalRequest, line: string): GateD
     const option = request.options.find((entry, index) => optionId(entry, index) === payload.option);
     if (!option)
         return { decision: { kind: "deny", reason: "unknown approval option id" }, error: "option" };
+    if (option.kind === "feedback") {
+        const text = typeof payload.input === "string" ? payload.input.trim() : "";
+        if (!text)
+            return { decision: { kind: "deny", reason: "feedback input is required" }, error: "feedback" };
+        return { decision: { kind: "feedback", text } };
+    }
     return { decision: decisionForOption(option) };
 }

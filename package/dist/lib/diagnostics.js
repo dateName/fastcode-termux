@@ -134,12 +134,15 @@ export function collectDiagnostics() {
         costBudgetUsd: positiveEnv("FASTCODE_COST_BUDGET_USD"),
         compactionEnabled: compaction.enabled,
         compactionRatio: compaction.localThresholdRatio,
+        compactionKeepTurns: compaction.keepTurns,
+        compactionSummaryTokens: compaction.maxSummaryTokens,
         compactionHeapMb: compaction.heapLimitMb,
         compactionHeapUsedMb: process.memoryUsage().heapUsed / 1024 / 1024,
         compactionForced: heapExceeded(compaction),
         serverCompactionAware: compaction.serverCompactionAware,
         shellActive: shells.active,
         shellPool: shells.pool,
+        shellPoolMax: shells.maxPool,
         shellSpawns: shells.spawns,
         shellMaxSpawn: shells.maxSpawnPerTurn,
         sseIdleMs: positiveEnv("FASTCODE_SSE_IDLE_MS") || 25_000,
@@ -182,8 +185,8 @@ export function formatDiagnostics(info) {
     lines.push(`  read limits   read ${info.readMaxBytes}B · scan ${info.readScanMaxBytes}B · read_many ${info.readManyMaxBytes}B · grep ${info.grepMaxBytes}B`);
     lines.push(`  egress        ${info.egress.enabled ? "enforce" : "audit-only"} · mode ${info.egress.mode} · scan ${info.egress.maxScanBytes}B · paths ${info.egress.denyPaths} · globs ${info.egress.denyGlobs} · markers ${info.egress.denyContentMarkers}`);
     lines.push(`  budgets       ${info.tokenBudget > 0 ? "tokens ≤ " + info.tokenBudget : "token budget off"} · ${info.costBudgetUsd > 0 ? "$" + info.costBudgetUsd : "cost budget off"}`);
-    lines.push(`  compaction    ${info.compactionEnabled ? "on" : "off"} · ${Math.round(info.compactionRatio * 100)}% · heap ${info.compactionHeapUsedMb.toFixed(1)}/${info.compactionHeapMb}MB${info.compactionForced ? " [FORCED]" : ""}${info.serverCompactionAware ? " · server-aware" : ""}`);
-    lines.push(`  shell pool    ${info.shellActive} active · ${info.shellPool} resident · ${info.shellSpawns} spawns · cap ${info.shellMaxSpawn}/turn`);
+    lines.push(`  compaction    ${info.compactionEnabled ? "on" : "off"} · ${Math.round(info.compactionRatio * 100)}% · keep ${info.compactionKeepTurns} turns · summary ${info.compactionSummaryTokens} tok · heap ${info.compactionHeapUsedMb.toFixed(1)}/${info.compactionHeapMb}MB${info.compactionForced ? " [FORCED]" : ""}${info.serverCompactionAware ? " · server-aware" : ""}`);
+    lines.push(`  shell pool    ${info.shellActive} active · ${info.shellPool}/${info.shellPoolMax} resident · ${info.shellSpawns} spawns · cap ${info.shellMaxSpawn}/turn`);
     lines.push(`  loop exempt   ${info.loopExempt.length > 0 ? info.loopExempt.join(", ") : "(none)"}`);
     lines.push(`  model meta    ctx ${info.modelMeta.contextWindow} · ~${info.modelMeta.charsPerToken} chars/token · ${info.modelMeta.supportsTools ? "tools" : "no tools"} · ${info.modelMetaFile}`);
     lines.push(`  sse timeout   ${info.sseIdleMs}ms idle`);

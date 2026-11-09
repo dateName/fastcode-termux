@@ -3,7 +3,7 @@
 审计对象：src/（114 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
 
-> 历史快照：本审计对象为 0.1.6-beta。0.1.7 的 Guardrails/AST/审批/egress 变更见 CHANGELOG 0.1.7 与 ARCHITECTURE §5–6。
+> 历史快照：本审计对象为 0.1.6-beta。0.1.7 的 Guardrails/AST/审批/egress 与 0.1.8-beta.0 的 shell/退出/压缩/版权补充见 CHANGELOG 与 ARCHITECTURE §5–6（本文件第六节为 0.1.8-beta.0 补记）。
 
 ## 级别定义
 
@@ -160,7 +160,7 @@ provider 级 Key 复用、v1/v2 迁移。
 - **patch**：parse→plan→apply 全量内存规划后才落盘；O_NOFOLLOW；rename 前 lstat；
   符号链接拒绝；CRLF/mode 保持；move 不覆盖；多文件失败回滚。
 - **trust v1**：`paths` 用 realpath；旧 `trusted[]` 迁移；每次 approve 重读（mtime memo）。
-- **facts/projection**：append-only 事实流；projection <20KB + fingerprint；未配对 tool_call 按幂等性补全。
+- **facts/projection**：append-only 事实流；projection + fingerprint；未配对 tool_call 按幂等性补全（0.1.7 工作树已把投影上限提升到约 200KB，见第六节）。
 - **SSE/retry**：25s idle（可调）；公共前缀去重；429 到上限抛 QuotaError。
 - **后台 shell**：默认 2s 转后台；`/jobs` `/attach` `/kill`；`FASTCODE_MAX_SPAWN_PER_TURN`。
 
@@ -172,3 +172,22 @@ provider 级 Key 复用、v1/v2 迁移。
 - 原生 tools 只覆盖 OpenAI 兼容 provider。
 
 回归：PC 115 项；Termux 120/120（含 #50/#51/#54、kill -9、/sdcard fsync、进程组 kill）。
+
+## 六、0.1.8-beta.0 工作树补充（2026-11-09，基于 tag `v0.1.7`）
+
+本轮针对 shell 会话、退出收口和 TUI 的补充修复：
+
+- **shell 状态**：`close` 退出码 0 记为 `done`；每条 resident 命令包进子 shell，`export`/`umask`/`set -e`/`exit` 不跨命令；resident 池默认 2、`/threads` 最大 6；resident 满额排队。
+- **双路径记账**：one-shot（Windows、交互/REPL 判定命令）由 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮）单独限制，满额立即失败、不排队；两套预算不共享。`active` 统计 resident + one-shot，`pool/maxPool` 只算 resident。
+- **退出/中断安全**：`Esc` 取消并保留部分输出；run 中 `Ctrl+C` 第一次取消、第二次退出；run 中 `/exit` 需 5s 内二次确认。确认后最多等 1000ms 落最终 facts，再 `shutdownShellsAsync`（SIGTERM → 等待 → SIGKILL），随后写 `session_end` + projection 并 best-effort fsync；`session_end.compaction` 预留压缩承接位。
+- **TUI**：compact 状态栏 `effort` 重复渲染修复。
+- **审批 feedback**：选择 “Deny with feedback” 后必须输入原因；TUI/plain 文本等待、JSON 要求 `input`、native `termux-dialog text`，空/缺失输入 fail-closed，不再把提示语当作用户反馈。
+- **压缩/恢复**：`/compact` 现在写 `compacted` fact（含 `summaryRef`），`/clear` 写 `cleared` fact；摘要按 Notes/Outcomes/Files 优先并带 limit marker；新压缩清理本会话旧 `summary-*.md`。投影上限从 19KB 提高到约 200KB，工具载荷折叠为编辑事实，裁剪时插入 dropped marker 并保护 summary marker；`/context` 读取实际 env 配置。
+
+仍存边界（未在本轮关闭）：
+
+- one-shot 跨 turn 未结束的进程仍占并发，没有全局回收上限；`setsid` 后代可能逃逸 `shutdownShellsAsync`。
+- 命令内再起的后台子进程不计入 resident/one-shot 预算。
+- ReDoS 执行超时、写路径 TOCTOU、egress 未覆盖出口、Tier 3 备份前置等仍按 `CONFIGURATION.md`/`ARCHITECTURE.md` 所列边界处理。
+
+验证：Windows `npm test` **282/282**（POSIX 专属用例跳过）；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 资产；手工核对 one-shot 记账、`/threads` clamp、`session_end` 保存口与 `shutdownShellsAsync`。Termux/POSIX 真机待复跑。

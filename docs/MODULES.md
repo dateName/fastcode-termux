@@ -15,13 +15,13 @@
 
 | 文件 | 职责 | 依赖 |
 |---|---|---|
-| src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发；统一 provider → model → key 配置流程并暂存至确认 | runner, session, commands, providers, config/store, ui |
+| src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发；统一 provider → model → key 配置流程并暂存至确认；审批 feedback 文本等待与 Esc 取消 | runner, session, commands, providers, config/store, ui |
 | src/ui/Banner.ts | 启动横幅（稳定 UI 下不动画） | 无 |
 | src/ui/Message.ts | 消息气泡；Markdown 渲染缓存（不 memo，避免终端 resize 后宽度不更新） | lib/markdown |
 | src/ui/Prompt.ts | 输入框与斜杠自动补全；`showCursor` 常开 | ink-text-input, commands/index |
 | src/ui/Spinner.ts | 思考动画（stable 模式低频） | 无 |
 | src/ui/Picker.ts | 模型/服务商/effort 选择器 | 无 |
-| src/ui/StatusBar.ts | 服务商/模型/用量/effort/平台 | lib/platform |
+| src/ui/StatusBar.ts | 服务商/模型/用量/effort/平台；compact 布局 effort 只渲染一次 | lib/platform |
 | src/ui/TrustGate.ts | 首次信任确认 | ink |
 
 ## 编排层
@@ -51,17 +51,17 @@
 | src/agent/tool-schemas.ts | 原生 function-calling JSON schema（15 工具） | types |
 | src/agent/guards.ts | 三态危险命令判定；Hard Block/Soft Gate；只读/副作用判定；指纹归一化；FASTCODE_LOOP_EXEMPT | shell-ast |
 | src/agent/shell-ast.ts | 纯 JS `bash-parser` 第二意见；只做 hard 升级；`-c`/`find -exec`/`eval/source/.`/同段赋值 | bash-parser |
-| src/agent/approval.ts | ApprovalRequest/Decision、稳定 option id、默认选项、plain 编号解析 | 无 |
+| src/agent/approval.ts | ApprovalRequest/Decision、稳定 option id、默认选项、plain 编号解析；feedback 必须有用户文本，否则 fail-closed | 无 |
 | src/agent/approval-store.ts | once/session/always 作用域；session 内存；always 绑 catalogHash | approval, trust, guards |
-| src/agent/approval-native.ts | termux-dialog sheet resolver；code/index 严格映射，缺失/超时回落 | approval |
-| src/agent/approval-json.ts | NDJSON gate:ask/decision schema、版本与错 id/畸形校验 | approval |
+| src/agent/approval-native.ts | termux-dialog sheet resolver；feedback 用 termux-dialog text 收集原因；code/index 严格映射，缺失/超时回落 | approval |
+| src/agent/approval-json.ts | NDJSON gate:ask/decision schema、版本与错 id/畸形校验；feedback 要求 input 并回传用户文本 | approval |
 | src/headless.ts | `--ui json` / 非 TTY plain 的无线程 TUI 运行器；NDJSON v/seq/ts、tool_call/tool_result、egress_denied、notice（plain 写 stderr） | runner, providers, approval-json |
 | src/agent/limits.ts | 边产边截断的工具输出缓冲 | 无 |
 | src/agent/stream.ts | runStream：idle 超时、retryStream、incomplete、toolCalls | lib/net, types |
 | src/agent/context.ts | 旧版字符压缩（兼容保留） | types |
-| src/agent/compaction.ts | token 阈值 / heap 强制压缩；摘要落盘；server-aware 互斥 | model-meta, config/paths |
+| src/agent/compaction.ts | token 阈值 / heap 强制压缩；摘要落盘与旧文件清理；Notes/Outcomes 优先与 limit marker；server-aware 互斥 | model-meta, config/paths |
 | src/agent/process-tree.ts | POSIX 进程组 kill；Windows taskkill /T | 无 |
-| src/agent/shell-session.ts | 常驻 sh -s 池、后台 session、增量轮询、/jobs /kill 数据源 | process-tree |
+| src/agent/shell-session.ts | 两条路径：resident `sh -s` 池（默认 2，`/threads` ≤6，子 shell 隔离、池满排队）与 one-shot（`FASTCODE_MAX_SPAWN_PER_TURN` 预算、满额立即失败）；后台输出隔离、`shutdownShellsAsync`、增量轮询、/jobs /kill 数据源 | process-tree |
 | src/agent/ignore.ts | .fastcodeignore、默认忽略、二进制识别 | 无 |
 
 ## 领域层：patch
@@ -76,8 +76,8 @@
 
 | 文件 | 职责 | 依赖 |
 |---|---|---|
-| src/session/log.ts | append-only 事实流；seq；checkpoint；fsync 分层；未闭合扫描；剪枝前摘要 | config/paths |
-| src/session/projection.ts | 事实→消息；未配对 tool_call 补全；投影 <20KB；fingerprint；resume | session/log, agent/registry, agent/protocol |
+| src/session/log.ts | append-only 事实流；seq；checkpoint；close(reason/compaction) + session_end/projection + best-effort fsync；fsync 分层；未闭合扫描；剪枝前摘要 | config/paths |
+| src/session/projection.ts | 事实→消息；fold 工具载荷、cleared 重置、未配对 tool_call 补全；投影约 200KB；dropped marker；fingerprint；resume | session/log, agent/registry, agent/protocol |
 
 ## 领域层：服务商
 
@@ -89,7 +89,7 @@
 | src/providers/anthropic.ts | Claude Messages API（伪协议工具） | lib/http |
 | src/providers/{openai,google,deepseek,openrouter,groq,mistral,xai,moonshot,zhipu,qwen,ollama,custom}.ts | 13 provider 配置 | openaiCompatible |
 
-## 领域层：命令（30 个）
+## 领域层：命令（31 个）
 
 | 文件 | 职责 |
 |---|---|
@@ -103,6 +103,7 @@
 | context | token/阈值/heap |
 | cancel / steer / bg / attach / expand / edit | 运行中控制、后台与输入绕行 |
 | jobs / kill | 后台 shell 会话 |
+| threads (pool) | 查看/调整 resident shell 并发（默认 2，上限 6；不影响 one-shot 路径） |
 | compact | 强制本地压缩 |
 
 ## 领域层：技能与插件

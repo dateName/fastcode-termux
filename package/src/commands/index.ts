@@ -28,6 +28,7 @@ import { expandCommand } from "./expand.js";
 import { attachCommand } from "./attach.js";
 import { bgCommand } from "./bg.js";
 import { editCommand } from "./edit.js";
+import { threadsCommand } from "./threads.js";
 export const COMMANDS = [
     helpCommand,
     agentCommand,
@@ -59,6 +60,7 @@ export const COMMANDS = [
     attachCommand,
     bgCommand,
     editCommand,
+    threadsCommand,
 ];
 export function findCommand(name) {
     const lower = name.toLowerCase();

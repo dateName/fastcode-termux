@@ -22,6 +22,8 @@ export declare const DEFAULT_CONFIG: {
     contextBudgetChars: number;
     /** Thinking depth: auto = send nothing, provider default. */
     reasoningEffort: string;
+    /** Resident shell concurrency: safe default 2, max 6. `/threads` changes it. */
+    shellPoolSize: number;
     /** Cached per-provider/model capabilities (native vs pseudo tool calling). */
     capabilities: {
         toolCalling: {};

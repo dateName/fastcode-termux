@@ -25,12 +25,18 @@ export function parseApprovalChoice(request, text) {
         return undefined;
     return request.options[index];
 }
-export function decisionForOption(option) {
+export function decisionForOption(option, input) {
     if (option.kind === "allow")
         return { kind: "allow", scope: option.scope };
     if (option.kind === "choose")
         return { kind: "choose", value: option.value };
-    if (option.kind === "feedback")
-        return { kind: "feedback", text: option.prompt };
+    if (option.kind === "feedback") {
+        const text = typeof input === "string" ? input.trim() : "";
+        // The option's prompt is the question, not the user's answer. Without an
+        // actual answer, fail closed instead of sending the prompt back to the model.
+        return text
+            ? { kind: "feedback", text }
+            : { kind: "deny", reason: "feedback was required but not provided (fail closed)" };
+    }
     return { kind: "deny", reason: "denied by user" };
 }

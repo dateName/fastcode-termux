@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import parse from "bash-parser";
 import { terminateProcessTree } from "./process-tree.js";
 import { normalizeTimeoutMs } from "./tools/validate.js";
 
@@ -37,7 +38,9 @@ interface ExecOptions {
 const OUTPUT_LIMIT = 1024 * 1024;
 const DEFAULT_BACKGROUND_MS = 2000;
 const DEFAULT_TIMEOUT_MS = 120_000;
-const MAX_POOL = 2;
+export const DEFAULT_SHELL_POOL_SIZE = 2;
+export const MAX_SHELL_POOL_SIZE = 6;
+let poolLimit = DEFAULT_SHELL_POOL_SIZE;
 const jobs = new Map<string, ShellJob>();
 const pool: ResidentShell[] = [];
 let spawns = 0;
@@ -168,7 +171,7 @@ class ShellJob {
             exitCode: this.exitCode,
             bytes: this.output.length,
             startedAt: this.startedAt,
-            pid: this.child?.pid,
+            pid: this.child?.pid ?? this.resident?.child.pid,
             timeoutArmed: Boolean(this.timeoutTimer),
             foregroundAttached: Boolean(this.abortListener),
         };
@@ -195,6 +198,8 @@ class ResidentShell {
     job?: ShellJob;
     dead = false;
     private buffer = "";
+    private background = false;
+    private claimed = false;
     constructor(cwd: string) {
         const env = { ...process.env, FASTCODE_SANDBOX: "1", FASTCODE_SANDBOX_ROOT: cwd };
         this.child = spawn("sh", ["-s"], {
@@ -218,13 +223,23 @@ class ResidentShell {
                 pool.splice(index, 1);
         });
     }
-    run(job: ShellJob, timeoutMs: number): void {
+    claimIfIdle(): boolean {
+        if (this.dead || this.job || this.claimed)
+            return false;
+        this.claimed = true;
+        return true;
+    }
+    run(job: ShellJob, timeoutMs: number, background = false): void {
+        this.claimed = false;
         this.job = job;
+        this.background = background;
+        this.buffer = "";
         job.resident = this;
         const marker = `__FC_END_${job.key}__`;
+        const body = job.command.trim() ? ["(", job.command, ")"] : [":"];
         const script = [
             `if cd ${shellQuote(job.cwd)}; then`,
-            job.command,
+            ...body,
             "__fc_status=$?",
             "else",
             "__fc_status=1",
@@ -244,9 +259,13 @@ class ResidentShell {
     private consume(chunk: string): void {
         if (this.dead)
             return;
-        this.buffer += chunk;
-        if (!this.job)
+        // Output that arrives while no job owns the shell belongs to an
+        // already-finished background child. Never carry it into the next job.
+        if (!this.job) {
+            this.buffer = "";
             return;
+        }
+        this.buffer += chunk;
         const marker = `__FC_END_${this.job.key}__:`;
         const index = this.buffer.indexOf(marker);
         if (index < 0) {
@@ -275,18 +294,38 @@ class ResidentShell {
         const code = Number(rest.slice(0, newline).trim());
         this.buffer = rest.slice(newline + 1);
         this.job = undefined;
+        const background = this.background;
+        this.background = false;
         job.finish(Number.isFinite(code) && code === 0 ? "done" : "failed", Number.isFinite(code) ? code : 1);
+        // A background operator leaves a detached child writing into this
+        // shell's stdout pipe. Retire the resident so late output cannot be
+        // attributed to the next command.
+        if (background)
+            this.kill();
     }
     private fail(message: string, code?: number | null): void {
+        this.claimed = false;
         if (!this.job)
             return;
         const job = this.job;
         this.job = undefined;
+        this.background = false;
+        if (this.buffer) {
+            job.append(this.buffer);
+            this.buffer = "";
+        }
+        if (code === 0) {
+            job.finish("done", 0);
+            return;
+        }
         job.append(`\n${message}`);
         job.finish("failed", code ?? 1);
     }
     kill(): void {
         this.dead = true;
+        this.claimed = false;
+        this.background = false;
+        this.buffer = "";
         terminateProcessTree(this.child);
         const index = pool.indexOf(this);
         if (index >= 0)
@@ -300,16 +339,19 @@ export async function executeShellCommand(command: string, cwd: string, options:
         return { ok: false, status: "killed", output: "command aborted before start" };
     const timeoutMs = normalizeTimeoutMs(options.timeoutMs, DEFAULT_TIMEOUT_MS);
     const backgroundAfterMs = options.backgroundAfterMs ?? DEFAULT_BACKGROUND_MS;
-    const useResident = process.platform !== "win32" && !needsOneShot(command);
+    const shape = analyzeShellShape(command);
+    const useResident = process.platform !== "win32" && !shape.oneShot;
     let job: ShellJob | undefined;
     if (useResident) {
-        const resident = acquireResident(options.turn, cwd);
-        if (resident === "busy")
-            return { ok: false, status: "failed", output: "both pool shells are busy; poll or kill a session first" };
+        const resident = await acquireResident(options.turn, cwd, timeoutMs, options.signal);
         if (resident === "limit")
             return { ok: false, status: "failed", output: spawnLimitMessage() };
+        if (resident === "timeout")
+            return { ok: false, status: "timeout", output: "shell pool is busy; timed out waiting for a free resident shell" };
+        if (resident === "killed")
+            return { ok: false, status: "killed", output: "command aborted before start" };
         job = new ShellJob(command, cwd);
-        resident.run(job, timeoutMs);
+        resident.run(job, timeoutMs, shape.background);
     }
     else {
         if (!maySpawn(options.turn))
@@ -388,11 +430,74 @@ export function shutdownShells(): void {
     jobs.clear();
 }
 
-export function shellPoolStats(): { spawns: number; active: number; pool: number; maxSpawnPerTurn: number } {
+/**
+ * Exit-safe stop: send SIGTERM, wait briefly for close, then force SIGKILL.
+ * Use this when the process is about to exit and must not leave children.
+ */
+export async function shutdownShellsAsync(graceMs = 400): Promise<void> {
+    const running = Array.from(jobs.values()).filter((job) => job.status === "running");
+    const residents = pool.filter((resident) => !resident.dead);
+    for (const job of running)
+        job.kill("killed");
+    for (const resident of residents)
+        resident.kill();
+    pool.length = 0;
+    jobs.clear();
+    const children: ChildProcess[] = [];
+    for (const job of running) {
+        if (job.child)
+            children.push(job.child);
+    }
+    for (const resident of residents)
+        children.push(resident.child);
+    if (children.length === 0)
+        return;
+    await Promise.race([
+        Promise.all(children.map((child) => waitForChildClose(child, graceMs))),
+        delay(graceMs + 50),
+    ]);
+    for (const child of children) {
+        if (child.exitCode === null && child.signalCode === null)
+            terminateProcessTree(child, { graceMs: 0 });
+    }
+    await delay(50);
+}
+
+function waitForChildClose(child: ChildProcess, ms: number): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null)
+        return Promise.resolve();
+    return new Promise((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const done = () => {
+            if (timer)
+                clearTimeout(timer);
+            child.removeListener("close", done);
+            resolve();
+        };
+        timer = setTimeout(done, ms);
+        child.once("close", done);
+    });
+}
+
+export function shellPoolSize(): number {
+    return poolLimit;
+}
+
+/** Clamp and apply the resident shell concurrency (1..6, default 2). */
+export function setShellPoolSize(size: number): number {
+    const parsed = Number(size);
+    poolLimit = Number.isFinite(parsed)
+        ? Math.min(MAX_SHELL_POOL_SIZE, Math.max(1, Math.floor(parsed)))
+        : DEFAULT_SHELL_POOL_SIZE;
+    return poolLimit;
+}
+
+export function shellPoolStats(): { spawns: number; active: number; pool: number; maxPool: number; maxSpawnPerTurn: number } {
     return {
         spawns,
         active: Array.from(jobs.values()).filter((job) => job.status === "running").length,
         pool: pool.filter((resident) => !resident.dead).length,
+        maxPool: poolLimit,
         maxSpawnPerTurn: maxSpawnPerTurn(),
     };
 }
@@ -420,22 +525,95 @@ function startOneShot(command: string, cwd: string): ShellJob {
     return job;
 }
 
-function acquireResident(turn: number | undefined, cwd: string): ResidentShell | "busy" | "limit" {
-    const idle = pool.find((resident) => !resident.dead && !resident.job);
-    if (idle)
-        return idle;
-    if (pool.filter((resident) => !resident.dead).length >= MAX_POOL)
-        return "busy";
-    if (!maySpawn(turn))
-        return "limit";
-    const resident = new ResidentShell(cwd);
-    pool.push(resident);
-    return resident;
+async function acquireResident(turn: number | undefined, cwd: string, waitMs: number, signal?: AbortSignal): Promise<ResidentShell | "limit" | "timeout" | "killed"> {
+    const deadline = Date.now() + waitMs;
+    while (true) {
+        for (const resident of pool) {
+            if (resident.claimIfIdle())
+                return resident;
+        }
+        const live = pool.filter((resident) => !resident.dead);
+        if (live.length < poolLimit && maySpawn(turn)) {
+            const resident = new ResidentShell(cwd);
+            resident.claimIfIdle();
+            pool.push(resident);
+            return resident;
+        }
+        // No free shell and no spawn budget: wait for a running command to
+        // finish instead of failing the third call with "both shells busy".
+        if (live.length === 0)
+            return "limit";
+        if (signal?.aborted)
+            return "killed";
+        const remaining = deadline - Date.now();
+        if (remaining <= 0)
+            return "timeout";
+        await delay(Math.min(remaining, 50));
+    }
 }
 
-function needsOneShot(command: string): boolean {
-    return /(^|\s)(vim|nano|less|more|ssh|su|login|read|top|htop|tmux|screen)(\s|$)/.test(command)
-        || /(^|\s)(python|python3|node|bash|zsh|fish|irb|sqlite3)(\s|$)/.test(command) && !/\s-(c|e|m)\s/.test(command);
+const INTERACTIVE_COMMANDS = new Set(["vim", "nano", "less", "more", "ssh", "su", "login", "read", "top", "htop", "tmux", "screen"]);
+const REPL_COMMANDS = new Set(["python", "python3", "node", "bash", "zsh", "fish", "irb", "sqlite3"]);
+const WRAPPER_COMMANDS = new Set(["sudo", "env", "nohup", "command", "time", "exec"]);
+
+interface ShellShape {
+    oneShot: boolean;
+    background: boolean;
+}
+
+function analyzeShellShape(command: string): ShellShape {
+    let ast: any;
+    try {
+        ast = parse(command, { mode: "bash" });
+    }
+    catch {
+        // Fall back to the historical heuristic only when the parser cannot
+        // classify the command at all.
+        return {
+            oneShot: /(^|\s)(vim|nano|less|more|ssh|su|login|read|top|htop|tmux|screen)(\s|$)/.test(command)
+                || /(^|\s)(python|python3|node|bash|zsh|fish|irb|sqlite3)(\s|$)/.test(command) && !/\s-(c|e|m)\s/.test(command),
+            background: /(^|[^&>])&([^&>]|$)/.test(command),
+        };
+    }
+    let oneShot = false;
+    let background = false;
+    const walk = (node: any, depth = 0): void => {
+        if (!node || typeof node !== "object" || depth > 32)
+            return;
+        if (Array.isArray(node)) {
+            for (const entry of node)
+                walk(entry, depth + 1);
+            return;
+        }
+        // bash-parser also marks `cmd &> file` as async; only retire the
+        // resident for a real background operator, not a redirect.
+        if (node.async === true && /(^|[^&>])&([^&>]|$)/.test(command))
+            background = true;
+        if (node.type === "Command" && typeof node.name?.text === "string") {
+            const name = node.name.text;
+            const args = Array.isArray(node.suffix)
+                ? node.suffix.map((word: any) => typeof word?.text === "string" ? word.text : "").filter(Boolean)
+                : [];
+            const replOptions = (values: string[]) => values.some((arg: string) => /^(-c|-e|-m|-p|--eval|--print|--command)$/.test(arg));
+            if (INTERACTIVE_COMMANDS.has(name) || REPL_COMMANDS.has(name) && !replOptions(args))
+                oneShot = true;
+            if (WRAPPER_COMMANDS.has(name)) {
+                const wrappedIndex = args.findIndex((arg: string) => INTERACTIVE_COMMANDS.has(arg) || REPL_COMMANDS.has(arg));
+                if (wrappedIndex >= 0) {
+                    const wrappedName = args[wrappedIndex];
+                    if (INTERACTIVE_COMMANDS.has(wrappedName) ||
+                        REPL_COMMANDS.has(wrappedName) && !replOptions(args.slice(wrappedIndex + 1)))
+                        oneShot = true;
+                }
+            }
+        }
+        for (const value of Object.values(node)) {
+            if (value && typeof value === "object")
+                walk(value, depth + 1);
+        }
+    };
+    walk(ast);
+    return { oneShot, background };
 }
 
 function maySpawn(turn: number | undefined): boolean {

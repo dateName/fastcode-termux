@@ -57,12 +57,15 @@ export declare function collectDiagnostics(): {
     costBudgetUsd: number;
     compactionEnabled: boolean;
     compactionRatio: number;
+    compactionKeepTurns: number;
+    compactionSummaryTokens: number;
     compactionHeapMb: number;
     compactionHeapUsedMb: number;
     compactionForced: boolean;
     serverCompactionAware: boolean;
     shellActive: number;
     shellPool: number;
+    shellPoolMax: number;
     shellSpawns: number;
     shellMaxSpawn: number;
     sseIdleMs: number;

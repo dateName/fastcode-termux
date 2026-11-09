@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前工作树：**0.1.7**（未发布）；历史条目中的 0.1.6-beta 保持不变
+> 当前工作树：**0.1.8-beta.0**（基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包，未发布）；历史条目中的 0.1.6-beta 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -444,27 +444,148 @@ printf 'node_modules/\n*.log\n' > .fastcodeignore
 
 ---
 
-## 0.1.7（2026-10-30，工作树未发布）
+## 0.1.7（2026-10-30 起始，2026-11-07 收口，已打 tag）
 
 ### 总览
 
-- 版本：`package.json` = `0.1.7`；npm/GitHub Release 仍为 0.1.6-beta。
-- 范围：Guardrails 三态与 AST 第二意见、审批 resolver、模型配置 TUI、会话 manifest、配置缓存、技能完整性、Termux 真机验收。
-- 验证：PC smoke **207/207**；Termux 真机 smoke **212/212**（0.1.6-beta 同源构建）。
+- 版本/发布：`package.json` = `0.1.7`；tag `v0.1.7` 指向 `be6e604`；`release/` 已含 0.1.7 便携包 tar.gz/zip、npm tgz 与 `SHA256SUMS`。
+- npm 状态：2026-11-09 查询 registry 仍返回 `latest=0.1.6`、`beta=0.1.6-beta`；npm 侧同步需再次核对，不能仅凭 tag 判定。
+- 范围：Guardrails 三态与 AST 第二意见、审批 resolver、模型配置 TUI、会话 manifest、配置缓存、技能完整性；收口阶段追加守卫重建、egress 策略、工具契约与精准读写、provider 协议参数化、生命周期兜底与测试/基准脚本。
+- 验证：PC `npm test` **275/275**（2026-11-09 复跑，HEAD `be6e604`）；Termux 真机 **281/281**（2026-11-06，G1 修复后）；`verify-artifacts` 通过。
 
 ### 关键改动
 
 | 主题 | 改动 | 落点 |
 |---|---|---|
-| Guardrails | Hard Block / Soft Gate / allow 三态；`.env` 删除 soft、截断/覆盖 hard；printenv 分级 | `agent/guards.ts` |
+| Guardrails | Hard Block / Soft Gate / allow 三态；`.env` 家族写入/删除/重命名/外发 hard；关键凭据读取 hard；`>>`/`>|`/fd 重定向解析；`sensitive_file_egress` | `agent/guards.ts`、`agent/shell-ast.ts` |
 | AST | 纯 JS `bash-parser`，只升不降；`-c`/`find -exec`/`eval/source/.`/同段赋值 | `agent/shell-ast.ts` |
+| 工具契约 | `read_file` offset/limit；`read_many` 总预算；`grep` case/glob/context/maxResults；`ToolResult` code/hint/截断/行字节/副作用；`replace_in_file` expectedMatches；copy 默认不覆盖；delete 递归需显式；move EXDEV 回退 | `agent/tools/*`、`agent/registry.ts` |
+| Egress | 纯策略模块；默认 `enabled:false + mode:"audit"`；block 态 `EGRESS_DENY`；内容标记与扫描预算；不生成审批、不写 trusted；配置热生效；`off` kill switch | `agent/policy/egress.ts`、`registry.ts` |
+| 事件/会话 | NDJSON `v/seq/ts`、tool_call/tool_result、usage/error.code；projection 保留 `notice`/`egress_denied`；旧 4 字段 fingerprint 兼容 | `headless.ts`、`session/projection.ts` |
 | 审批 | pending request；once/session/always；catalogHash；trust --forget；tty/native/plain/json | `agent/approval*.ts`、`registry.ts`、`app.ts` |
-| 模型配置 | `/provider` `/model` `/login` 无参数统一向导；取消不改配置；key 掩码 | `app.ts`、`commands/{provider,model,login}.ts` |
-| 会话 | manifest contentHash/sessionHash/lastFactSeq；剪枝后可恢复；工具配对修复 | `session/{log,projection}.ts` |
+| Provider | `providers/spec.ts` URL/query/pathParams/auth 模板；13 provider 默认快照不变；`modelsPath:null` 静态列表 | `providers/*` |
+| 模型配置 | `/provider` `/model` `/login` 无参数统一向导；取消不改配置；key 掩码；DeepSeek 默认 `deepseek-flash` | `app.ts`、`commands/{provider,model,login}.ts` |
+| 生命周期 | SIGTERM/SIGHUP/uncaughtException/unhandledRejection 兜底；重试 `notice` 在 TUI/JSON/stderr 可见；`doctor --net` | `lib/lifecycle.ts`、`headless.ts`、`lib/diagnostics.ts` |
 | 配置/技能 | stat 指纹缓存；技能目录 sha256；`/skills verify --confirm` | `config/store.ts`、`skills/manager.ts` |
-| 构建 | `cli-main.ts` 避免 tsc 覆盖 bundle；highlight 子集；便携包需 bash-parser 闭包 | `tsconfig*`、`scripts/*` |
+| 构建/测试 | `build.mjs` 同源重建 src→dist→bundle；新增 `bench.mjs`、`verify-artifacts.mjs`；smoke 增至 275 项 | `scripts/*`、`package/scripts/*` |
+
+### 关键不变量
+
+- egress 判定在 `registry.execute()` 的 prepare 之后、approve 之前；Hard Block 不被 `FASTCODE_ALLOW_DANGEROUS`、trust、`sharedDirs`、`FASTCODE_TRUST_ALL` 覆盖。
+- 默认 audit 不改变工具结果；只有 `enabled:true + mode:"block"` 才拦截；`mode:"off"` 为完整回退开关。
+- block 拒绝返回结构化 `code:"EGRESS_DENY"`，不生成审批请求，不写 `trusted.json`。
+- 旧 JSONL、旧 4 字段 projection fingerprint 与旧 config 仍可读取。
+
+### 验证
+
+```
+cd package
+npm test                          # ALL PASS (275 checks), 2026-11-09, HEAD be6e604
+node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundle 2,138,499 B
+```
+
+- Termux 真机（LG V409N / Android 12 / arm64）：smoke **281/281**（2026-11-06；G1 修复前 279/279）。
+- bench（Windows / Node v24.20.0）：cold start 143.74ms、write 200KB 8.86ms、read_many 10×200KB 26.04ms、list 1000 68.19ms、grep 1000 630.06ms。
+- 真机已验证 TUI、审批 Esc/allow once、模型配置向导取消不改配置。
+
+### 已知限制与未完成（0.1.7）
+
+1. egress 未覆盖：provider 请求正文、session JSONL 落盘正文、CLI 子命令输出、skills/plugins prompt、TTS/share/clipboard、debug 日志；shell 路径仍是启发式。
+2. 无 `/egress list|add|test` 命令；`doctor` 仅输出 egress 计数，无 `recentDenied`。
+3. `HTTPS_PROXY` / `ALL_PROXY`（ProxyAgent）未接入，弱网代理场景仍可能卡到 SSE idle 超时。
+4. Tier 3 备份前置未接入；native / json gate 端到端未完成。
+5. 写路径未做 realpath/lstat 的 TOCTOU 复核；`grep` 复杂嵌套正则无执行超时/子进程隔离。
+6. CI 仍只在 `v*` tag / 手动触发，未加 PR 门禁（typecheck/lint/smoke/产物一致性）。
+7. `bench.mjs` / `verify-artifacts.mjs` 已入库但 `package.json` 未注册对应脚本；`npm test` 指向上级 `../scripts/smoke-test.mjs`，安装态/发布包不可用。
+8. 运维入口：`doctor --json`、`sessions export/rm/prune`、TUI `/sessions`、子命令 `--json` 尚未补齐；现有 `sessions` / `sessions show` / `resume` / `doctor --net`。
 
 ### 回退
 
-- 运行时：`FASTCODE_TOOL_PROTOCOL=legacy`、`FASTCODE_COMPACTION=0`、`FASTCODE_SESSION_LOG=0`。
+- 运行时：`FASTCODE_TOOL_PROTOCOL=legacy`、`FASTCODE_COMPACTION=0`、`FASTCODE_SESSION_LOG=0`、`egress.mode="off"`。
 - 安装：保留 `~/opt/fastcode-termux.old-*` 与 `~/.fastcode.bak-*`。
+
+---
+
+## 0.1.8-beta.0（2026-11-09，未发布）
+
+> `package/package.json` = `0.1.8-beta.0`；基于 tag `v0.1.7`（`be6e604`）+ 本节修复。已本地 build/打包，尚未发布；`release/` 已为 0.1.8-beta.0 资产，npm registry 最近查询仍为 0.1.6 / 0.1.6-beta。
+
+### 0.1.7 tag 之后的工作树修复
+
+### TUI 状态栏 effort 重复
+
+- 问题：终端列宽 < 88 的 compact 布局下，`ui/StatusBar.ts` 第一行渲染一次 `effort:<level>`，第二行又用 `${effort} · ...` 渲染一次，TUI 出现两个 `effort:high`。
+- 修复：第一行的 effort 仅非 compact 时渲染（`!compact && effort`）；compact 继续只在第二行显示一次。
+- 落点：`package/src/ui/StatusBar.ts`；`package/dist/ui/StatusBar.js` 与 `package/dist/cli.js` 由 `npm run build` 同源重建。
+- 验证：`npm run typecheck` / `lint` / `build` 通过；`npm test` **275/275**；`node package/scripts/verify-artifacts.mjs` 通过（bundle 2,138,503 B）。
+- 平台边界：未在真实 Ink TTY 截图复验；按 compact / 非 compact 两个渲染分支静态核对。
+
+### 常驻 shell 会话修复（config/fast_其他.txt）
+
+- ① `close` 兜底：`shell exited (0)` 不再一律写 `failed`；退出码 0 记为 `done`，非 0 / 信号仍为 `failed`。
+- ② 状态泄漏：每条命令包进子 shell `( ... )`；`export`、函数、`umask`、`set -e`、`exit` 不再跨命令保留。外层仍每命令显式重置 cwd。
+- ③ spawn 预算：`exit`/`set -e` 只结束子 shell，不再杀死常驻 shell，因此不会连续消耗 `FASTCODE_MAX_SPAWN_PER_TURN` 导致后续命令级联失败。
+- ④ 后台输出串台：命令含后台操作符（AST `async`）时，打印完成标记后回收该 resident，后台子进程与其 stdout 管道一并终止；无 job 时的残留输出直接丢弃，不再进入下一命令。
+- ⑤ 并发：resident 池默认 2，`/threads <1-6>` 可调大至 6；resident 路径达到上限时新命令排队等待空闲 shell（受命令 timeout 约束），不再立即返回 `both pool shells are busy`；one-shot 路径不受此池限制。
+- ⑥ 正则误判：`needsOneShot` 改为 `bash-parser` AST 判命令名与参数；`echo top` 不再被当成交互式 one-shot；`sudo vim` 等 wrapper 仍能识别。
+- 落点：`package/src/agent/shell-session.ts`；`dist/agent/shell-session.js` 与 `dist/cli.js` 由 `npm run build` 同源重建。
+- 回归：`scripts/smoke-test.mjs` 新增 POSIX 专属用例（状态隔离、10×`exit 0`、后台输出、池满排队、`echo top` 分类）。
+- 验证：`typecheck` / `lint` / `build` 通过；Windows `npm test` **275/275**（POSIX 专属用例跳过）；`verify-artifacts` 通过。另用 msys `sh -s` 手工核对子 shell 的 `exit 0`、状态隔离与 `set -e` 语义。**Termux/POSIX 真机尚未复跑，新增用例计数待真机确认。**
+- 行为变化：命令内的后台进程会在该命令完成时随 resident 回收而终止；需要长期后台请使用 shell 工具的 `backgroundAfterMs` session，而不是 `&`。
+
+### 并发上限与 `/exit` 收口（2026-11-09）
+
+- resident 池默认 **2**（安全默认），`/threads <1-6>` 可调大、上限 6；resident 路径满载时新命令排队，one-shot 路径不排队（见下方纠偏）。
+- `/exit`（`/quit`、`/q`）：运行中第一次输入只提示“将停止当前 run、保留部分输出并保存”，5s 内第二次确认后 abort → `shutdownShellsAsync()` → 关闭 session → 退出。
+- `Ctrl+C` 在 run 中第一次先取消当前 run 并保留部分输出，第二次才退出；`Esc` 同样取消并保留部分输出，提示输入 `继续`。双击 Ctrl+C 的最终路径仍是 `quitCleanly()`。
+- 回归：`#54` 改为验证顺序命令复用；新增 POSIX 用例覆盖“默认 2”“`/threads` 上限 6”“6 个 resident 满载”“第 7 条排队”“shutdown 清理全部 resident”。
+- 验证：`typecheck` / `lint` / `build` 通过；Windows `npm test` **275/275**（POSIX 专属用例跳过）；`verify-artifacts` 通过。Termux 真机待复跑。
+
+### 退出保存口 / 安全停止 / 压缩承接位（2026-11-09）
+
+- 保存口：`quitCleanly()` 先 abort 当前 run，最多等 1000ms 让 finally 落完最终 facts；随后关闭 session。
+- 安全停止：新增 `shutdownShellsAsync(graceMs)`：SIGTERM → 等待 close → 对仍存活的 child 强制 SIGKILL；`/exit` 与双击 Ctrl+C 走该路径。
+- 保存落盘：`session.close({reason})` 写 `session_end` + projection，并对 JSONL 与 projection 做 best-effort fsync（FUSE 失败不阻断退出）。
+- 压缩承接：`session_end.compaction` 预留 `source` / `summaryRef` / `pending`，当前默认 `none/null/false`；JSONL 全量事实仍保留，供后续压缩/恢复使用。
+- 验证：手工创建会话后 `close({reason:"exit"})`，末行确认为 `session_end reason=exit compaction{source:none,summaryRef:null,pending:false}` 且 projection 存在；Windows 手工 `shutdownShellsAsync` 3 个 one-shot 进程，pids 全部消失、耗时约 336ms。Windows `npm test` **275/275**；POSIX 真机待复跑。
+
+### 纠偏：双路径与并发记账（2026-11-09）
+
+对照 `config/sj.txt` 复核后，之前把 `shellPoolSize` / `/threads` 说成“全局并发上限”是不准确的。实际语义：
+
+- **两条路径**：resident（POSIX 非交互）与 one-shot（Windows、交互/REPL 判定命令）。两者预算不共享。
+- **resident**：默认 2，`/threads` 可调 1–6；满载排队；每条命令在子 shell 中，状态不泄漏。
+- **one-shot**：由 `FASTCODE_MAX_SPAWN_PER_TURN` 限制（默认 8/轮，新建速率不是全局并发上限）；满额立即返回 `spawn limit reached`，不排队。
+- **共用预算**：`FASTCODE_MAX_SPAWN_PER_TURN` 同时计入新建 resident 和 one-shot；fresh turn 里 2 resident + 6 one-shot = 8 次新建。
+- **跨 turn**：resident 池保留；one-shot 预算重置；上一轮未结束的 one-shot 仍占并发。因此既有 2 resident + 本轮 8 one-shot 可达 10（`/threads 6` 时 14）；长期未结束的 one-shot 没有全局回收上限。
+- **记账**：`active` = resident + one-shot 运行中 job；`pool/maxPool` 只算 resident。`doctor` 两者会不一致。
+- **旧观察已失效**：`export ZZZ=42` 在 2026-11-09 子 shell 修复后不会泄漏到后续命令；`echo top` 也已不再因参数含 `top` 走 one-shot（AST 按命令名判定）。路径分叉仍存在，但影响的是并发记账/生命周期，不是命令间状态。
+- **证据**：手工 one-shot 长命令返回 `{active:1,pool:0,maxPool:2,maxSpawnPerTurn:8}`；同一 turn 第 9 个 one-shot 立即返回 spawn limit；代码 `maySpawn` 同时被 `acquireResident` 与 `startOneShot` 调用。
+
+本轮仅纠正文档理解，不改变上述执行路径的行为；若要“全局并发上限 + 统一排队”，需要另立改动。
+
+### 审批 “Deny with feedback” 输入修复（2026-11-09）
+
+- **问题**：`decisionForOption(feedback)` 直接把 `option.prompt`（“Why should this be denied?”）当成反馈，选择该选项后没有等待用户输入，模型收到的是提示语而不是原因。
+- **修复**：TUI 选择 feedback 后切到文本等待模式（Prompt 占位符显示问题，Enter 提交、Esc 取消、空输入不提交）；plain 模式选择后继续等待第二行文本；JSON gate 的 feedback 选项要求 `input`；native 模式用 `termux-dialog text` 收集文本，不可用时回落 TUI。
+- **失败关闭**：`decisionForOption(feedback)` 无输入时返回 `deny`（不再伪造反馈）；JSON 缺 `input` 返回错误并 deny。
+- **落点**：`agent/approval.ts`、`app.ts`、`headless.ts`、`agent/approval-json.ts`、`agent/approval-native.ts`。
+- **验证**：`typecheck` / `lint` / `build` 通过；用 `tsx` 直接跑源码核对 feedback 有/无输入的 decision 与 JSON gate 结果；smoke 中 feedback 用例通过（Windows 总计数 282）。
+
+### 工具压缩流 / 投影恢复修复（2026-11-09）
+
+- **手动压缩落事实**：`/compact` 现在返回 `compacted` 元数据，由 app 追加 `compacted` fact（含 `summaryRef`、token、dropped/keep）；resume 的 `applySummary` 能找到对应摘要，不再复活全量历史。
+- **清空持久化**：`/clear` 返回 `cleared`，app 追加 `cleared` fact；`buildProjection` 只使用最后一次 `cleared` 之后的事实，旧历史不再在 resume 后回来。
+- **摘要质量**：section 顺序改为 Notes → Outcomes → Files touched → Requests → Actions；条目超限追加 `(N more … not listed)`；文件名过滤 `summary-*`、`//`、反斜杠转义和伪扩展；新压缩会删除本会话旧 `summary-*.md`。
+- **投影工具压缩**：投影前把 native `role:"tool"` 与 legacy `FastCode executed…` 结果折叠为「tool + target + ok/error + 关键错误」事实，不保留完整 output；单条上限 8000 字符（保留头尾），总上限约 200KB；裁剪插入 `[projection] N earlier message(s) dropped …`，并保护 summary/compaction marker。
+- **fingerprint 稳定性**：`sessionMetaFromFacts` 只采用首个 `session_start`，忽略 resume 追加的新 start，避免换目录/模型后必然全量重建。
+- **配置可观测**：`/context` 改用 `compactionConfigFromEnv()`；新增 `FASTCODE_COMPACTION_RATIO` / `FASTCODE_COMPACTION_KEEP_TURNS` / `FASTCODE_COMPACTION_SUMMARY_TOKENS`，`doctor` 显示 keep/summary 预算。
+- **版权**：根 `LICENSE` 与 `package/LICENSE` 保留原始 `Copyright (c) 2026 SimpleLittleDev` + MIT 全文，补 FastCode-Termux 自有版权行、上游来源与修改说明；README / package README 增加 License 段。
+- **文档**：README / README.zh / package README 补齐 CLI 子命令、TUI 斜杠命令与设置入口；`docs/CONFIGURATION.md` §8 为完整速查（含 `/threads`、`/steer`、trust/skills/sessions/doctor/update）。
+- **验证**：`typecheck` / `lint` / `build` 通过；`tsx` 源码核对：`/compact` 返回 `compacted+summaryRef`、摘要顺序、cleared 重置、工具载荷折叠、summary 文件安全删除、meta 取首个 start；smoke 对应用例通过。
+
+### 0.1.8-beta.0 最终验证（2026-11-09）
+
+- Windows：`npm test` **282/282**；`verify-artifacts` 通过（`dist/cli.js` + `dist/agent/guards.js` 5 个标记，bundle 2,150,507 B）。
+- 打包：`release/` 已生成 `fastcode-portable-0.1.8-beta.0.tar.gz|zip`、`datename-fastcode-termux-0.1.8-beta.0.tgz`、`SHA256SUMS`。
+- 发布：GitHub/npm 尚未发布；npm registry 仍为 0.1.6 / 0.1.6-beta。Termux 真机未复跑。

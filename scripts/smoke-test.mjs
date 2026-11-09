@@ -1350,6 +1350,24 @@ ok("JSON gate schema is versioned with stable option ids",
 ok("JSON gate decisions reject wrong ids, unknown options, and malformed input",
     gateAllow.decision.kind === "allow" && gateWrongId.decision.kind === "deny" &&
         gateBadJson.decision.kind === "deny");
+const approvalCore = await load("agent/approval.js");
+const feedbackOption = approvalCore.DEFAULT_ALLOW_OPTIONS.find((option) => option.kind === "feedback");
+const feedbackMissing = approvalCore.decisionForOption(feedbackOption);
+const feedbackWithText = approvalCore.decisionForOption(feedbackOption, "  use a safer command  ");
+ok("feedback requires user input instead of echoing the prompt",
+    feedbackMissing.kind === "deny" && feedbackWithText.kind === "feedback" &&
+        feedbackWithText.text === "use a safer command",
+    JSON.stringify({ feedbackMissing, feedbackWithText }));
+const gateFeedbackMissing = approvalJson.parseGateDecision(softRequest, JSON.stringify({
+    event: "gate:decision", version: gateAsk.version, id: softRequest.id, option: "feedback",
+}));
+const gateFeedback = approvalJson.parseGateDecision(softRequest, JSON.stringify({
+    event: "gate:decision", version: gateAsk.version, id: softRequest.id, option: "feedback", input: "  not safe  ",
+}));
+ok("JSON feedback requires and returns user text",
+    gateFeedbackMissing.decision.kind === "deny" && gateFeedback.decision.kind === "feedback" &&
+        gateFeedback.decision.text === "not safe" && typeof gateAsk.require_input === "string" && gateAsk.require_input.length > 0,
+    JSON.stringify({ missing: gateFeedbackMissing, feedback: gateFeedback, require: gateAsk.require_input }));
 const plainChoice = (await load("agent/approval.js")).parseApprovalChoice(softRequest, "1");
 const plainBad = (await load("agent/approval.js")).parseApprovalChoice(softRequest, "99");
 ok("plain approval accepts only a valid numbered option",
@@ -1724,7 +1742,7 @@ ok("facts appended after the projection manifest force a rebuild",
     JSON.stringify({ warnings: staleResume.warnings, last: staleResume.messages.at(-1) }));
 ok("resume restores cwd/provider/model", firstResume.meta.cwd === stage0 && firstResume.meta.providerId === "deepseek" && firstResume.meta.model === "deepseek-v4-pro", JSON.stringify(firstResume.meta));
 ok("projection records active files and last fact sequence", firstResume.projection.activeFiles.length === 1 && firstResume.projection.lastFactSeq > 0);
-ok("projection stays under 20KB", Buffer.byteLength(JSON.stringify(firstResume.projection), "utf8") < 20000);
+ok("projection stays under 200KB", Buffer.byteLength(JSON.stringify(firstResume.projection), "utf8") < 200000);
 const projectionFile = slog.projectionPath(factLog.file);
 ok("projection is written next to the session", existsSync(projectionFile));
 
@@ -1754,7 +1772,22 @@ const hugeProjection = projectionModule.buildProjection([
     { seq: 4, type: "tool_result", id: "r1", tool: "read_file", ok: true, output: "y".repeat(30000) },
     { seq: 5, type: "assistant_raw", content: "done" },
 ], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
-ok("large tool output is clamped in the projection", Buffer.byteLength(JSON.stringify(hugeProjection), "utf8") < 20000);
+ok("large tool output is folded/clamped in the projection", Buffer.byteLength(JSON.stringify(hugeProjection), "utf8") < 200000);
+const hugeText = hugeProjection.messages.map((message) => message.content).join("\n");
+ok("tool payloads are folded to edit facts in the projection",
+    !hugeText.includes("y".repeat(1000)) && /read_file a\.txt → ok/.test(hugeText), hugeText.slice(0, 400));
+const clearedProjection = projectionModule.buildProjection([
+    { seq: 1, type: "session_start", cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" },
+    { seq: 2, type: "user", content: "old question" },
+    { seq: 3, type: "cleared" },
+    { seq: 4, type: "user", content: "new question" },
+], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
+ok("cleared facts reset resumable history", clearedProjection.messages.length === 1 &&
+    clearedProjection.messages[0]?.content === "new question", JSON.stringify(clearedProjection.messages));
+const clearCommand = await load("commands/clear.js");
+let clearCalled = false;
+const clearOutput = clearCommand.clearCommand.run({ actions: { clearHistory: () => { clearCalled = true; } } });
+ok("/clear requests a persisted cleared fact", clearCalled && clearOutput.cleared === true, JSON.stringify(clearOutput));
 
 const showOutput = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "sessions", "show", factLog.id], {
     env: { ...process.env, FASTCODE_HOME: process.env.FASTCODE_HOME },
@@ -1801,6 +1834,10 @@ ok("#5 a tampered pruned projection is rejected with a warning, not silently emp
     JSON.stringify(tamperedPruned.warnings));
 
 const compactionModule = await load("agent/compaction.js");
+const cleanupKeep = join(stage0, "keep-not-a-summary.txt");
+writeFileSync(cleanupKeep, "keep", "utf8");
+compactionModule.removeSummaryFile(cleanupKeep);
+ok("summary cleanup refuses non-summary paths", existsSync(cleanupKeep));
 const longHistory = [{ role: "user", content: "Please fix src/early-file.ts and keep notes in src/early-notes.md" }];
 for (let i = 0; i < 40; i += 1) {
     longHistory.push({ role: "assistant", content: `Step ${i}: edited src/file-${i}.ts and wrote the result.` });
@@ -1819,6 +1856,11 @@ ok("#44 local compaction drops at least 60% of estimated tokens", compactedResul
     `${beforeCompactTokens} -> ${compactedResult.afterTokens}`);
 const compactedText = compactedResult.messages.map((message) => message.content).join("\n");
 ok("#44 summary keeps early file names", compactedResult.summary.includes("src/file-0.ts") && compactedText.includes("src/early-notes.md"), compactedResult.summary.slice(0, 200));
+ok("summary prioritizes notes/outcomes/files before requests/actions",
+    compactedResult.summary.indexOf("## Notes") < compactedResult.summary.indexOf("## Files touched") &&
+        compactedResult.summary.indexOf("## Files touched") < compactedResult.summary.indexOf("## Requests") &&
+        compactedResult.summary.indexOf("## Requests") < compactedResult.summary.indexOf("## Actions"),
+    compactedResult.summary.slice(0, 300));
 ok("#44 summary is under 1500 tokens and written to disk", modelMeta.estTokens(compactedResult.summary, { providerId: "deepseek", model: "deepseek-v4-pro" }) < 1500 &&
     Boolean(compactedResult.summaryFile) && existsSync(compactedResult.summaryFile));
 const heapHistory = Array.from({ length: 20 }, (_value, index) => ({ role: index % 2 === 0 ? "user" : "assistant", content: `turn ${index}` }));
@@ -2230,8 +2272,160 @@ if (process.platform !== "win32") {
     for (let i = 0; i < 3; i += 1)
         await agentTools.runAgentTool({ tool: "shell", command: "echo pooled" }, stage0);
     const afterSpawns = shells.shellPoolStats().spawns;
-    ok("#54 resident shell pool keeps spawns to at most 2", afterSpawns - beforeSpawns <= 2,
+    ok("#54 resident shell pool reuses shells for sequential commands", afterSpawns - beforeSpawns <= 1,
         `${beforeSpawns} -> ${afterSpawns}`);
+
+    shells.shutdownShells();
+    await waitMs(150);
+
+    const stateWarmup = await shells.executeShellCommand("export FC_LEAK_MARK=1; FC_LOCAL=1; umask 0111; set -e", stage0, {
+        timeoutMs: 1000, backgroundAfterMs: 1000, turn: 9101,
+    });
+    const stateProbe = await shells.executeShellCommand(
+        "printf '%s|%s\\n' \"${FC_LEAK_MARK:-none}\" \"${FC_LOCAL:-none}\"; false; echo after-set-e",
+        stage0,
+        { timeoutMs: 1000, backgroundAfterMs: 1000, turn: 9101 },
+    );
+    ok("resident shell state does not leak between commands",
+        stateWarmup.status === "done" && stateProbe.status === "done" &&
+            stateProbe.output.includes("none|none") && /after-set-e/.test(stateProbe.output),
+        JSON.stringify({ stateWarmup, stateProbe }));
+
+    const exitSpawnsBefore = shells.shellPoolStats().spawns;
+    let exitFailures = 0;
+    for (let i = 0; i < 10; i += 1) {
+        const result = await shells.executeShellCommand("exit 0", stage0, {
+            timeoutMs: 1000, backgroundAfterMs: 1000, turn: 9102,
+        });
+        if (result.status !== "done" || result.exitCode !== 0)
+            exitFailures += 1;
+    }
+    const afterExit = await shells.executeShellCommand("echo FINAL_AFTER_10", stage0, {
+        timeoutMs: 1000, backgroundAfterMs: 1000, turn: 9102,
+    });
+    ok("exit 0 reports done and does not exhaust the spawn budget",
+        exitFailures === 0 && afterExit.status === "done" && /FINAL_AFTER_10/.test(afterExit.output) &&
+            shells.shellPoolStats().spawns - exitSpawnsBefore <= 1,
+        JSON.stringify({ exitFailures, afterExit, spawnDelta: shells.shellPoolStats().spawns - exitSpawnsBefore }));
+
+    const bgStale = await shells.executeShellCommand(
+        "node -e \"setTimeout(()=>console.log('STALE_PAYLOAD'), 200)\" & echo done",
+        stage0,
+        { timeoutMs: 2000, backgroundAfterMs: 1000, turn: 9103 },
+    );
+    const nextClean = await shells.executeShellCommand(
+        "node -e \"setTimeout(()=>console.log('next-clean'), 400)\"",
+        stage0,
+        { timeoutMs: 2000, backgroundAfterMs: 1000, turn: 9103 },
+    );
+    ok("late background output does not bleed into the next command",
+        bgStale.status === "done" && /done/.test(bgStale.output) &&
+            nextClean.status === "done" && /next-clean/.test(nextClean.output) && !/STALE_PAYLOAD/.test(nextClean.output),
+        JSON.stringify({ bgStale, nextClean }));
+
+    const queueTurn = 9104;
+    const queueA = shells.executeShellCommand("node -e \"setTimeout(()=>{}, 350)\"", stage0, {
+        timeoutMs: 2000, backgroundAfterMs: 25, turn: queueTurn,
+    });
+    const queueB = shells.executeShellCommand("node -e \"setTimeout(()=>{}, 350)\"", stage0, {
+        timeoutMs: 2000, backgroundAfterMs: 25, turn: queueTurn,
+    });
+    const [queueAResult, queueBResult] = await Promise.all([queueA, queueB]);
+    const queueC = await shells.executeShellCommand("echo queued", stage0, {
+        timeoutMs: 3000, backgroundAfterMs: 1000, turn: queueTurn,
+    });
+    ok("a third command waits for a free resident shell instead of failing",
+        queueAResult.status === "running" && queueBResult.status === "running" &&
+            queueC.status === "done" && /queued/.test(queueC.output),
+        JSON.stringify({ queueAResult, queueBResult, queueC }));
+
+    const topSpawnsBefore = shells.shellPoolStats().spawns;
+    await shells.executeShellCommand("echo top", stage0, { timeoutMs: 1000, backgroundAfterMs: 1000, turn: 9105 });
+    await shells.executeShellCommand("echo top", stage0, { timeoutMs: 1000, backgroundAfterMs: 1000, turn: 9105 });
+    const topSpawnsAfter = shells.shellPoolStats().spawns;
+    ok("echo top is not misclassified as an interactive one-shot",
+        topSpawnsAfter - topSpawnsBefore <= 1, `${topSpawnsBefore} -> ${topSpawnsAfter}`);
+
+    shells.shutdownShells();
+    await waitMs(150);
+    ok("shell pool defaults to two resident slots",
+        shells.shellPoolSize() === 2 && shells.shellPoolStats().maxPool === 2,
+        JSON.stringify(shells.shellPoolStats()));
+    shells.setShellPoolSize(6);
+    const poolTurn = 9106;
+    const poolJobs = [];
+    for (let i = 0; i < 6; i += 1) {
+        poolJobs.push(shells.executeShellCommand('node -e "setTimeout(()=>{}, 800)"', stage0, {
+            timeoutMs: 3000, backgroundAfterMs: 25, turn: poolTurn,
+        }));
+    }
+    const poolResults = await Promise.all(poolJobs);
+    const poolStats = shells.shellPoolStats();
+    ok("shell pool grows to six concurrent residents",
+        poolResults.every((result) => result.status === "running") && poolStats.active === 6 && poolStats.pool === 6,
+        JSON.stringify(poolStats));
+    const queuedOverSix = await shells.executeShellCommand("echo queued-over-six", stage0, {
+        timeoutMs: 3000, backgroundAfterMs: 1000, turn: poolTurn,
+    });
+    ok("a seventh command queues while six shells are busy",
+        queuedOverSix.status === "done" && /queued-over-six/.test(queuedOverSix.output),
+        JSON.stringify(queuedOverSix));
+
+    const killTurn = 9107;
+    const killJobs = [];
+    for (let i = 0; i < 6; i += 1) {
+        killJobs.push(shells.executeShellCommand('node -e "setInterval(()=>{}, 1000)"', stage0, {
+            timeoutMs: 5000, backgroundAfterMs: 25, turn: killTurn,
+        }));
+    }
+    const killResults = await Promise.all(killJobs);
+    shells.shutdownShells();
+    await waitMs(200);
+    const afterShutdown = shells.shellPoolStats();
+    ok("/exit cleanup kills all resident shells",
+        killResults.every((result) => result.status === "running") && afterShutdown.active === 0 && afterShutdown.pool === 0,
+        JSON.stringify(afterShutdown));
+
+    const asyncTurn = 9108;
+    const asyncJobs = [];
+    for (let i = 0; i < 6; i += 1) {
+        asyncJobs.push(shells.executeShellCommand('node -e "setInterval(()=>{}, 1000)"', stage0, {
+            timeoutMs: 5000, backgroundAfterMs: 25, turn: asyncTurn,
+        }));
+    }
+    const asyncResults = await Promise.all(asyncJobs);
+    const asyncPids = shells.listShellSessions()
+        .filter((view) => view.status === "running")
+        .map((view) => view.pid)
+        .filter((pid) => typeof pid === "number");
+    const stopStarted = Date.now();
+    await shells.shutdownShellsAsync(300);
+    const stopElapsed = Date.now() - stopStarted;
+    let aliveAfterAsyncStop = 0;
+    for (const pid of asyncPids) {
+        try {
+            process.kill(pid, 0);
+            aliveAfterAsyncStop += 1;
+        }
+        catch {
+            // Expected: the resident process group is gone.
+        }
+    }
+    const asyncStats = shells.shellPoolStats();
+    ok("shutdownShellsAsync stops resident processes before exit",
+        asyncResults.every((result) => result.status === "running") && asyncPids.length === 6 &&
+            aliveAfterAsyncStop === 0 && asyncStats.active === 0 && asyncStats.pool === 0 && stopElapsed < 2000,
+        JSON.stringify({ asyncPids, aliveAfterAsyncStop, stopElapsed, asyncStats }));
+
+    shells.setShellPoolSize(2);
+    const threadsModule = await load("commands/threads.js");
+    const threadsActions = { setShellPoolSize: (size) => shells.setShellPoolSize(size) };
+    const threadsShow = threadsModule.threadsCommand.run({ args: [], actions: threadsActions });
+    const threadsSet = threadsModule.threadsCommand.run({ args: ["9"], actions: threadsActions });
+    ok("/threads shows the safe default and clamps the maximum to six",
+        /2/.test(threadsShow.message) && shells.shellPoolSize() === 6 && /clamped/.test(threadsSet.message),
+        JSON.stringify({ show: threadsShow.message, set: threadsSet.message }));
+    shells.setShellPoolSize(2);
 }
 delete process.env.FASTCODE_TRUST_ALL;
 shells.shutdownShells();
@@ -2338,7 +2532,10 @@ const compactOutput = compactCommand.compactCommand.run({
     actions: { replaceHistory: (messages) => { compactedHistory = messages; } },
 });
 ok("/compact forces compaction and replaces history", compactedHistory.length > 0 && compactedHistory.length < longHistory.length &&
-    /context compacted/.test(compactOutput.message), compactOutput.message);
+    /context compacted/.test(compactOutput.message) && Boolean(compactOutput.compacted) &&
+    compactOutput.compacted.source === "local" && typeof compactOutput.compacted.summaryRef === "string" &&
+    compactOutput.compacted.reason === "manual",
+    JSON.stringify({ message: compactOutput.message, compacted: compactOutput.compacted }));
 let expandedValue = false;
 const expandCommand = await load("commands/expand.js");
 expandCommand.expandCommand.run({ state: { expanded: false }, actions: { setExpanded: (value) => { expandedValue = value; } } });

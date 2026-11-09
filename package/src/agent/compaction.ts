@@ -1,5 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join, resolve, sep } from "node:path";
 import { estMessagesTokens, estTokens } from "../lib/model-meta.js";
 import { getPaths } from "../config/paths.js";
 import type { ChatMessage } from "../types.js";
@@ -57,6 +57,15 @@ export function compactionConfigFromEnv(): CompactionConfig {
     const heap = Number(process.env["FASTCODE_HEAP_LIMIT_MB"]);
     if (Number.isFinite(heap) && heap > 0)
         config.heapLimitMb = heap;
+    const ratio = Number(process.env["FASTCODE_COMPACTION_RATIO"]);
+    if (Number.isFinite(ratio) && ratio > 0 && ratio < 1)
+        config.localThresholdRatio = ratio;
+    const keepTurns = Number(process.env["FASTCODE_COMPACTION_KEEP_TURNS"]);
+    if (Number.isFinite(keepTurns) && keepTurns > 0)
+        config.keepTurns = Math.floor(keepTurns);
+    const summaryTokens = Number(process.env["FASTCODE_COMPACTION_SUMMARY_TOKENS"]);
+    if (Number.isFinite(summaryTokens) && summaryTokens > 0)
+        config.maxSummaryTokens = Math.floor(summaryTokens);
     const server = (process.env["FASTCODE_SERVER_COMPACTION"] ?? "").trim().toLowerCase();
     if (["1", "true", "yes", "on"].includes(server))
         config.serverCompactionAware = true;
@@ -192,23 +201,31 @@ export function buildSummary(messages: ChatMessage[], config: CompactionConfig, 
         }
         collectFiles(message.content, files);
     }
+    const fileList = Array.from(files);
     const sections = [
         "# Session summary",
         "",
-        "## Requests",
-        ...limitLines(requests, 8).map((line) => `- ${line}`),
-        "",
-        "## Actions",
-        ...limitLines(actions, 20).map((line) => `- ${line}`),
+        // Conclusions first: when the token budget runs out, keep what the
+        // session decided rather than the oldest requests.
+        "## Notes",
+        ...limitLines(notes, 10, "notes").map((line) => `- ${line}`),
         "",
         "## Outcomes",
-        ...limitLines(outcomes, 10).map((line) => `- ${line}`),
+        ...limitLines(outcomes, 10, "outcomes").map((line) => `- ${line}`),
         "",
         "## Files touched",
-        ...(files.size > 0 ? Array.from(files).slice(0, 40).map((file) => `- ${file}`) : ["- (none recorded)"]),
+        ...(fileList.length > 0
+            ? [
+                ...fileList.slice(0, 40).map((file) => `- ${file}`),
+                ...(fileList.length > 40 ? [`- (${fileList.length - 40} more files not listed)`] : []),
+            ]
+            : ["- (none recorded)"]),
         "",
-        "## Notes",
-        ...limitLines(notes, 10).map((line) => `- ${line}`),
+        "## Requests",
+        ...limitLines(requests, 8, "requests").map((line) => `- ${line}`),
+        "",
+        "## Actions",
+        ...limitLines(actions, 20, "actions").map((line) => `- ${line}`),
     ];
     const budget = Math.max(200, Math.floor(config.maxSummaryTokens));
     const kept: string[] = [];
@@ -243,9 +260,7 @@ function collectFiles(text: string, files: Set<string>): void {
     if (!matches)
         return;
     for (const match of matches) {
-        if (match.length <= 3 || match.length > 240)
-            continue;
-        if (/^\d+(\.\d+)+$/.test(match))
+        if (!looksLikeProjectFile(match))
             continue;
         files.add(match);
         if (files.size >= 200)
@@ -253,13 +268,43 @@ function collectFiles(text: string, files: Set<string>): void {
     }
 }
 
-function limitLines(lines: string[], max: number): string[] {
-    return lines.slice(0, max);
+function looksLikeProjectFile(value: string): boolean {
+    if (value.length <= 3 || value.length > 240)
+        return false;
+    if (/^summary-\d/.test(value) || value.includes("//") || value.includes("\\.") || value.startsWith("s/"))
+        return false;
+    if (/^\d+(\.\d+)+$/.test(value))
+        return false;
+    return /\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|py|rs|go|java|kt|kts|c|cc|cpp|h|hpp|sh|bash|zsh|fish|yml|yaml|toml|ini|conf|cfg|env|lock|sql|html|css|scss|sass|less|vue|svelte|rb|php|swift|dart|xml|gradle|properties)$/i.test(value);
+}
+
+function limitLines(lines: string[], max: number, label: string): string[] {
+    if (lines.length <= max)
+        return lines;
+    return [...lines.slice(0, max), `(${lines.length - max} more ${label} not listed)`];
 }
 
 function clip(text: string, max: number): string {
     const oneLine = String(text).replace(/\s+/g, " ").trim();
     return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
+}
+
+/** Delete a summary file only when it is one of our summary-*.md artifacts. */
+export function removeSummaryFile(file?: string): void {
+    if (!file)
+        return;
+    const name = basename(file);
+    if (!/^summary-\d+.*\.md$/i.test(name))
+        return;
+    const sessions = resolve(getPaths().sessions) + sep;
+    if (!resolve(file).startsWith(sessions))
+        return;
+    try {
+        rmSync(file, { force: true });
+    }
+    catch {
+        // Best effort; an orphan summary is not worth failing compaction.
+    }
 }
 
 function writeSummaryFile(summary: string): string | undefined {

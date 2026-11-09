@@ -4,6 +4,6 @@ export const clearCommand = {
     aliases: ["cls"],
     run({ actions }) {
         actions.clearHistory();
-        return { message: "Conversation cleared.", silent: false };
+        return { message: "Conversation cleared.", silent: false, cleared: true };
     },
 };

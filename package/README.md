@@ -16,9 +16,11 @@
 </p>
 
 ```bash
-npm install -g @datename/fastcode-termux@0.1.6-beta
+npm install -g @datename/fastcode-termux@0.1.8-beta.0
 fastcode
 ```
+
+> Registry check (2026-11-09): npm still reports `latest=0.1.6` / `beta=0.1.6-beta`. If `@0.1.8-beta.0` is not resolvable yet, use the repo/portable build or `@0.1.6-beta`.
 
 Short alias included:
 
@@ -26,9 +28,11 @@ Short alias included:
 fc
 ```
 
-This tree is **0.1.7**. The npm registry / GitHub Release assets remain
-**0.1.6-beta** until 0.1.7 is published. Use the repo/portable build for
-the current working tree, or the published beta package.
+This tree is **0.1.8-beta.0**, based on tag `v0.1.7` plus the 2026-11-09
+fixes (shell safety, `/threads`, exit protection, approval feedback,
+compaction/projection, TUI effort, license). It is built and packaged locally
+but not published. The npm registry still reports `latest=0.1.6` /
+`beta=0.1.6-beta` (checked 2026-11-09); `release/` contains 0.1.8-beta.0 assets.
 
 ---
 
@@ -84,7 +88,7 @@ npm link
 ### Global install
 
 ```bash
-npm install -g @datename/fastcode-termux@0.1.6-beta
+npm install -g @datename/fastcode-termux@0.1.8-beta.0
 fastcode
 ```
 
@@ -241,7 +245,28 @@ Installed plugins live under:
 
 ---
 
+## ⌨️ CLI Commands
+
+These subcommands do not start a conversation:
+
+| Command | Action |
+| --- | --- |
+| `fastcode` / `fastcode "prompt"` | open TUI / open with an initial prompt |
+| `fastcode --version` / `-v` / `--help` / `-h` | version / all commands |
+| `fastcode provider [id]` / `model [id]` | list or set default provider / model |
+| `fastcode config` / `config path` | config + paths / config.json path only |
+| `fastcode sessions` / `sessions show <id>` / `resume [id\|latest]` | list / inspect / resume sessions |
+| `fastcode trust [dir]` / `untrust [dir]` / `trusted` / `trust --forget <key>` | trust management |
+| `fastcode skills list\|install <id>\|uninstall <id>\|search <q>` | skill management |
+| `fastcode doctor` / `doctor --net` | diagnostics / probe registry |
+| `fastcode update` | check for updates |
+| `--ui tty\|native\|plain\|json` | approval/render backend |
+
+---
+
 ## 🎮 Slash Commands
+
+These run in the TUI without sending a model request:
 
 | Command | Action |
 | --- | --- |
@@ -261,7 +286,7 @@ Installed plugins live under:
 | `/system [text]` | Show or update system prompt |
 | `/whoami` | Show configured provider keys |
 | `/config` | Print config and paths |
-| `/clear` | Clear conversation |
+| `/clear` (`cls`) | Clear conversation |
 | `/reset` | Reset config |
 | `/about` | Show version and platform |
 | `/context` | Token estimate, compaction threshold, heap |
@@ -269,16 +294,17 @@ Installed plugins live under:
 | `/cancel` | Abort the active run (mobile alternative to Esc) |
 | `/steer <text>` | Guide the next request of an active run |
 | `/jobs` / `/attach <id>` / `/kill <id>` | Background shell sessions |
+| `/threads [1-6]` | Show or set resident shell concurrency (default 2, max 6) |
 | `/expand` | Toggle full/collapsed tool output |
 | `/edit` | Edit the prompt in `$EDITOR` (works around Ink IME bugs) |
 | `/bg` | Explain background shell behaviour |
-| `/exit` | Quit |
+| `/exit` | Abort the active run, kill resident shells, then quit |
 
 Keyboard controls:
 
 ```text
-Esc       cancel streaming
-Ctrl+C    press twice to quit
+Esc       cancel streaming; partial output is kept
+Ctrl+C    during a run: first cancels, second quits; idle: press twice to quit
 ```
 
 ---
@@ -309,9 +335,11 @@ Install Node.js first:
 
 ```bash
 pkg install nodejs
-npm install -g @datename/fastcode-termux@0.1.6-beta
+npm install -g @datename/fastcode-termux@0.1.8-beta.0
 fastcode
 ```
+
+> If npm does not resolve `@0.1.8-beta.0` yet, install the portable bundle or use `@0.1.6-beta`.
 
 If the command is not found, check your npm global binary path:
 
@@ -394,7 +422,7 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits (0.1.7)
+## Safety, sessions and limits (0.1.8-beta.0)
 
 | Feature | Behaviour | Override |
 | --- | --- | --- |
@@ -403,11 +431,12 @@ npm publish --access public
 | Egress policy | application-layer tool/payload/output policy; default audit-only, `enabled:true + mode:"block"` returns `EGRESS_DENY` | `config.egress`: enabled, mode, denyPaths, denyGlobs, denyContentMarkers, maxScanBytes |
 | Unified tool-output cap | Output is truncated while it is produced, not sliced afterwards (default 30000 characters) | FASTCODE_TOOL_OUTPUT_LIMIT |
 | Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash (cache cap 256MB by default) | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
-| Checkpoints/projection | `*.projection.json` (<20KB) with tool/model/cwd fingerprint; unpaired tool calls are completed on resume | FASTCODE_FSYNC, FASTCODE_SESSION_LOG |
+| Checkpoints/projection | `*.projection.json` (~200KB cap) with tool/model/cwd fingerprint; tool payloads folded to edit facts, dropped-message markers, summary markers protected; unpaired tool calls completed on resume | FASTCODE_FSYNC, FASTCODE_SESSION_LOG |
+| Exit save point | `/exit` aborts the run, stops shells, then writes `session_end{reason,compaction}` + projection and best-effort fsyncs both; busy runs require a second `/exit` within 5s; Esc/Ctrl+C keep partial output | `/exit` (`/quit`, `/q`), double Ctrl+C |
 | Patch transaction | parse → plan → apply; CRLF/mode kept; symlinks refused; move never overwrites | `/expand` for the full diff |
-| Process tree | abort or `/kill` kills children/grandchildren | POSIX process group, Windows `taskkill /T` |
-| Compaction | token threshold or heap pressure; summary written to `summary-*.md` | FASTCODE_COMPACTION=0, FASTCODE_HEAP_LIMIT_MB |
-| Background shell | Commands over ~2s return a session id; poll incrementally | `/jobs`, `/attach`, `/kill`, FASTCODE_MAX_SPAWN_PER_TURN |
+| Process tree | abort or `/kill` kills children/grandchildren; `/exit` uses SIGTERM → wait → SIGKILL for resident shells | POSIX process group, Windows `taskkill /T` |
+| Compaction | token/heap threshold; Notes/Outcomes/Files first; summary written to `summary-*.md`; `/compact` records a `compacted` fact; old summaries cleaned | FASTCODE_COMPACTION=0, FASTCODE_COMPACTION_RATIO, FASTCODE_COMPACTION_KEEP_TURNS, FASTCODE_COMPACTION_SUMMARY_TOKENS, FASTCODE_HEAP_LIMIT_MB |
+| Background shell | Commands over ~2s return a session id; poll incrementally. `/threads` caps the **resident** pool (default 2, max 6); one-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget and are not globally capped | `/jobs`, `/attach`, `/kill`, `/threads`, FASTCODE_MAX_SPAWN_PER_TURN |
 | Approval hook | Sensitive/large patches need approval; without a resolver they are denied (fail closed) | pending UI not implemented yet |
 
 ## 🙏 Credits
@@ -418,4 +447,6 @@ npm publish --access public
 
 ## 📜 License
 
-MIT © SimpleLittleDev
+MIT. Original FastCode © 2026 SimpleLittleDev; this fix/Termux adaptation © 2026
+FastCode-Termux contributors. Based on `SimpleLittleDev/FastCode`
+(`@simplelittledev/fastcode` 0.1.3), originally MIT. See `LICENSE`.

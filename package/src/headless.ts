@@ -8,6 +8,7 @@ import { AGENT_SYSTEM_PROMPT } from "./agent/protocol.js";
 import { compactionConfigFromEnv } from "./agent/compaction.js";
 import { resolveToolProtocol } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
+import { setShellPoolSize } from "./agent/shell-session.js";
 import { toolSchemas } from "./agent/tool-schemas.js";
 import { encodeGateAsk, parseGateDecision } from "./agent/approval-json.js";
 import { decisionForOption, parseApprovalChoice, type ApprovalDecision, type ApprovalRequest } from "./agent/approval.js";
@@ -37,6 +38,7 @@ function optionalBudget(name: string): number | undefined {
 
 export async function runHeadless(options: HeadlessOptions): Promise<void> {
     const config = loadConfig();
+    setShellPoolSize(config.shellPoolSize);
     const provider = getProviderOrThrow(config.providerId);
     let apiKey: string | undefined;
     if (provider.authEnv.length > 0) {
@@ -108,7 +110,17 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         process.stderr.write(`Choose 1-${request.options.length}: `);
         const line = await nextLine(request.timeoutMs ?? 60_000);
         const option = line === undefined ? undefined : parseApprovalChoice(request, line);
-        return option ? decisionForOption(option) : { kind: "deny", reason: "approval cancelled/invalid/timeout" };
+        if (!option)
+            return { kind: "deny", reason: "approval cancelled/invalid/timeout" };
+        if (option.kind === "feedback") {
+            process.stderr.write(`${option.prompt || "Why should this be denied?"}\n> `);
+            const feedbackLine = await nextLine(request.timeoutMs ?? 60_000);
+            const feedback = feedbackLine?.trim();
+            return feedback
+                ? { kind: "feedback", text: feedback }
+                : { kind: "deny", reason: "feedback cancelled/empty (fail closed)" };
+        }
+        return decisionForOption(option);
     };
 
     const abort = new AbortController();
