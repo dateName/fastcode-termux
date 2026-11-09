@@ -9,7 +9,7 @@
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> **0.1.8-beta.0** is the current working tree, based on tag `v0.1.7` (`be6e604`) plus the 2026-11-09 fixes (shell safety, `/threads`, exit protection, approval feedback, compaction/projection, TUI effort, license). It is **built and packaged locally** (`release/` now contains 0.1.8-beta.0 assets) but **not published**; the npm registry still reports `latest=0.1.6` / `beta=0.1.6-beta` (checked 2026-11-09).
+> **0.1.8-beta.0** is the current working tree, based on tag `v0.1.7` (`be6e604`) plus the 2026-11-09 fixes (shell safety, `/threads`, exit protection, approval feedback, compaction/projection, TUI effort, license). It is **built and packaged locally** (`release/` now contains 0.1.8-beta.0 assets) but **not published**; the npm registry still reports `latest=0.1.6` / `beta=0.1.8-beta.0` (checked 2026-11-09).
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
