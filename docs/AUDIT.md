@@ -190,4 +190,4 @@ provider 级 Key 复用、v1/v2 迁移。
 - 命令内再起的后台子进程不计入 resident/one-shot 预算。
 - ReDoS 执行超时、写路径 TOCTOU、egress 未覆盖出口、Tier 3 备份前置等仍按 `CONFIGURATION.md`/`ARCHITECTURE.md` 所列边界处理。
 
-验证：Windows `npm test` **282/282**（POSIX 专属用例跳过）；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 资产；手工核对 one-shot 记账、`/threads` clamp、`session_end` 保存口与 `shutdownShellsAsync`。Termux/POSIX 真机待复跑。
+验证：Windows `npm test` **282/282**（POSIX 专属用例跳过）；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 资产；npm `beta=0.1.8-beta.0`；手工核对 one-shot 记账、`/threads` clamp、`session_end` 保存口与 `shutdownShellsAsync`。Termux/POSIX 真机待复跑。

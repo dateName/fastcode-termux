@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前工作树：**0.1.8-beta.0**（基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包，未发布）；历史条目中的 0.1.6-beta 保持不变
+> 当前工作树：**0.1.8-beta.0**（基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包并发布 npm beta；GitHub Release 资产待补）；历史条目中的 0.1.6-beta 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -506,9 +506,9 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 
 ---
 
-## 0.1.8-beta.0（2026-11-09，未发布）
+## 0.1.8-beta.0（2026-11-09，npm beta 已发布）
 
-> `package/package.json` = `0.1.8-beta.0`；基于 tag `v0.1.7`（`be6e604`）+ 本节修复。已本地 build/打包，尚未发布；`release/` 已为 0.1.8-beta.0 资产，npm registry 最近查询仍为 0.1.6 / 0.1.6-beta。
+> `package/package.json` = `0.1.8-beta.0`；基于 tag `v0.1.7`（`be6e604`）+ 本节修复。已本地 build/打包，并发布到 npm 的 `beta` tag；`release/` 已为 0.1.8-beta.0 资产，npm `beta=0.1.8-beta.0`、`latest` 仍为 0.1.6。
 
 ### 0.1.7 tag 之后的工作树修复
 
@@ -588,4 +588,4 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 
 - Windows：`npm test` **282/282**；`verify-artifacts` 通过（`dist/cli.js` + `dist/agent/guards.js` 5 个标记，bundle 2,150,507 B）。
 - 打包：`release/` 已生成 `fastcode-portable-0.1.8-beta.0.tar.gz|zip`、`datename-fastcode-termux-0.1.8-beta.0.tgz`、`SHA256SUMS`。
-- 发布：GitHub/npm 尚未发布；npm registry 仍为 0.1.6 / 0.1.6-beta。Termux 真机未复跑。
+- 发布：npm 已发布 `beta=0.1.8-beta.0`（`latest` 仍为 0.1.6）；GitHub tag/main 已推送，但 GitHub Release 二进制资产因 Actions billing 锁定待补。Termux 真机未复跑。

@@ -1,6 +1,6 @@
 # FastCode 架构说明
 
-> 版本：0.1.8-beta.0（工作树；基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包，未发布）
+> 版本：0.1.8-beta.0（工作树；基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包并发布 npm beta；GitHub Release 资产待补）
 > 适用：`package/src` 当前源码树与 `dist/cli.js` 构建产物
 > 维护：改模块、命令、环境变量或安全语义时同步本文件
 
@@ -139,7 +139,7 @@
 - esbuild 输出自包含 `dist/cli.js`；`highlight.js` 裁剪为常用语言子集；`bash-parser` 纯 JS。
 - 便携包必须包含 `bash-parser` 依赖闭包，否则真机 smoke 直接加载 dist 模块会失败。
 - 发布态已知缺口：`package.json.files` 不含 `scripts/`，`npm test` 指向 `../scripts/smoke-test.mjs`；发布前需纳入打包或改测试入口。`.github/workflows/release.yml` 只在 tag/手动触发，PR 门禁尚未新增。
-- 当前工作树 = **0.1.8-beta.0**（基于 tag `v0.1.7` / `be6e604` + 2026-11-09 修复）；已本地 `npm run build` + `sh scripts/build-portable.sh`，`release/` 为 0.1.8-beta.0 资产。npm registry 2026-11-09 仍为 0.1.6/0.1.6-beta，尚未发布。
+- 当前工作树 = **0.1.8-beta.0**（基于 tag `v0.1.7` / `be6e604` + 2026-11-09 修复）；已本地 `npm run build` + `sh scripts/build-portable.sh`，`release/` 为 0.1.8-beta.0 资产；npm 已发布 `beta=0.1.8-beta.0`、`latest` 仍为 0.1.6。GitHub Release 二进制资产因 Actions billing 锁定待补。
 - 不提交/发布本工作树的改动，除非用户明确授权。
 
 ## 11. 安全边界

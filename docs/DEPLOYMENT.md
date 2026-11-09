@@ -3,9 +3,9 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
-> 当前工作树版本：**0.1.8-beta.0**（基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包，尚未发布）。
-> `release/` 已含 0.1.8-beta.0 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`。
-> npm registry 截至 2026-11-09 仍显示 `latest=0.1.6` / `beta=0.1.6-beta`；npm 同步确认前请用仓库、便携包或已发布的 `0.1.6-beta`。
+> 当前工作树版本：**0.1.8-beta.0**（基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包，并发布到 npm 的 `beta` tag；`latest` 仍为 0.1.6）。
+> `release/` 已含 0.1.8-beta.0 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；GitHub Release 二进制资产因 Actions billing 锁定待补。
+> npm registry 已发布 `beta=0.1.8-beta.0`；`latest` 仍为 `0.1.6`。GitHub Release 二进制资产因 Actions billing 锁定待补。
 > GitHub Release 与 npm 的实际同步以外部查询为准；后续发布仍需单独授权 tag/Release/npm publish。
 
 ## 0. 先确认 Node 与 git

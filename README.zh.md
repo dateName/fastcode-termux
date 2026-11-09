@@ -9,7 +9,7 @@
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> 当前工作树为 **0.1.8-beta.0**，基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复（shell 安全、`/threads`、退出保护、审批 feedback、压缩/投影、TUI effort、版权）；**已在本地 build 并打包**（`release/` 现为 0.1.8-beta.0 资产），**尚未发布**；npm registry 截至 2026-11-09 仍显示 `latest=0.1.6` / `beta=0.1.6-beta`。
+> 当前工作树为 **0.1.8-beta.0**，基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复（shell 安全、`/threads`、退出保护、审批 feedback、压缩/投影、TUI effort、版权）；已在本地 build/打包，并**发布到 npm 的 `beta` tag**（`latest` 仍是 0.1.6）。GitHub Release 二进制资产仍待处理（Actions 因账号 billing 锁定失败），本地 `release/` 资产完整。
 
 **English → [README.md](README.md)**
 
@@ -103,7 +103,7 @@ termux-setup-storage     # 让 agent 能访问 ~/storage/shared（手机项目/�
 
 按推荐优先级排列。仓库内已提交 **自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等依赖全部打进单文件），因此克隆后**无需 `npm install`** 即可运行。
 
-从 npm 安装：registry 显示 `0.1.8-beta.0` 后即可 `npm install -g @datename/fastcode-termux@0.1.8-beta.0`；在此之前已发布的是 `0.1.6`（dist-tag `latest`）与 `0.1.6-beta`（`beta`）。`release/` 已是 0.1.8-beta.0 资产。
+从 npm 安装：`npm install -g @datename/fastcode-termux@0.1.8-beta.0`（或 `@beta`）；`latest` 仍是 0.1.6。`release/` 也已是 0.1.8-beta.0 资产。
 
 > ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 

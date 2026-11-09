@@ -2,10 +2,10 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.8-beta.0（开发版，未发布）
+## 0.1.8-beta.0（npm beta 已发布）
 
-> 状态：`package/package.json` = `0.1.8-beta.0`；工作树基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复；已在本地 build/打包，尚未发布。
-> `release/` 已含 0.1.8-beta.0 tar.gz/zip/tgz/SHA256SUMS；npm registry 最近查询仍为 `0.1.6` / `0.1.6-beta`。
+> 状态：`package/package.json` = `0.1.8-beta.0`；工作树基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复；已在本地 build/打包，并发布到 npm 的 `beta` tag。
+> `release/` 已含 0.1.8-beta.0 tar.gz/zip/tgz/SHA256SUMS；npm `beta=0.1.8-beta.0`，`latest` 仍为 0.1.6。GitHub Release 二进制资产因 Actions billing 锁定待补。
 > 本版本重点：shell 会话安全与 resident 并发、Esc/Ctrl+C//exit 中断保护、审批 feedback 输入、工具压缩流/投影恢复、版权合规、TUI effort 修复。
 
 ### Shell / 并发 / 退出
@@ -29,7 +29,7 @@
 
 ### 验证与未完成
 - `typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过。
-- 已生成 `release/` 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`；尚未发布到 GitHub/npm。Termux 真机未复跑。
+- 已生成 `release/` 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`；npm 已发布 `beta=0.1.8-beta.0`；GitHub Release 二进制资产因 Actions billing 锁定待补。Termux 真机未复跑。
 - 仍未完成：跨会话孤儿 summary 全局 GC、全局并发上限/统一排队、`contextBudgetChars` 死字段、server-aware 实际接线、Termux 真机复跑。
 
 ## 0.1.7（2026-11-07 发布）

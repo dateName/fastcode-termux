@@ -201,9 +201,9 @@
 - npm：2026-11-09 查询 registry 仍为 `latest=0.1.6` / `beta=0.1.6-beta`；npm 侧同步待再次核对。
 - 未完成：PR CI 门禁、`/egress` 命令、ProxyAgent 代理、Tier 3、写路径 TOCTOU 复核、ReDoS 隔离；`bench` / `verify:artifacts` 脚本未注册到 `package.json`。
 
-## 0.1.8-beta.0（2026-11-09，未发布）
+## 0.1.8-beta.0（2026-11-09，npm beta 已发布）
 
-> 基于 0.1.7 tag 之后的工作树修复；已本地 build/打包，尚未发布。包含 shell 会话、并发、退出保护、审批 feedback、压缩/投影、TUI 与版权。
+> 基于 0.1.7 tag 之后的工作树修复；已本地 build/打包，并发布到 npm 的 `beta` tag。包含 shell 会话、并发、退出保护、审批 feedback、压缩/投影、TUI 与版权。
 
 ### 常驻 shell 会话修复（0.1.7 tag 之后）
 
@@ -231,5 +231,5 @@
 - ⑲ `/context` 使用实际 env 配置；新增 `FASTCODE_COMPACTION_RATIO` / `KEEP_TURNS` / `SUMMARY_TOKENS`。
 - ⑳ 版权合规：根 `LICENSE` + `package/LICENSE` 保留原始 `Copyright (c) 2026 SimpleLittleDev` 与 MIT 全文，补 FastCode-Termux 自有版权行、上游来源与修改说明；README/package README 增加 License 段。
 - ㉑ 文档补全：README / README.zh / package README 增加完整 CLI 子命令、TUI 斜杠命令与设置入口；`docs/CONFIGURATION.md` §8 为速查（含 `/threads`、`/steer`、trust/skills/sessions/doctor/update）。
-- 验证：`typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`。
+- 验证：`typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`；npm `beta=0.1.8-beta.0`。
 - 额外手工核对：审批 feedback 源码逻辑、压缩/投影（`/compact` 元数据、摘要顺序、cleared、工具折叠、summary 安全删除）、`session_end` 保存口、Windows one-shot 异步停止、one-shot `active=1/pool=0/maxPool=2/maxSpawnPerTurn=8`、第 9 个 one-shot spawn limit、msys `sh -s` 的 `exit 0`/状态隔离/`set -e`。Termux 真机待复跑。

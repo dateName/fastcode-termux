@@ -20,7 +20,7 @@ npm install -g @datename/fastcode-termux@0.1.8-beta.0
 fastcode
 ```
 
-> Registry check (2026-11-09): npm still reports `latest=0.1.6` / `beta=0.1.6-beta`. If `@0.1.8-beta.0` is not resolvable yet, use the repo/portable build or `@0.1.6-beta`.
+> Registry check: `beta=0.1.8-beta.0` is published; `latest` remains `0.1.6`. Install with `@0.1.8-beta.0` or `@beta`.
 
 Short alias included:
 
@@ -30,9 +30,10 @@ fc
 
 This tree is **0.1.8-beta.0**, based on tag `v0.1.7` plus the 2026-11-09
 fixes (shell safety, `/threads`, exit protection, approval feedback,
-compaction/projection, TUI effort, license). It is built and packaged locally
-but not published. The npm registry still reports `latest=0.1.6` /
-`beta=0.1.6-beta` (checked 2026-11-09); `release/` contains 0.1.8-beta.0 assets.
+compaction/projection, TUI effort, license). It is built, packaged locally,
+and published to npm under the `beta` tag; npm `latest` remains 0.1.6.
+GitHub Release binary assets are still pending (Actions billing block);
+`release/` contains 0.1.8-beta.0 assets.
 
 ---
 
@@ -339,7 +340,7 @@ npm install -g @datename/fastcode-termux@0.1.8-beta.0
 fastcode
 ```
 
-> If npm does not resolve `@0.1.8-beta.0` yet, install the portable bundle or use `@0.1.6-beta`.
+> `beta=0.1.8-beta.0` is published; `latest` remains 0.1.6.
 
 If the command is not found, check your npm global binary path:
 

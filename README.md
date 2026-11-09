@@ -9,7 +9,7 @@
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> **0.1.8-beta.0** is the current working tree, based on tag `v0.1.7` (`be6e604`) plus the 2026-11-09 fixes (shell safety, `/threads`, exit protection, approval feedback, compaction/projection, TUI effort, license). It is **built and packaged locally** (`release/` now contains 0.1.8-beta.0 assets) but **not published**; the npm registry still reports `latest=0.1.6` / `beta=0.1.6-beta` (checked 2026-11-09).
+> **0.1.8-beta.0** is the current working tree, based on tag `v0.1.7` (`be6e604`) plus the 2026-11-09 fixes (shell safety, `/threads`, exit protection, approval feedback, compaction/projection, TUI effort, license). It is built and packaged locally, and **published to npm under the `beta` tag** (`latest` remains 0.1.6). GitHub Release binary assets are still pending because the Actions job is blocked by an account billing issue; local `release/` assets are complete.
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
@@ -105,7 +105,7 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-From npm: install `@0.1.8-beta.0` once the registry shows it; until then the published versions are `0.1.6` (dist-tag `latest`) and `0.1.6-beta` (`beta`). The tracked `release/` now contains 0.1.8-beta.0 assets.
+From npm: `npm install -g @datename/fastcode-termux@0.1.8-beta.0` (or `@beta`); `latest` remains 0.1.6. The tracked `release/` also contains 0.1.8-beta.0 assets.
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
