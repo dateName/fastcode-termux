@@ -20,7 +20,7 @@ npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
-> Registry check: `beta=0.1.8-beta.0` is published; `latest` remains `0.1.6`. The working tree is `0.1.8-beta.1` (not yet published); install `@beta` until beta.1 is released.
+> Registry check: install `@beta`; run `npm view @datename/fastcode-termux dist-tags` for the currently published versions (`latest` remains the stable line). The working tree may be ahead of the registry.
 
 Short alias included:
 
@@ -30,9 +30,9 @@ fc
 
 This tree is **0.1.8-beta.1**, based on 0.1.8-beta.0 plus the 2026-11-15
 audit/backend/failure/structure batch. It is built locally but not yet
-packaged or published; npm `beta` remains 0.1.8-beta.0 (`latest` remains
-0.1.6). GitHub Release binary assets are still pending (Actions billing
-block); `release/` currently contains 0.1.8-beta.0 assets.
+packaged or published; the npm `beta` tag and `release/` may lag the
+working tree. GitHub Release binary assets are still pending (Actions
+billing block).
 
 ---
 
@@ -339,7 +339,7 @@ npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
-> `beta=0.1.8-beta.0` is published; `latest` remains 0.1.6.
+> Install `@beta`; run `npm view @datename/fastcode-termux dist-tags` for the published versions.
 
 If the command is not found, check your npm global binary path:
 
@@ -422,7 +422,7 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits (0.1.8-beta.1)
+## Safety, sessions and limits
 
 | Feature | Behaviour | Override |
 | --- | --- | --- |

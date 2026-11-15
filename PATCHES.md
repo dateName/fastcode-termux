@@ -1,6 +1,6 @@
 # FastCode 0.1.3 → 0.1.8-beta.1 修复清单
 
-> 0.1.8-beta.1 = 0.1.8-beta.0 工作树 + 2026-11-15 审计/执行后端/失败语义/结构治理；`release/` 与 npm `beta` 仍为 0.1.8-beta.0。
+> 本版 = 0.1.8-beta.0 工作树 + 2026-11-15 审计/执行后端/失败语义/结构治理；`release/` 与 npm `beta` 仍是上一批资产。
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树

@@ -174,12 +174,14 @@
 | scripts/install.sh / install-termux.sh | 软链 dist/cli.js 到 $PREFIX/bin |
 | scripts/build-portable.sh | release/ tar.gz/zip + npm pack + SHA256SUMS |
 | scripts/update-termux.sh | 目录/git/npm 更新 |
-| scripts/smoke-test.mjs | 回归（PC 115 项；Termux 120 项，含 POSIX-only） |
+| scripts/smoke-test.mjs | 回归（当前 PC 325 项；Termux 281 项为历史，待复跑） |
+| scripts/version-anchors.mjs | 只读扫描当前 package 版本的所有文本锚点；升级版本后用它核对 |
 | .github/workflows/release.yml | v* tag：构建资产、GitHub Release、npm publish |
 
 ## 测试与验证
 
 - `npm run typecheck` / `npm run lint` / `npm run build`
-- `node scripts/smoke-test.mjs`：110+ 行为断言（runner、预算、循环、工具契约、
-  retry/SSE、checkpoint/projection、compaction、patch、shell、native tools、命令、doctor）。
+- `node scripts/smoke-test.mjs`：当前 **325** 项行为断言（runner、预算、循环、工具契约、
+  retry/SSE、checkpoint/projection、compaction、patch、shell、native tools、命令、doctor、错误语义、方言）。
+- `node scripts/version-anchors.mjs`：列出当前版本的文本锚点；版本升级后核对是否只改允许位置。
 - Termux 真机额外验证：进程组 kill、/sdcard fsync、#50/#51/#54、TUI `/context`、`/edit`。

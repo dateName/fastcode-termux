@@ -142,7 +142,7 @@
 - esbuild 输出自包含 `dist/cli.js`；`highlight.js` 裁剪为常用语言子集；`bash-parser` 纯 JS。
 - 便携包必须包含 `bash-parser` 依赖闭包，否则真机 smoke 直接加载 dist 模块会失败。
 - 发布态已知缺口：`package.json.files` 不含 `scripts/`，`npm test` 指向 `../scripts/smoke-test.mjs`；发布前需纳入打包或改测试入口。`.github/workflows/release.yml` 只在 tag/手动触发，PR 门禁尚未新增。
-- 当前工作树 = **0.1.8-beta.1**（基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理）；已本地 `npm run build`，`release/` 仍为 0.1.8-beta.0 资产；npm `beta=0.1.8-beta.0`、`latest` 仍为 0.1.6；0.1.8-beta.1 的打包/发布待单独执行。GitHub Release 二进制资产因 Actions billing 锁定待补。
+- 当前工作树版本见 `package/package.json`（基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理）；已本地 `npm run build`；`release/` 与 npm `beta` 仍是上一批资产（`latest` 仍为 0.1.6）；本版本打包/发布待单独执行。GitHub Release 二进制资产因 Actions billing 锁定待补。
 - 不提交/发布本工作树的改动，除非用户明确授权。
 
 ## 11. 安全边界
@@ -165,8 +165,8 @@ git diff --check
 
 当前基线（2026-11-15 复核；PC 为当日复跑，Termux 为 2026-11-06 真机记录）：
 
-- PC：**325/325**（0.1.8-beta.1 工作树本地 build；Windows；POSIX 专属用例跳过）
-- Termux 真机：281/281（历史；2026-11-06 tag 前记录；0.1.8-beta.1 新增用例待复跑）
+- PC：**325/325**（当前工作树本地 build；Windows；POSIX 专属用例跳过）
+- Termux 真机：281/281（历史；2026-11-06 tag 前记录；当前工作树新增用例待复跑）
 - bench（Windows / Node v24.20.0）：cold start 143.74ms、write 200KB 8.86ms、read_many 10×200KB 26.04ms、list 1000 68.19ms、grep 1000 630.06ms
 - bench（Termux / Node v26.4.0）：cold start 893.13ms、write 200KB 32.78ms、read_many 10×200KB 82.57ms、list 1000 153.18ms、grep 1000 865.73ms
 - 回滚演练：`git archive HEAD` 临时目录中的旧 bundle 可启动（`--version` 正常）

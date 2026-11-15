@@ -9,7 +9,7 @@
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> 当前工作树为 **0.1.8-beta.1**，基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理；已本地 build，但**未打包、未发布**；npm `beta` 仍是 0.1.8-beta.0（`latest` 仍是 0.1.6），`release/` 仍是 0.1.8-beta.0 资产。GitHub Release 二进制资产仍待处理（Actions 因账号 billing 锁定失败）。
+> 当前工作树（见上方版本）基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理；已本地 build，但**未打包、未发布**；npm `beta` 与 `release/` 可能落后于工作树。GitHub Release 二进制资产仍待处理（Actions 因账号 billing 锁定失败）。
 
 **English → [README.md](README.md)**
 
@@ -73,7 +73,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 🛑 进程树/退出 | abort/`/kill` 杀子进程与孙进程；`/exit` 中止当前运行并清理所有 resident shell；SIGTERM/SIGHUP/fatal 同样清理 | POSIX 进程组；`lib/lifecycle.ts`；Windows `taskkill /T` |
 | 🔐 审批钩子 | Soft Gate 与敏感/大补丁生成 pending 请求；无 resolver 时 **拒绝**（fail closed） | `--ui tty\|native\|plain\|json`；once/session/always；`fastcode trust --forget <key>` |
 
-### 已知限制（0.1.8-beta.1）
+### 已知限制
 
 - Ink 5.x 的 IME 光标定位未彻底修复；Termux pty 尺寸异常时可能裁切/乱序（`abcdef` → `bcdefa`）。
   用 `stty` 修正 pty，或用 `/edit`；彻底修需 Ink ≥6.7。
@@ -107,7 +107,7 @@ termux-setup-storage     # 让 agent 能访问 ~/storage/shared（手机项目/�
 
 按推荐优先级排列。仓库内已提交 **自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等依赖全部打进单文件），因此克隆后**无需 `npm install`** 即可运行。
 
-从 npm 安装：`npm install -g @datename/fastcode-termux@beta`（registry 目前仍是 0.1.8-beta.0，待 0.1.8-beta.1 发布）；`latest` 仍是 0.1.6。`release/` 目前仍是 0.1.8-beta.0 资产。
+从 npm 安装：`npm install -g @datename/fastcode-termux@beta`（registry 的 `beta` 可能落后于工作树；用 `npm view @datename/fastcode-termux dist-tags` 查看已发布版本）；`latest` 仍是 0.1.6。`release/` 也可能落后于工作树。
 
 > ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 
@@ -124,15 +124,15 @@ fastcode          # 直接可用（短别名 fc）
 
 ### 方式二：便携版（无需 npm）
 
-0.1.8-beta.0 发布构建后，到 Releases 下载 `fastcode-portable-0.1.8-beta.0.tar.gz`（校验见 `SHA256SUMS`），解压即用：
+发布构建后，到 Releases 下载 `fastcode-portable-<version>.tar.gz`（校验见 `SHA256SUMS`），解压即用：
 
 ```bash
-tar -xzf fastcode-portable-0.1.8-beta.0.tar.gz
-cd fastcode-portable-0.1.8-beta.0
+tar -xzf fastcode-portable-<version>.tar.gz
+cd fastcode-portable-<version>
 ./fastcode
 ```
 
-> `release/` 目前含 0.1.8-beta.0 资产（`fastcode-portable-0.1.8-beta.0.tar.gz|zip`、`datename-fastcode-termux-0.1.8-beta.0.tgz`、`SHA256SUMS`），由 `npm run build` + `sh scripts/build-portable.sh` 生成；在 0.1.8-beta.1 工作树上运行同一脚本会生成 `*-0.1.8-beta.1.*`。
+> `release/` 可能落后于工作树；`npm run build` + `sh scripts/build-portable.sh` 会按当前 `package.json` 版本生成 `fastcode-portable-<version>.tar.gz|zip`、`datename-fastcode-termux-<version>.tgz` 与 `SHA256SUMS`。
 
 ### 方式三：从源码运行（仅在你要改源码 / 重新构建时）
 
@@ -254,7 +254,7 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | 如何更新 | `cd ~/fastcode && git pull && bash scripts/install.sh`（单跑 install.sh 不会拉取） |
 | npm 安装后行为旧 / 报错 | npm registry 可能落后于仓库 —— 暂时优先用克隆或便携版；`fastcode update` 会比较版本 |
 | 提示 requires a TTY | 要在**真实终端**运行；管道或某些远程工具会触发，Termux 正常 |
-| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认版本为 0.1.8-beta.1） |
+| 单按 Ctrl+C 就退出 | 已修复：单按只提示，再按一次才退（确认构建包含该修复） |
 | 命令被拦截 | 那是危险命令保护；确认无误可临时 `export FASTCODE_ALLOW_DANGEROUS=1` |
 
 ---
@@ -302,12 +302,12 @@ sh scripts/build-portable.sh
 产物在 `release/`：
 
 ```text
-fastcode-portable-0.1.8-beta.0.tar.gz       当前发布：免安装便携包（自包含单文件）
-fastcode-portable-0.1.8-beta.0.zip          当前发布：同上（需系统有 zip）
-datename-fastcode-termux-0.1.8-beta.0.tgz   当前发布：npm 包（npm pack）
-SHA256SUMS                                  以上文件的校验和
+fastcode-portable-<version>.tar.gz       免安装便携包（自包含单文件）
+fastcode-portable-<version>.zip          同上（需系统有 zip）
+datename-fastcode-termux-<version>.tgz   npm 包（npm pack）
+SHA256SUMS                               以上文件的校验和
 
-# 在 0.1.8-beta.1 工作树上运行同一命令会生成 *-0.1.8-beta.1.* 文件。
+# <version> 取自 package/package.json。
 ```
 
 ### 发布 npm
@@ -325,16 +325,16 @@ npm publish --access public --tag beta
 推荐用 CI 自动发布（`.github/workflows/release.yml`）：打 tag 即可
 
 ```bash
-git tag v0.1.8-beta.1
-git push origin v0.1.8-beta.1        # 触发 Actions：构建 + 打包 + 上传 Release
+git tag v<version>
+git push origin v<version>        # 触发 Actions：构建 + 打包 + 上传 Release
 ```
 
 也可手动：
 
 ```bash
-gh release create v0.1.8-beta.1 -t "FastCode 0.1.8-beta.1" \
-  release/fastcode-portable-0.1.8-beta.1.tar.gz \
-  release/datename-fastcode-termux-0.1.8-beta.1.tgz \
+gh release create v<version> -t "FastCode <version>" \
+  release/fastcode-portable-<version>.tar.gz \
+  release/datename-fastcode-termux-<version>.tgz \
   release/SHA256SUMS
 ```
 
@@ -356,10 +356,10 @@ gh release create v0.1.8-beta.1 -t "FastCode 0.1.8-beta.1" \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块、数据流 |
 | [docs/MODULES.md](docs/MODULES.md) | 每个文件干什么 |
 | [docs/AUDIT.md](docs/AUDIT.md) | 安全审计结论 |
-| [docs/DEVLOG.md](docs/DEVLOG.md) | 0.1.8-beta.1 改动日志、迁移、风险与回滚 |
+| [docs/DEVLOG.md](docs/DEVLOG.md) | 改动日志、迁移、风险与回滚 |
 | [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta 交接报告（历史） |
-| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（0.1.8-beta.1；0.1.8-beta.0 / 0.1.7 / 0.1.6-beta 为历史） |
-| [PATCHES.md](PATCHES.md) | 上游修复 + 0.1.8-beta.1 harness 改造 |
+| [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（含历史版本） |
+| [PATCHES.md](PATCHES.md) | 上游修复 + harness 改造 |
 
 ---
 
@@ -388,4 +388,4 @@ MIT。原始 FastCode © 2026 SimpleLittleDev；本修复/Termux 适配 © 2026 
 本项目基于 `SimpleLittleDev/FastCode`（`@simplelittledev/fastcode` 0.1.3），原项目采用 MIT。
 完整文本见 [LICENSE](LICENSE)。
 
-<sub>Made for Termux 🐧📱 · FastCode 0.1.8-beta.1</sub>
+<sub>Made for Termux 🐧📱 · FastCode</sub>
