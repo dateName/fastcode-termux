@@ -20,7 +20,7 @@ npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
-> Registry check: install `@beta`; run `npm view @datename/fastcode-termux dist-tags` for the currently published versions (`latest` remains the stable line). The working tree may be ahead of the registry.
+> The `beta` tag carries this version; `latest` remains the stable line. Install with `@beta` (or `@<version>`).
 
 Short alias included:
 
@@ -29,9 +29,10 @@ fc
 ```
 
 This tree is **0.1.8-beta.1**, based on 0.1.8-beta.0 plus the 2026-11-15
-audit/backend/failure/structure batch. It is built and packaged locally;
-npm publishing and the GitHub Release are still pending (Actions billing
-block). The tracked `release/` contains the current version assets.
+audit/backend/failure/structure batch. It is built and packaged locally and
+published to npm under the `beta` tag; the GitHub Release is still pending
+(Actions billing block). The tracked `release/` contains the current version
+assets.
 
 ---
 
@@ -338,7 +339,7 @@ npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
-> Install `@beta`; run `npm view @datename/fastcode-termux dist-tags` for the published versions.
+> Install `@beta`; the `beta` tag carries this version, `latest` remains the stable line.
 
 If the command is not found, check your npm global binary path:
 

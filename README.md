@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Version | **0.1.8-beta.1** (working tree; tag `v0.1.7` assets; npm `beta` still 0.1.8-beta.0, `latest` still 0.1.6) |
+| Version | **0.1.8-beta.1** (working tree; npm `beta` = this version; `latest` still 0.1.6) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> This working tree (see **Version** above) is based on 0.1.8-beta.0 plus the 2026-11-15 audit/backend/failure/structure batch. It is built and packaged locally; npm publishing and the GitHub Release are still pending. GitHub Actions remain blocked by an account billing issue.
+> This working tree (see **Version** above) is based on 0.1.8-beta.0 plus the 2026-11-15 audit/backend/failure/structure batch. It is built and packaged locally and **published to npm under the `beta` tag**; the GitHub Release is still pending because GitHub Actions remain blocked by an account billing issue.
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
@@ -109,7 +109,7 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-From npm: `npm install -g @datename/fastcode-termux@beta` (the registry tag may lag the working tree; run `npm view @datename/fastcode-termux dist-tags` for the published version); `latest` remains 0.1.6. The tracked `release/` contains the current version assets.
+From npm: `npm install -g @datename/fastcode-termux@beta` (the `beta` tag now carries this version; `latest` remains 0.1.6). The tracked `release/` contains the current version assets.
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 

@@ -142,7 +142,7 @@
 - esbuild 输出自包含 `dist/cli.js`；`highlight.js` 裁剪为常用语言子集；`bash-parser` 纯 JS。
 - 便携包必须包含 `bash-parser` 依赖闭包，否则真机 smoke 直接加载 dist 模块会失败。
 - 发布态已知缺口：`package.json.files` 不含 `scripts/`，`npm test` 指向 `../scripts/smoke-test.mjs`；发布前需纳入打包或改测试入口。`.github/workflows/release.yml` 只在 tag/手动触发，PR 门禁尚未新增。
-- 当前工作树版本见 `package/package.json`（基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理）；已本地 `npm run build` 并生成当前版本 `release/` 资产；npm `beta` 仍是上一批（`latest` 仍为 0.1.6）；本版本 npm 发布待授权。GitHub Release 二进制资产因 Actions billing 锁定待补。
+- 当前工作树版本见 `package/package.json`（基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理）；已本地 `npm run build` 并生成当前版本 `release/` 资产；npm `beta` 已发布当前版本（`latest` 仍为 0.1.6）。GitHub Release 二进制资产因 Actions billing 锁定待补。
 - 不提交/发布本工作树的改动，除非用户明确授权。
 
 ## 11. 安全边界

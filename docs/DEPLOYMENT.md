@@ -4,8 +4,8 @@
 所有方式都要求已安装 Node.js 18.17 及以上。
 
 > 当前工作树版本：见 `package/package.json`（基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理；已本地 build/打包）。
-> `release/` 已含当前版本 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；npm `beta` 仍是上一批；GitHub Release 二进制资产因 Actions billing 锁定待补。
-> GitHub Release 与 npm 的实际同步以外部查询为准；后续发布仍需单独授权 tag/Release/npm publish。
+> `release/` 已含当前版本 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；npm `beta` 已发布当前版本；GitHub Release 二进制资产因 Actions billing 锁定待补。
+> GitHub Release 与 npm 的实际同步以外部查询为准。
 
 ## 0. 先确认 Node 与 git
 

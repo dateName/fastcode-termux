@@ -5,7 +5,7 @@
 ## 0.1.8-beta.1（2026-11-15，工作树）
 
 > 状态：工作树版本见 `package/package.json`；基于 0.1.8-beta.0 工作树；仅本地 build 与 PC 回归，未提交、未发布。来源：`yq.txt` 审计整合 + 本项目文档要求。
-> `release/` 已生成当前版本资产；npm `beta` 仍是上一批（`latest` 仍为 0.1.6）；本版本 npm 发布待授权。
+> `release/` 已生成当前版本资产；npm `beta` 已发布当前版本（`latest` 仍为 0.1.6）；GitHub Release 仍待补。
 
 ### 稳定性 / 限界
 - `read_file` 的 `offset/limit` 分支先按字节预算裁剪再入结果：单行超长文件不再绕过 `FASTCODE_READ_MAX_BYTES`。
