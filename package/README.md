@@ -16,11 +16,11 @@
 </p>
 
 ```bash
-npm install -g @datename/fastcode-termux@0.1.8-beta.0
+npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
-> Registry check: `beta=0.1.8-beta.0` is published; `latest` remains `0.1.6`. Install with `@0.1.8-beta.0` or `@beta`.
+> Registry check: `beta=0.1.8-beta.0` is published; `latest` remains `0.1.6`. The working tree is `0.1.8-beta.1` (not yet published); install `@beta` until beta.1 is released.
 
 Short alias included:
 
@@ -28,12 +28,11 @@ Short alias included:
 fc
 ```
 
-This tree is **0.1.8-beta.0**, based on tag `v0.1.7` plus the 2026-11-09
-fixes (shell safety, `/threads`, exit protection, approval feedback,
-compaction/projection, TUI effort, license). It is built, packaged locally,
-and published to npm under the `beta` tag; npm `latest` remains 0.1.6.
-GitHub Release binary assets are still pending (Actions billing block);
-`release/` contains 0.1.8-beta.0 assets.
+This tree is **0.1.8-beta.1**, based on 0.1.8-beta.0 plus the 2026-11-15
+audit/backend/failure/structure batch. It is built locally but not yet
+packaged or published; npm `beta` remains 0.1.8-beta.0 (`latest` remains
+0.1.6). GitHub Release binary assets are still pending (Actions billing
+block); `release/` currently contains 0.1.8-beta.0 assets.
 
 ---
 
@@ -89,7 +88,7 @@ npm link
 ### Global install
 
 ```bash
-npm install -g @datename/fastcode-termux@0.1.8-beta.0
+npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
@@ -336,7 +335,7 @@ Install Node.js first:
 
 ```bash
 pkg install nodejs
-npm install -g @datename/fastcode-termux@0.1.8-beta.0
+npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
@@ -423,7 +422,7 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits (0.1.8-beta.0)
+## Safety, sessions and limits (0.1.8-beta.1)
 
 | Feature | Behaviour | Override |
 | --- | --- | --- |

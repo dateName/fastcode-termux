@@ -2,9 +2,10 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## Unreleased（2026-11-15 审计修复）
+## 0.1.8-beta.1（2026-11-15，工作树）
 
-> 状态：基于 0.1.8-beta.0 工作树；仅本地 build 与 PC 回归，未提交、未发布。来源：`yq.txt` 审计整合 + 本项目文档要求。
+> 状态：`package/package.json` = `0.1.8-beta.1`；基于 0.1.8-beta.0 工作树；仅本地 build 与 PC 回归，未提交、未发布。来源：`yq.txt` 审计整合 + 本项目文档要求。
+> `release/` 仍是 0.1.8-beta.0 资产；npm `beta` 仍为 0.1.8-beta.0，`latest` 仍为 0.1.6；0.1.8-beta.1 的打包/发布待单独执行。
 
 ### 稳定性 / 限界
 - `read_file` 的 `offset/limit` 分支先按字节预算裁剪再入结果：单行超长文件不再绕过 `FASTCODE_READ_MAX_BYTES`。
