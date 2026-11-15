@@ -3,9 +3,8 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
-> 当前工作树版本：**0.1.8-beta.0**（基于 tag `v0.1.7` + 2026-11-09 修复；已本地 build/打包，并发布到 npm 的 `beta` tag；`latest` 仍为 0.1.6）。
-> `release/` 已含 0.1.8-beta.0 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；GitHub Release 二进制资产因 Actions billing 锁定待补。
-> npm registry 已发布 `beta=0.1.8-beta.0`；`latest` 仍为 `0.1.6`。GitHub Release 二进制资产因 Actions billing 锁定待补。
+> 当前工作树版本：见 `package/package.json`（基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理；已本地 build/打包）。
+> `release/` 已含当前版本 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；npm `beta` 仍是上一批；GitHub Release 二进制资产因 Actions billing 锁定待补。
 > GitHub Release 与 npm 的实际同步以外部查询为准；后续发布仍需单独授权 tag/Release/npm publish。
 
 ## 0. 先确认 Node 与 git
@@ -56,13 +55,13 @@ Termux 安装依赖：
 
 ## 方式 B：免安装便携包（Release 附件）
 
-运行时 `dist/cli.js` 已自包含，解压后不需要 npm install。0.1.8-beta.0 发布构建后，到 Release 页面下载
-`fastcode-portable-0.1.8-beta.0.tar.gz`（或 `.zip`，校验见 `SHA256SUMS`）。
+运行时 `dist/cli.js` 已自包含，解压后不需要 npm install。发布构建后，到 Release 页面下载
+`fastcode-portable-<version>.tar.gz`（或 `.zip`，校验见 `SHA256SUMS`）。
 注意：若要运行真机 smoke，需要把 `bash-parser` 及其依赖闭包一并放入 `package/node_modules`；否则 smoke 直接加载 dist 模块会报模块缺失（见 `RUNBOOK.md`）。
 
 发布包结构：
 
-    fastcode-portable-0.1.8-beta.0/
+    fastcode-portable-<version>/
       fastcode            启动脚本（Linux/macOS/Termux）
       fastcode.cmd        Windows 启动脚本
       package/            程序本体；运行时只需 dist/cli.js，smoke 需 bash-parser 依赖闭包
@@ -70,10 +69,10 @@ Termux 安装依赖：
 
 使用步骤：
 
-    1) 把 fastcode-portable-0.1.8-beta.0.tar.gz 传到设备
+    1) 把 fastcode-portable-<version>.tar.gz 传到设备
     2) 解压
-         tar -xzf fastcode-portable-0.1.8-beta.0.tar.gz
-         cd fastcode-portable-0.1.8-beta.0
+         tar -xzf fastcode-portable-<version>.tar.gz
+         cd fastcode-portable-<version>
     3) 直接运行
          ./fastcode --version
          ./fastcode doctor
@@ -111,7 +110,7 @@ Windows：
 
 用本地 tarball 安装：
 
-    npm install -g ./datename-fastcode-termux-0.1.8-beta.0.tgz
+    npm install -g ./datename-fastcode-termux-<version>.tgz
 
 临时试用（不安装）：
 
@@ -125,10 +124,10 @@ Windows：
 
 产物在 `release/`：
 
-    fastcode-portable-0.1.8-beta.0.tar.gz       免安装便携包
-    fastcode-portable-0.1.8-beta.0.zip          同上（需系统有 zip）
-    datename-fastcode-termux-0.1.8-beta.0.tgz   npm 包（npm pack）
-    SHA256SUMS                                  以上文件的校验和
+    fastcode-portable-<version>.tar.gz       免安装便携包
+    fastcode-portable-<version>.zip          同上（需系统有 zip）
+    datename-fastcode-termux-<version>.tgz   npm 包（npm pack）
+    SHA256SUMS                               以上文件的校验和
 
 脚本步骤：复制 bin/dist 与元数据 ->（若含自包含的 dist/cli.js 则跳过依赖安装）
 写入 fastcode / fastcode.cmd 启动脚本 -> 打 tar.gz/zip -> npm pack -> 计算 SHA256。
@@ -137,9 +136,9 @@ Windows：
 
 发布：
 
-    gh release create v0.1.8-beta.0 -t "FastCode 0.1.8-beta.0" \
-      release/fastcode-portable-0.1.8-beta.0.tar.gz \
-      release/datename-fastcode-termux-0.1.8-beta.0.tgz \
+    gh release create v<version> -t "FastCode <version>" \
+      release/fastcode-portable-<version>.tar.gz \
+      release/datename-fastcode-termux-<version>.tgz \
       release/SHA256SUMS
 
     cd package && npm publish --access public --tag beta

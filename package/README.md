@@ -29,10 +29,9 @@ fc
 ```
 
 This tree is **0.1.8-beta.1**, based on 0.1.8-beta.0 plus the 2026-11-15
-audit/backend/failure/structure batch. It is built locally but not yet
-packaged or published; the npm `beta` tag and `release/` may lag the
-working tree. GitHub Release binary assets are still pending (Actions
-billing block).
+audit/backend/failure/structure batch. It is built and packaged locally;
+npm publishing and the GitHub Release are still pending (Actions billing
+block). The tracked `release/` contains the current version assets.
 
 ---
 
