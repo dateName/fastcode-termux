@@ -30,9 +30,10 @@ fc
 
 This tree is **0.1.8-beta.1**, based on 0.1.8-beta.0 plus the 2026-11-15
 audit/backend/failure/structure batch. It is built and packaged locally and
-published to npm under the `beta` tag; the GitHub Release is still pending
-(Actions billing block). The tracked `release/` contains the current version
-assets.
+published to npm under the `beta` tag; GitHub Release assets are published
+too. The Release workflow's final npm step may fail because this beta was
+already published manually; the uploaded assets are unaffected. The tracked
+`release/` contains the current version assets.
 
 ---
 

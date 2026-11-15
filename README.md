@@ -9,7 +9,7 @@
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> This working tree (see **Version** above) is based on 0.1.8-beta.0 plus the 2026-11-15 audit/backend/failure/structure batch. It is built and packaged locally and **published to npm under the `beta` tag**; the GitHub Release is still pending because GitHub Actions remain blocked by an account billing issue.
+> This working tree (see **Version** above) is based on 0.1.8-beta.0 plus the 2026-11-15 audit/backend/failure/structure batch. It is built and packaged locally and **published to npm under the `beta` tag**; the GitHub Release assets are published too. The Release workflow's final npm step may fail because this beta was already published manually; the uploaded assets are unaffected.
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
