@@ -69,6 +69,13 @@ const bundleText = readFileSync(join(distDir, "cli.js"), "utf8");
 const guardMarkers = ["critical-credential-read", "sensitive_file_egress", "sensitive-file-upload", "move_sensitive", "truncate_sensitive"];
 const missingGuardMarkers = guardMarkers.filter((marker) => !bundleText.includes(marker));
 ok("dist/cli.js contains rebuilt sensitive-file guard markers", missingGuardMarkers.length === 0, JSON.stringify(missingGuardMarkers));
+const helpHome = mkdtempSync(join(tmpdir(), "fastcode-help-"));
+const helpEnv = { ...process.env, FASTCODE_HOME: helpHome };
+const shortHelp = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "-h"], { encoding: "utf8", env: helpEnv });
+const helpWord = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "help"], { encoding: "utf8", env: helpEnv });
+ok("-h and help print the same formatted help",
+    shortHelp === helpWord && /--ui/.test(shortHelp) && /sessions show/.test(shortHelp),
+    JSON.stringify({ same: shortHelp === helpWord, sample: shortHelp.slice(0, 80) }));
 ok("#3 common-only highlight subset keeps cold highlight.js languages out", !bundleText.includes("mathematica") && !bundleText.includes("isbl"));
 if (existsSync(join(pkgDir, "node_modules", "highlight.js"))) {
     const markdownModule = await load("lib/markdown.js");
@@ -114,29 +121,55 @@ catch {
     placeholderThrew = true;
 }
 ok("missing baseUrl placeholder throws before any request", placeholderThrew);
+const placeholderEnv = {
+    RUNPOD_ENDPOINT_ID: "test-endpoint",
+    AZURE_OPENAI_RESOURCE: "test-resource",
+    AZURE_OPENAI_DEPLOYMENT: "test-deployment",
+    CLOUDFLARE_ACCOUNT_ID: "test-account",
+    AWS_REGION: "us-east-1",
+    GOOGLE_CLOUD_PROJECT: "test-project",
+    GOOGLE_CLOUD_LOCATION: "us-central1",
+};
+const previousPlaceholderEnv = Object.fromEntries(Object.keys(placeholderEnv).map((key) => [key, process.env[key]]));
+Object.assign(process.env, placeholderEnv);
 const providerUrlFailures = [];
 let providerSnapshots = 0;
-for (const provider of providers.PROVIDERS) {
-    let base;
-    try {
-        base = String(provider.baseUrl ?? "").replace(/[/]+$/, "");
+try {
+    for (const provider of providers.PROVIDERS) {
+        let base;
+        try {
+            base = requestSpec.resolveBaseUrl({ baseUrl: String(provider.baseUrl ?? "") }).replace(/[/]+$/, "");
+        }
+        catch {
+            continue;
+        }
+        if (!base)
+            continue;
+        const spec = compatible.toRequestSpec({ baseUrl: provider.baseUrl, apiKey: "k" });
+        const url = requestSpec.buildRequestUrl(spec, "/chat/completions");
+        const expected = base + "/chat/completions";
+        if (url !== expected)
+            providerUrlFailures.push({ id: provider.id, url, expected });
+        const header = requestSpec.buildHeaders(spec, "k");
+        if (header.authorization !== "Bearer k")
+            providerUrlFailures.push({ id: provider.id, header });
+        providerSnapshots += 1;
     }
-    catch {
-        continue;
+}
+finally {
+    for (const [key, value] of Object.entries(previousPlaceholderEnv)) {
+        if (value === undefined)
+            delete process.env[key];
+        else
+            process.env[key] = value;
     }
-    if (!base)
-        continue;
-    const spec = compatible.toRequestSpec({ baseUrl: provider.baseUrl, apiKey: "k" });
-    const url = requestSpec.buildRequestUrl(spec, "/chat/completions");
-    const expected = base + "/chat/completions";
-    if (url !== expected)
-        providerUrlFailures.push({ id: provider.id, url, expected });
-    const header = requestSpec.buildHeaders(spec, "k");
-    if (header.authorization !== "Bearer k")
-        providerUrlFailures.push({ id: provider.id, header });
-    providerSnapshots += 1;
 }
 ok("default provider URL/header snapshots are unchanged", providerUrlFailures.length === 0 && providerSnapshots >= 10, JSON.stringify({ providerSnapshots, providerUrlFailures }));
+ok("catalog registers 55 providers", providers.PROVIDERS.length === 55, String(providers.PROVIDERS.length));
+const protocolModeForDefault = await load("agent/protocol-mode.js");
+ok("default tool protocol is auto (native for compatible providers)",
+    protocolModeForDefault.resolveToolProtocol({}, "deepseek", "deepseek-flash", {}) === "native",
+    protocolModeForDefault.resolveToolProtocol({}, "deepseek", "deepseek-flash", {}));
 let capturedRequest = null;
 const specServer = createServer((req, res) => {
     capturedRequest = { url: req.url, auth: req.headers.authorization };
@@ -171,6 +204,54 @@ try {
 }
 finally {
     globalThis.fetch = originalFetch;
+}
+
+let probeUrl = "";
+globalThis.fetch = async (url) => {
+    probeUrl = String(url);
+    return { ok: true };
+};
+try {
+    const noModels = await providers.probeProvider({ id: "probe-none", baseUrl: "https://example.invalid/v1", modelsPath: null }, undefined, 500);
+    ok("probe treats a provider without /models as reachable instead of offline", noModels === true && probeUrl === "", probeUrl);
+    probeUrl = "";
+    const customModels = await providers.probeProvider({ id: "probe-path", baseUrl: "https://example.invalid/", modelsPath: "/v1/models" }, undefined, 500);
+    ok("probe uses provider.modelsPath when present", customModels === true && probeUrl === "https://example.invalid/v1/models", probeUrl);
+    const unsupportedProbe = await providers.probeProviderDetailed({ id: "probe-none", baseUrl: "https://example.invalid/v1", modelsPath: null }, undefined, 500);
+    ok("probe reports a missing /models endpoint as a reason, not offline",
+        unsupportedProbe.ok === true && /no \/models/.test(unsupportedProbe.reason), JSON.stringify(unsupportedProbe));
+    globalThis.fetch = async () => ({ ok: false, status: 404, statusText: "Not Found" });
+    const failedProbe = await providers.probeProviderDetailed({ id: "probe-404", baseUrl: "https://example.invalid/v1" }, undefined, 500);
+    ok("probe keeps the HTTP status and reason",
+        failedProbe.ok === false && failedProbe.status === 404 && /404/.test(failedProbe.reason), JSON.stringify(failedProbe));
+}
+finally {
+    globalThis.fetch = originalFetch;
+}
+
+const customProvider = providers.PROVIDERS.find((provider) => provider.id === "custom");
+let customHeaders;
+globalThis.fetch = async (_url, init) => {
+    customHeaders = init?.headers ?? {};
+    return new Response("data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+};
+process.env.FASTCODE_BASE_URL = "https://example.invalid/v1";
+process.env.FASTCODE_API_KEY = "secret";
+process.env.FASTCODE_AUTH_HEADER = "api-key";
+process.env.FASTCODE_EXTRA_HEADERS = '{"x-extra":"1"}';
+try {
+    for await (const _chunk of customProvider.stream({ model: "m", messages: [] }, "secret"))
+        break;
+    ok("custom provider honors auth header/prefix and extra headers",
+        customHeaders?.["api-key"] === "secret" && customHeaders?.["authorization"] === undefined && customHeaders?.["x-extra"] === "1",
+        JSON.stringify(customHeaders));
+}
+finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.FASTCODE_BASE_URL;
+    delete process.env.FASTCODE_API_KEY;
+    delete process.env.FASTCODE_AUTH_HEADER;
+    delete process.env.FASTCODE_EXTRA_HEADERS;
 }
 
 const http = await load("lib/http.js");
@@ -362,6 +443,43 @@ const mixed = protocol.parseToolCalls('<fastcode_tool>{"tool":"pwd"}</fastcode_t
 ok("a stray close tag does not duplicate consumed calls", mixed.calls.length === 2 && mixed.errors.length > 0, JSON.stringify(mixed));
 const broken = protocol.parseToolCalls("</parameter></invoke>");
 ok("pure residual closing tags report a parse error", broken.calls.length === 0 && broken.errors.length > 0, JSON.stringify(broken));
+const hermes = protocol.parseToolCalls('<tool_call>{"name":"pwd","arguments":{}}</tool_call>');
+ok("Hermes/Qwen dialect parses nested arguments",
+    hermes.calls.length === 1 && hermes.calls[0].tool === "pwd" && hermes.detectedDialects.includes("hermes"),
+    JSON.stringify(hermes));
+const hermesVisible = protocol.stripToolCalls('<tool_call>{"name":"pwd"}</tool_call>');
+ok("Hermes markup is stripped from visible text", hermesVisible === "", JSON.stringify(hermesVisible));
+const hermesBad = protocol.parseToolCalls('<tool_call>{bad}</tool_call>');
+ok("malformed Hermes is an explicit protocol error",
+    hermesBad.calls.length === 0 && hermesBad.errors.length > 0 && hermesBad.detectedDialects.includes("hermes"),
+    JSON.stringify(hermesBad));
+const qwen = protocol.parseToolCalls('<tool_call>{"name":"read_file","arguments":{"path":"a.txt"}}</tool_call>');
+ok("Qwen shares the Hermes format", qwen.calls.length === 1 && qwen.calls[0].tool === "read_file" && qwen.calls[0].path === "a.txt", JSON.stringify(qwen));
+const mistralArray = protocol.parseToolCalls('[TOOL_CALLS][{"name":"pwd","arguments":{}},{"name":"grep","arguments":{"pattern":"x"}}]');
+ok("Mistral pre-v11 array parses parallel calls",
+    mistralArray.calls.length === 2 && mistralArray.calls[1].tool === "grep" && mistralArray.detectedDialects.includes("mistral"),
+    JSON.stringify(mistralArray));
+const mistralV11 = protocol.parseToolCalls('[TOOL_CALLS]get_weather[abc123]{"city":"Tokyo"}');
+ok("Mistral v11 func[CALL_ID]{args} keeps the opening brace",
+    mistralV11.calls.length === 1 && mistralV11.calls[0].tool === "get_weather" &&
+        mistralV11.calls[0].city === "Tokyo" && mistralV11.calls[0].id === "abc123",
+    JSON.stringify(mistralV11));
+const kimiSection = protocol.parseToolCalls('<|tool_calls_section_begin|><|tool_call_begin|>functions.get_weather:0<|tool_call_argument_begin|>{"city":"Tokyo"}<|tool_call_end|><|tool_calls_section_end|>');
+ok("Kimi K2 extracts the function name from the ID header",
+    kimiSection.calls.length === 1 && kimiSection.calls[0].tool === "get_weather" &&
+        kimiSection.calls[0].city === "Tokyo" && String(kimiSection.calls[0].id).includes("functions.get_weather:0"),
+    JSON.stringify(kimiSection));
+const llamaTagged = protocol.parseToolCalls('<|python_tag|>{"name":"pwd","parameters":{}}');
+ok("Llama parameters normalize to arguments", llamaTagged.calls.length === 1 && llamaTagged.calls[0].tool === "pwd", JSON.stringify(llamaTagged));
+const llamaBare = protocol.parseToolCalls('{"name":"pwd","parameters":{}}');
+ok("Llama bare leading JSON is accepted", llamaBare.calls.length === 1 && llamaBare.calls[0].tool === "pwd", JSON.stringify(llamaBare));
+const unsupportedDialect = protocol.parseToolCalls('<function_call>{"name":"pwd"}</function_call>');
+ok("an unsupported dialect with zero parsed calls is an explicit protocol error",
+    unsupportedDialect.calls.length === 0 && unsupportedDialect.errors.length > 0, JSON.stringify(unsupportedDialect));
+const unsupportedVisible = protocol.stripToolCalls('<function_call>{"name":"pwd"}</function_call>');
+ok("unsupported dialect markup is not silently stripped as DSML", unsupportedVisible.includes("<function_call>"), JSON.stringify(unsupportedVisible));
+const kimiLegacyMarker = protocol.parseToolCalls("<|tool_call|>{\"name\":\"pwd\"}<|/tool_call|>");
+ok("an unknown marker also fails loudly instead of a silent complete", kimiLegacyMarker.calls.length === 0 && kimiLegacyMarker.errors.length > 0, JSON.stringify(kimiLegacyMarker));
 
 const agentTools = await load("agent/tools.js");
 const tmp = mkdtempSync(join(tmpdir(), "fastcode-smoke-"));
@@ -434,6 +552,14 @@ ok("read_file range near EOF reports the true total", rangeTail.ok === true && r
 const rangePast = await agentTools.runAgentTool({ tool: "read_file", path: "range.txt", offset: 5000, limit: 10 }, tmp);
 ok("read_file offset past EOF is a structured error", rangePast.ok === false && rangePast.code === "NOT_FOUND" && rangePast.totalLines === 2000, JSON.stringify(rangePast));
 
+const hugeLineFile = join(tmp, "huge-line.txt");
+writeFileSync(hugeLineFile, "q".repeat(1_200_000), "utf8");
+const hugeLineRead = await agentTools.runAgentTool({ tool: "read_file", path: "huge-line.txt", offset: 1, limit: 1 }, tmp);
+ok("read_file clips a single huge line to the byte budget before returning it",
+    hugeLineRead.ok === true && hugeLineRead.truncated === true &&
+        hugeLineRead.returnedBytes <= 200_000 && hugeLineRead.output.length < 210_000,
+    JSON.stringify({ returnedBytes: hugeLineRead.returnedBytes, chars: hugeLineRead.output.length }));
+
 const manyDir = join(tmp, "many");
 mkdirSync(manyDir, { recursive: true });
 const manyPaths = [];
@@ -456,6 +582,10 @@ ok("grep context includes surrounding lines", grepCtx.ok === true && grepCtx.out
 writeFileSync(join(tmp, "matches.txt"), Array.from({ length: 10 }, (_, index) => `hit ${index}`).join(LF), "utf8");
 const grepMax = await agentTools.runAgentTool({ tool: "grep", pattern: "hit", path: ".", glob: "matches.txt", maxResults: 3 }, tmp);
 ok("grep maxResults truncates with metadata", grepMax.ok === true && grepMax.matches === 3 && grepMax.truncated === true, JSON.stringify(grepMax));
+writeFileSync(join(tmp, "longline.txt"), "needle " + "z".repeat(5_000) + LF, "utf8");
+const grepLong = await agentTools.runAgentTool({ tool: "grep", pattern: "needle", path: ".", glob: "longline.txt", maxResults: 1 }, tmp);
+ok("grep clips a very long matched line", grepLong.ok === true && grepLong.output.includes("…") && !grepLong.output.includes("z".repeat(600)),
+    JSON.stringify({ chars: grepLong.output.length }));
 const grepBad = await agentTools.runAgentTool({ tool: "grep", pattern: "(", path: "." }, tmp);
 ok("grep invalid regex is a structured error, not a throw", grepBad.ok === false && grepBad.code === "INVALID_ARGS", JSON.stringify(grepBad));
 
@@ -628,6 +758,36 @@ session.close();
 const sessions = slog.listSessions();
 ok("session log writes JSONL and lists it", sessions.length === 1 && sessions[0].messages === 1, JSON.stringify(sessions));
 ok("session log can be replayed", (slog.loadSessionMessages(sessions[0].file)[0] ?? {}).content === "hi");
+
+const degradedLog = slog.createSessionLog({ providerId: "deepseek" });
+rmSync(degradedLog.file, { force: true });
+mkdirSync(degradedLog.file, { recursive: true });
+const degradedAppend = degradedLog.append({ type: "user", content: "lost" });
+ok("#4 session append failures surface as degraded and return 0",
+    degradedAppend === 0 && degradedLog.degraded() === true && Boolean(degradedLog.lastError()),
+    JSON.stringify({ append: degradedAppend, degraded: degradedLog.degraded(), error: degradedLog.lastError() }));
+degradedLog.close({ reason: "exit" });
+ok("#4 degraded logs do not write a projection", !existsSync(slog.projectionPath(degradedLog.file)));
+rmSync(degradedLog.file, { recursive: true, force: true });
+
+const idempotentLog = slog.createSessionLog({ providerId: "deepseek" });
+idempotentLog.append({ type: "user", content: "once" });
+idempotentLog.close({ reason: "exit" });
+idempotentLog.close({ reason: "exit" });
+const sessionEnds = slog.readSession(idempotentLog.file).filter((fact) => fact.type === "session_end").length;
+ok("session close is idempotent", sessionEnds === 1, String(sessionEnds));
+
+const previousLogging = process.env.FASTCODE_SESSION_LOG;
+process.env.FASTCODE_SESSION_LOG = "0";
+const disabledLog = slog.createSessionLog({ cwd: process.cwd() });
+disabledLog.append({ type: "user", content: "disabled" });
+disabledLog.close({ reason: "exit" });
+ok("disabled session logging does not write a projection",
+    disabledLog.degraded() === false && !existsSync(slog.projectionPath(disabledLog.file)));
+if (previousLogging === undefined)
+    delete process.env.FASTCODE_SESSION_LOG;
+else
+    process.env.FASTCODE_SESSION_LOG = previousLogging;
 
 const trust = await load("config/trust.js");
 ok("a fresh folder is not trusted", trust.isTrusted(process.cwd()) === false);
@@ -1233,6 +1393,22 @@ const twoTurnTypes = twoTurn.map((event) => event.type).join(",");
 ok("#32 runner completes 2 turns without React", twoTurnTypes === "assistant_raw,assistant_text,tool_call,tool_result,checkpoint,assistant_raw,checkpoint,done" &&
     twoTurn.at(-1).stopReason === "complete" && twoTurn.at(-1).history.length === 4, twoTurnTypes);
 
+const hermesRun = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { text: '<tool_call>{"name":"pwd","arguments":{}}</tool_call>' },
+        { text: "done" },
+    ]),
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 5,
+    cwd: stage0,
+}));
+ok("Hermes tool calls execute through the host tool path",
+    Boolean(hermesRun.find((event) => event.type === "tool_call" && event.call?.tool === "pwd")) &&
+        hermesRun.at(-1).stopReason === "complete" &&
+        !hermesRun.some((event) => event.type === "error" && event.kind === "protocol_error"),
+    JSON.stringify(hermesRun.filter((event) => event.type === "tool_call" || event.type === "error")));
+
 const brokenMarkup = await collect(runner.runAgent({
     provider: scriptedProvider([
         { text: "oops </parameter></invoke>" },
@@ -1249,6 +1425,83 @@ ok("#2 broken tool markup injects a tool error instead of silently finishing",
         /invalid tool-call markup/i.test(injectedProtocolError.output) &&
         brokenMarkup.at(-1).stopReason === "complete",
     brokenMarkup.map((event) => event.type).join(","));
+const persistentProtocolError = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { text: "oops </parameter></invoke>" },
+        { text: "still </parameter></invoke>" },
+    ]),
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 2,
+    cwd: stage0,
+}));
+const protocolErrorEvent = persistentProtocolError.find((event) => event.type === "error" && event.kind === "protocol_error");
+ok("persistent protocol failures end as protocol_error, not a normal turn cap",
+    Boolean(protocolErrorEvent) && persistentProtocolError.at(-1).stopReason === "protocol_error",
+    JSON.stringify({ stopReason: persistentProtocolError.at(-1).stopReason, kinds: persistentProtocolError.filter((event) => event.type === "error").map((event) => event.kind) }));
+
+let nonRetryableAttempts = 0;
+const nonRetryableProvider = {
+    id: "mock-retry",
+    label: "Mock Retry",
+    authEnv: [],
+    baseUrl: "",
+    defaultModel: "mock",
+    capabilities: { retryable: false },
+    listModels: async () => [],
+    async *stream() {
+        nonRetryableAttempts += 1;
+        throw new Error("fetch failed");
+    },
+};
+let nonRetryableError;
+try {
+    await streamModule.runStream(nonRetryableProvider, { model: "mock", messages: [] }, undefined, {});
+}
+catch (err) {
+    nonRetryableError = err;
+}
+ok("non-retryable backends are not replayed",
+    Boolean(nonRetryableError) && nonRetryableAttempts === 1,
+    JSON.stringify({ attempts: nonRetryableAttempts, message: nonRetryableError?.message }));
+
+const incompleteProvider = {
+    id: "mock-incomplete",
+    label: "Mock Incomplete",
+    authEnv: [],
+    baseUrl: "",
+    defaultModel: "mock",
+    listModels: async () => [],
+    async *stream() {
+        yield { delta: "partial", done: false };
+    },
+};
+const incompleteResult = await streamModule.runStream(incompleteProvider, { model: "mock", messages: [] }, undefined, {});
+ok("incomplete streams are reported instead of silently completed",
+    incompleteResult.incomplete === true && incompleteResult.text === "partial",
+    JSON.stringify({ incomplete: incompleteResult.incomplete, text: incompleteResult.text }));
+const incompleteRunnerProvider = {
+    id: "mock-incomplete-run",
+    label: "Mock Incomplete Run",
+    authEnv: [],
+    baseUrl: "",
+    defaultModel: "mock",
+    listModels: async () => [],
+    async *stream() {
+        yield { delta: "partial", done: false };
+    },
+};
+const incompleteRun = await collect(runner.runAgent({
+    provider: incompleteRunnerProvider,
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 2,
+    cwd: stage0,
+}));
+ok("incomplete runs emit an error event and stop reason",
+    incompleteRun.some((event) => event.type === "error" && event.kind === "incomplete") &&
+        incompleteRun.at(-1).stopReason === "incomplete",
+    JSON.stringify({ stopReason: incompleteRun.at(-1).stopReason, kinds: incompleteRun.filter((event) => event.type === "error").map((event) => event.kind) }));
 
 const abortController = new AbortController();
 const aborted = await collect(runner.runAgent({
@@ -1350,6 +1603,11 @@ ok("JSON gate schema is versioned with stable option ids",
 ok("JSON gate decisions reject wrong ids, unknown options, and malformed input",
     gateAllow.decision.kind === "allow" && gateWrongId.decision.kind === "deny" &&
         gateBadJson.decision.kind === "deny");
+const gateDecisionFrame = approvalJson.encodeGateDecision(softRequest, { kind: "deny", reason: "denied by user" }, "policy");
+ok("gate decision frame records the decision and error without secrets",
+    gateDecisionFrame.event === "gate:decision" && gateDecisionFrame.id === softRequest.id &&
+        gateDecisionFrame.decision.kind === "deny" && gateDecisionFrame.error === "policy",
+    JSON.stringify(gateDecisionFrame));
 const approvalCore = await load("agent/approval.js");
 const feedbackOption = approvalCore.DEFAULT_ALLOW_OPTIONS.find((option) => option.kind === "feedback");
 const feedbackMissing = approvalCore.decisionForOption(feedbackOption);
@@ -1603,10 +1861,17 @@ store.saveConfig({ ...store.loadConfig(), sharedDirs: sharedDirsBackup });
 
 const egressPolicyModule = await load("agent/policy/egress.js");
 const defaultEgress = egressPolicyModule.normalizeEgressConfig(undefined);
-ok("missing egress config defaults to audit-only",
-    defaultEgress.enabled === false && defaultEgress.mode === "audit" &&
-        defaultEgress.maxScanBytes > 0 && defaultEgress.denyContentMarkers.length >= 1,
+ok("missing egress config defaults to block with built-in denyPaths",
+    defaultEgress.enabled === true && defaultEgress.mode === "block" &&
+        defaultEgress.denyPaths.length >= 2 && defaultEgress.maxScanBytes > 0 &&
+        defaultEgress.denyContentMarkers.length >= 1,
     JSON.stringify(defaultEgress));
+const offEgress = egressPolicyModule.normalizeEgressConfig({ enabled: false, mode: "off" });
+ok("egress built-in denyPaths cover auth.json and sessions, and off is a kill switch",
+    defaultEgress.denyPaths.some((entry) => /auth\.json$/.test(entry)) &&
+        defaultEgress.denyPaths.some((entry) => /sessions$/.test(entry)) &&
+        offEgress.enabled === false && offEgress.mode === "off",
+    JSON.stringify({ denyPaths: defaultEgress.denyPaths, off: { enabled: offEgress.enabled, mode: offEgress.mode } }));
 
 delete process.env.FASTCODE_TRUST_ALL;
 const revokedShell = await agentTools.runAgentTool({ tool: "shell", command: "echo revoked" }, stage0);
@@ -1880,6 +2145,23 @@ ok("server-aware compaction skips the local summary", serverCompacted.compacted 
     !serverCompacted.summary && !serverCompacted.summaryFile, JSON.stringify(serverCompacted));
 const clamped = compactionModule.localThresholdTokens({ ...compactionModule.DEFAULT_COMPACTION_CONFIG, serverCompactionAware: true, serverCompactThreshold: 100000 }, 200000);
 ok("local threshold sits 8K above the server threshold", clamped >= 108192, String(clamped));
+const blobHistory = [{ role: "user", content: "head" }];
+for (let i = 0; i < 20; i += 1) {
+    blobHistory.push({ role: "assistant", content: `step ${i}` });
+    blobHistory.push({ role: "user", content: `result ${i}` });
+}
+blobHistory.push({ role: "tool", content: "q".repeat(1_200_000) });
+const blobStarted = Date.now();
+const blobCompacted = compactionModule.compactMessages(blobHistory, { ...compactionModule.DEFAULT_COMPACTION_CONFIG }, {
+    contextWindow: 128000,
+    providerId: "deepseek",
+    model: "deepseek-v4-pro",
+    force: true,
+});
+const blobElapsed = Date.now() - blobStarted;
+ok("A2/A3 compaction stays fast and actually shrinks a 1.2MB tail message",
+    blobCompacted.compacted && blobCompacted.afterTokens < blobCompacted.beforeTokens * 0.5 && blobElapsed < 2000,
+    JSON.stringify({ before: blobCompacted.beforeTokens, after: blobCompacted.afterTokens, ms: blobElapsed }));
 
 const summaryFacts = [
     { seq: 1, type: "session_start", cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" },
@@ -2440,6 +2722,141 @@ const mergedCalls = nativeTools.finalizeToolCalls(accumulator);
 ok("#70 native tool calls merge by index, not array order", mergedCalls.length === 2 &&
     mergedCalls[0].id === "call_a" && mergedCalls[1].id === "call_b" &&
     mergedCalls[1].arguments === '{"pattern":"x"}', JSON.stringify(mergedCalls));
+
+const noIndexAccumulator = new Map();
+nativeTools.mergeToolCallDelta(noIndexAccumulator, { function: { name: "shell", arguments: '{"comm' } });
+nativeTools.mergeToolCallDelta(noIndexAccumulator, { function: { arguments: 'and":"ls"}' } });
+const noIndexCalls = nativeTools.finalizeToolCalls(noIndexAccumulator);
+ok("B1 chunks without an index accumulate into one call",
+    noIndexCalls.length === 1 && noIndexCalls[0].name === "shell" && noIndexCalls[0].arguments === '{"command":"ls"}',
+    JSON.stringify(noIndexCalls));
+const objectArgsAccumulator = new Map();
+nativeTools.mergeToolCallDelta(objectArgsAccumulator, { index: 0, id: "call_obj", function: { name: "shell", arguments: { command: "ls" } } });
+const objectArgsCalls = nativeTools.finalizeToolCalls(objectArgsAccumulator);
+ok("B2 object-shaped arguments are normalized instead of dropped",
+    objectArgsCalls.length === 1 && objectArgsCalls[0].arguments === '{"command":"ls"}', JSON.stringify(objectArgsCalls));
+
+const streamEvents = await load("agent/stream-events.js");
+const assembler = new streamEvents.StreamAssembler();
+assembler.push({ type: "text-delta", text: "he" });
+assembler.push({ type: "thinking-delta", text: "why" });
+assembler.push({ type: "usage", usage: { inputTokens: 1, outputTokens: 2 } });
+assembler.push({ type: "tool-call-end", index: 0, call: { id: "c1", name: "pwd", arguments: "{}" } });
+assembler.push({ type: "turn-end", reason: "tool-calls" });
+assembler.push({ type: "text-delta", text: "ignored" });
+const assembledStream = assembler.snapshot();
+ok("stream assembler folds canonical events and ignores post-finish records",
+    assembledStream.text === "he" && assembledStream.thinking === "why" &&
+        assembledStream.usage?.inputTokens === 1 && assembledStream.toolCalls.length === 1 &&
+        assembledStream.finish === "tool-calls" && !assembledStream.text.includes("ignored"),
+    JSON.stringify(assembledStream));
+
+const childEnvModule = await load("lib/child-env.js");
+const previousSecret = process.env.FASTCODE_TEST_SECRET;
+process.env.FASTCODE_TEST_SECRET = "leak-me";
+const filteredChildEnv = childEnvModule.buildChildEnv(["LANG"], { EXTRA: "ok" });
+ok("child env forwards only allowlisted names",
+    filteredChildEnv.FASTCODE_TEST_SECRET === undefined && filteredChildEnv.EXTRA === "ok" &&
+        typeof filteredChildEnv.PATH === "string",
+    JSON.stringify({ secret: filteredChildEnv.FASTCODE_TEST_SECRET, extra: filteredChildEnv.EXTRA, path: Boolean(filteredChildEnv.PATH) }));
+const redactedText = childEnvModule.redactSecrets("Authorization: Bearer sk-abcdefghijk\napi_key=secret123\n\u001b[31mred\u001b[0m");
+ok("redactSecrets hides credentials and ANSI escapes",
+    !redactedText.includes("sk-abcdefghijk") && !redactedText.includes("secret123") &&
+        redactedText.includes("[REDACTED]") && !redactedText.includes("\u001b"), JSON.stringify(redactedText));
+
+const stdio = await load("providers/stdioBackend.js");
+const stdioTmp = mkdtempSync(join(tmpdir(), "fastcode-stdio-"));
+const stdioScript = [
+    'process.stdin.once("data", () => {',
+    '  process.stdout.write(JSON.stringify({ type: "text-delta", text: "hello" }) + "\\n");',
+    '  process.stdout.write(JSON.stringify({ type: "thinking-delta", text: "because" }) + "\\n");',
+    '  process.stdout.write(JSON.stringify({ type: "tool-call", id: "c1", name: "write_file", arguments: { path: "pwned.txt", content: "x" } }) + "\\n");',
+    '  process.stdout.write(JSON.stringify({ type: "usage", inputTokens: 3, outputTokens: 4 }) + "\\n");',
+    '  process.stdout.write(JSON.stringify({ type: "done" }) + "\\n");',
+    '});',
+].join("\n");
+const stdioProvider = stdio.createStdioProvider({
+    id: "mock-cli",
+    label: "Mock CLI",
+    command: process.execPath,
+    args: ["-e", stdioScript],
+    cwd: stdioTmp,
+    staticModels: [{ id: "mock" }],
+});
+const stdioResult = await streamModule.runStream(stdioProvider, { model: "mock", messages: [{ role: "user", content: "hi" }] }, undefined, {});
+ok("stdio backend maps canonical NDJSON, keeps thinking and proposes tools without executing them",
+    stdioResult.text === "hello" && stdioResult.reasoning === "because" &&
+        stdioResult.toolCalls?.length === 1 && stdioResult.toolCalls[0].name === "write_file" &&
+        stdioResult.usage?.inputTokens === 3 && !existsSync(join(stdioTmp, "pwned.txt")),
+    JSON.stringify({ text: stdioResult.text, reasoning: stdioResult.reasoning, calls: stdioResult.toolCalls, usage: stdioResult.usage }));
+
+const latchScript = [
+    'process.stdin.once("data", () => {',
+    '  process.stdout.write(JSON.stringify({ type: "text-delta", text: "ok" }) + "\\n");',
+    '  process.stdout.write(JSON.stringify({ type: "done" }) + "\\n");',
+    '  process.stdout.write(JSON.stringify({ type: "tool-call", name: "pwd", arguments: {} }) + "\\n");',
+    '});',
+].join("\n");
+const latchProvider = stdio.createStdioProvider({
+    id: "mock-latch",
+    label: "Mock Latch",
+    command: process.execPath,
+    args: ["-e", latchScript],
+    cwd: stdioTmp,
+    staticModels: [{ id: "mock" }],
+});
+const latchResult = await streamModule.runStream(latchProvider, { model: "mock", messages: [{ role: "user", content: "hi" }] }, undefined, {});
+ok("stdio terminal latch ignores records after done",
+    latchResult.text === "ok" && !latchResult.toolCalls,
+    JSON.stringify({ text: latchResult.text, calls: latchResult.toolCalls }));
+
+const envScript = [
+    'process.stdin.once("data", () => {',
+    '  process.stdout.write(JSON.stringify({ type: "text-delta", text: String(process.env.FASTCODE_TEST_SECRET ?? "unset") }) + "\\n");',
+    '  process.stdout.write(JSON.stringify({ type: "done" }) + "\\n");',
+    '});',
+].join("\n");
+const envProvider = stdio.createStdioProvider({
+    id: "mock-env",
+    label: "Mock Env",
+    command: process.execPath,
+    args: ["-e", envScript],
+    cwd: stdioTmp,
+    staticModels: [{ id: "mock" }],
+});
+const envResult = await streamModule.runStream(envProvider, { model: "mock", messages: [{ role: "user", content: "hi" }] }, undefined, {});
+ok("stdio backend does not leak unlisted host secrets", envResult.text === "unset", envResult.text);
+if (previousSecret === undefined)
+    delete process.env.FASTCODE_TEST_SECRET;
+else
+    process.env.FASTCODE_TEST_SECRET = previousSecret;
+
+const cancelScript = 'process.stdin.once("data", () => { setTimeout(() => undefined, 10000); });';
+const cancelProvider = stdio.createStdioProvider({
+    id: "mock-cancel",
+    label: "Mock Cancel",
+    command: process.execPath,
+    args: ["-e", cancelScript],
+    cwd: stdioTmp,
+    staticModels: [{ id: "mock" }],
+});
+const cancelController = new AbortController();
+const cancelStarted = Date.now();
+const cancelRun = streamModule.runStream(cancelProvider, {
+    model: "mock",
+    messages: [{ role: "user", content: "hi" }],
+}, undefined, { signal: cancelController.signal });
+setTimeout(() => cancelController.abort(), 150);
+let cancelError;
+try {
+    await cancelRun;
+}
+catch (err) {
+    cancelError = err;
+}
+ok("stdio backend aborts promptly and reports abort",
+    Boolean(cancelError) && Date.now() - cancelStarted < 3000,
+    JSON.stringify({ name: cancelError?.name, message: cancelError?.message, ms: Date.now() - cancelStarted }));
 
 const protocolMode = await load("agent/protocol-mode.js");
 const autoEnv = { FASTCODE_TOOL_PROTOCOL: "auto" };

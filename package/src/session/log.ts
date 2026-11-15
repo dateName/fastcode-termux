@@ -90,10 +90,10 @@ export function fsyncEnabled(type = "checkpoint"): boolean {
 
 function writeLine(file: string, line: string, type: string): void {
     if (!fsyncEnabled(type)) {
-        appendFileSync(file, line, "utf8");
+        appendFileSync(file, line, { encoding: "utf8", mode: 0o600 });
         return;
     }
-    const fd = openSync(file, "a");
+    const fd = openSync(file, "a", 0o600);
     try {
         writeSync(fd, line);
         fsyncSync(fd);
@@ -138,6 +138,9 @@ function newId(): string {
 
 function openLog(id: string | undefined, file: string, meta: Record<string, any>) {
     let closed = false;
+    let degraded = false;
+    let lastError: string | undefined;
+    let warnedDegraded = false;
     let seq = countLines(file);
     const append = (entry: Record<string, any>) => {
         if (closed || !loggingEnabled())
@@ -149,7 +152,17 @@ function openLog(id: string | undefined, file: string, meta: Record<string, any>
             seq = next;
             return next;
         }
-        catch {
+        catch (err) {
+            // Never route this through pushSystem: that would append a notice
+            // and recurse into the same failing write. The process-level
+            // degraded flag is the durable signal; stderr is the human one.
+            degraded = true;
+            lastError = err instanceof Error ? err.message : String(err);
+            if (!warnedDegraded) {
+                warnedDegraded = true;
+                process.stderr.write(`[fastcode] session log write failed; persistence is degraded (${lastError}). ` +
+                    `The session will not be resumed from this copy.\n`);
+            }
             return 0;
         }
     };
@@ -161,7 +174,16 @@ function openLog(id: string | undefined, file: string, meta: Record<string, any>
         count() {
             return seq;
         },
+        /** True after at least one write failed (or the log is otherwise unreliable). */
+        degraded() {
+            return degraded;
+        },
+        lastError() {
+            return lastError;
+        },
         close(info: SessionCloseInfo = {}) {
+            if (closed)
+                return;
             append({
                 type: "session_end",
                 reason: info.reason ?? "close",
@@ -174,6 +196,15 @@ function openLog(id: string | undefined, file: string, meta: Record<string, any>
                 },
             });
             closed = true;
+            // A partial/degraded JSONL must never be frozen into a "verified"
+            // projection: resume would trust a manifest computed from the
+            // missing facts. Logging disabled is an intentional no-persist mode
+            // and also has no projection to write.
+            if (degraded || !loggingEnabled()) {
+                if (degraded)
+                    process.stderr.write(`[fastcode] session log degraded; projection and pruning skipped for ${file}.\n`);
+                return;
+            }
             try {
                 // Snapshot + manifest are written while the facts still exist;
                 // pruning later keeps this verified copy.

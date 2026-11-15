@@ -233,3 +233,83 @@
 - ㉑ 文档补全：README / README.zh / package README 增加完整 CLI 子命令、TUI 斜杠命令与设置入口；`docs/CONFIGURATION.md` §8 为速查（含 `/threads`、`/steer`、trust/skills/sessions/doctor/update）。
 - 验证：`typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`；npm `beta=0.1.8-beta.0`。
 - 额外手工核对：审批 feedback 源码逻辑、压缩/投影（`/compact` 元数据、摘要顺序、cleared、工具折叠、summary 安全删除）、`session_end` 保存口、Windows one-shot 异步停止、one-shot `active=1/pool=0/maxPool=2/maxSpawnPerTurn=8`、第 9 个 one-shot spawn limit、msys `sh -s` 的 `exit 0`/状态隔离/`set -e`。Termux 真机待复跑。
+
+## 审计修复（2026-11-15，未提交/未发布）
+
+> 依据 `yq.txt` 的 A–D 缺陷线与 F/J/G/C/A/K/B/D/E/H 审计项；详见 `docs/DEVLOG.md` 同名小节与方案 §4 #94–#103。
+
+### A 线：限界与压缩
+
+- `src/agent/tools/readers.ts`：`readFileRange` 先按 `budget = maxBytes - returnedBytes - 1` 裁剪单行（UTF-8 安全）再入结果；`grep` 命中行裁剪 500 字符。
+- `src/agent/limits.ts`：新增 `DEFAULT_TOOL_MESSAGE_LIMIT` / `toolMessageLimit()` / `boundToolMessage()`。
+- `src/agent/runner.ts`：native/legacy 两条路径在写 `role:"tool"` 前统一 `boundToolMessage`。
+- `src/agent/compaction.ts`：摘要采样 256KB；`collectFiles` 采样 64KB + 正则 `{1,240}`；`clip` 限长；无进展熔断（0.9 比例、20KB→8KB）。
+- `src/agent/shell-session.ts`：job 输出窗口 1MB → 256KB。
+- `src/agent/tools/readers.ts`（grep）：超长命中行裁剪。
+
+### B 线：协议
+
+- `src/agent/protocol.ts`：只消费含 `<invoke>` 的块；已知外来方言 0 调用 → `errors`；`stripToolCalls` 保留外来块。
+- `src/lib/native-tools.ts`：`resolveIndex` 无 index 归并；对象 arguments 归一。
+- `src/providers/openaiCompatible.ts`：非流式 JSON 兜底；SSE 传入 `req.idleTimeoutMs`。
+- `src/agent/protocol-mode.ts`：`isNativeUnsupportedError` 结构判定。
+
+### C 线：错误生命周期
+
+- `src/agent/runner.ts`：请求前 `pairToolMessages`；提前 break 补 tool 占位；`lastVisible` 重置。
+- `src/app.ts`：配额提示收窄。
+- `src/lib/net.ts`：`isQuotaError` 收窄；`retryStream` 抛 `QuotaError`。
+- `src/headless.ts`：error → stderr/JSON + 非零退出码；补协议降级回调。
+- `src/index.ts`：初始化错误去 minified 堆栈（`FASTCODE_DEBUG` 保留）。
+
+### 配置 / 权限 / provider 边界
+
+- `src/config/paths.ts`：POSIX 数据目录 0700；`src/config/store.ts`：config 0600、损坏 `.bak` + 提示；`src/session/log.ts`：JSONL 0600。
+- `src/lib/http.ts` / `src/agent/stream.ts` / `src/providers/anthropic.ts`：共享 `requestIdleTimeoutMs`；`src/lib/diagnostics.ts` 上报请求空闲、SSE 回退、tool 消息上限。
+- `src/providers/custom.ts`：`FASTCODE_AUTH_HEADER` / `FASTCODE_AUTH_PREFIX` / `FASTCODE_EXTRA_HEADERS`。
+- `src/providers/index.ts` + `src/providers/catalog.ts` + `src/types.ts`：`modelsPath` 暴露给 probe；占位符解析后再探测。
+- `src/cli-main.ts`：`sessions show` 不存在 id、`trust --forget` 空值/不存在、非法 model ID 返回非零。
+- `package/package.json`：注册 `verify:artifacts` / `bench`。
+
+### 验证
+
+- `npm run typecheck` / `lint` / `build` 通过；Windows `npm test` **325/325**；`npm run verify:artifacts` 通过。
+- 新增回归：超大单行读取、外来方言显式失败、无 index 归并、对象 arguments、压缩大消息、probe modelsPath、custom 认证头、grep 长行。
+- 未做：Termux 真机复跑、方言解析器扩展、厂商端点联机验证、PR CI、`/egress` 命令、ProxyAgent。
+
+## 执行后端抽象（2026-11-15，基础层，CLI 后端默认不注册）
+
+- `src/agent/stream-events.ts`（新增）：`StreamEvent` 闭集（text/thinking/tool-call/usage/turn-end）+ `StreamAssembler` 单一折叠 + `chunkToStreamEvents` 适配旧 chunk；`usage` 先于 `turn-end`、结束后忽略、中断不保留未完成工具调用。
+- `src/agent/stream.ts`：`runStream` 只保留 idle/retry/abort；`RunStreamResult.reasoning`。
+- `src/types.ts`：`ChatChunk.reasoning?`；`Provider.transport/capabilities/authKind`。
+- `src/agent/runner.ts` / `src/app.ts`：`assistant_raw.reasoning` 与会话事实保留 thinking。
+- `src/lib/child-env.ts`（新增）：子进程环境 allowlist + 凭据/ANSI 脱敏。
+- `src/lib/process-tree.ts`（新增）：进程树终止下移；`src/agent/process-tree.ts` 兼容 re-export。
+- `src/lib/values.ts`（新增）：`assertNever`。
+- `src/providers/stdioBackend.ts`（新增）：规范 NDJSON CLI 后端；只提议工具、不执行；allowlist 环境；abort 收敛；默认不注册。
+- 文档：`docs/EXECUTION_BACKENDS.md`（新增）；ARCHITECTURE/MODULES/CHANGELOG/DEVLOG 同步。
+- 错误语义补强：持续协议失败 → `stopReason:"protocol_error"` + error 事件 + headless 非零；`incomplete` headless 非零；`capabilities.retryable:false` 禁止重放；`auth.json` 损坏保留 `.corrupt.bak` 并提示一次。
+- 验证：`typecheck` / `lint` / `build` / `verify:artifacts` 通过；Windows smoke **325/325**；新增事件装配/thinking/环境白名单/脱敏/NDJSON/只提议/abort/错误语义回归。
+- 未做：接入配置/命令/UI、会话续接、外部模型目录、只读 CLI 端到端、Termux 真机。
+
+## 失败语义与方言扩展（2026-11-15）
+
+- `src/session/log.ts`：append 写失败 → stderr + `degraded` + 返回 0；`close()` 幂等，degraded/日志关闭时跳过 projection/fsync/prune。
+- `src/app.ts`：审批决策写 `approval` fact（decision/scope/requestId/approvalKey 哈希）；`trusted.json` 仍是授权状态。
+- `src/agent/approval-json.ts` + `src/headless.ts`：新增 `gate:decision` 帧；headless 无 session log 时只发帧、不落盘。
+- `src/providers/index.ts` + `src/app.ts`：`probeProviderDetailed()` 返回 `{ok, reason, status}`；picker 显示具体原因（无 /models / HTTP / 超时）。
+- `src/agent/runner.ts` + `src/providers/stdioBackend.ts`：`incomplete` error 事件；stdio 收到 `done` 后 terminal latch。
+- `src/agent/protocol.ts`：新增 Hermes/Qwen、Mistral（pre-v11/v11+）、Kimi K2、Llama（tag/裸 JSON）；`detectedDialects`；检测到标记但 0 调用 → `protocol_error`。
+- 文档：新增 `docs/ERROR_SEMANTICS.md`；ARCHITECTURE/MODULES/CHANGELOG/DEVLOG 同步。
+- 验证：`typecheck` / `lint` / `build` / `verify:artifacts` 通过；Windows smoke **325/325**；新增 degraded 会话、幂等 close、审批决策帧、probe 归因、incomplete、terminal latch、五种方言回归。
+
+## 结构治理 L0–L2（2026-11-15）
+
+- `docs/MODULES.md`：目录契约（新增文件登记、依赖方向、受控上行、同名命名空间）；补 `lib/debug.ts`、`commands/threads.ts`、`ui/picker-window.ts`。
+- `docs/AUDIT.md`：标题标注为 0.1.6-beta 起（当前 0.1.8-beta.0），历史正文保留。
+- `LOCALIZATION_REPORT.md`：增加“文件名沿用历史，实际为交接报告”说明。
+- `CONTRIBUTING.md`（新增）：内联 AGENTS 关键约束（clone 后可见）。
+- `docs/CONFIGURATION.md`：移除 `contextBudgetChars` 行，标注内部 env `FASTCODE_SANDBOX`/`ROOT`。
+- 死代码：删除 `src/agent/context.ts`、`contextBudgetChars`（store/runner）及对应 dist 文件。
+- 基线：未执行 pull/sync；本地 HEAD `70eaea9`，`4d2e1c3b` 本地不存在，工作树未提交改动较多。
+- 验证：`typecheck` / `lint` / `build` / `smoke` / `verify:artifacts` 通过。

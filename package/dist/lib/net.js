@@ -25,7 +25,11 @@ export function isRetryableError(error) {
     return /\b(429|5\d\d)\b/.test(message);
 }
 function isQuotaError(error) {
-    return /\b429\b|quota|insufficient|rate limit|billing|balance/i.test(String(error?.message ?? error));
+    const message = String(error?.message ?? error);
+    // Keep this narrow: a 400 like "insufficient tool messages" is a protocol
+    // error, not a billing one.
+    return /\b(402|429)\b/.test(message)
+        || /quota|rate limit|billing|insufficient (?:balance|quota|credit|funds)|exceeded .*(?:quota|balance|limit)/i.test(message);
 }
 export async function retryRequest(fn, options = {}) {
     const attempts = Math.max(1, Math.floor(options.retries ?? 3));
@@ -133,6 +137,11 @@ export async function* retryStream(send, options = {}) {
                 throw abortError();
             if (attempt >= attempts - 1 || !retryOn(lastError)) {
                 lastError.partialText = delivered;
+                // retryRequest already surfaces QuotaError; mirror it here so
+                // callers can special-case chat quotas instead of falling into
+                // the generic catch forever.
+                if (isQuotaError(lastError))
+                    throw new QuotaError(lastError.message);
                 throw lastError;
             }
             options.onRetry?.(lastError, attempt + 1);

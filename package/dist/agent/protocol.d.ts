@@ -8,6 +8,11 @@ export interface ToolCallParseResult {
     consumedEnd: number;
     /** True parse failures. Salvaged calls do not add an error. */
     errors: string[];
+    /**
+     * Marker families recognized in the text, even when they produced no call.
+     * A non-empty list with zero calls must block a "complete" stop reason.
+     */
+    detectedDialects: string[];
 }
 /**
  * Parse all complete tool calls, then salvage only the *remaining* text.

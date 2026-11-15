@@ -1,11 +1,14 @@
 import { IncompleteStreamError, retryStream } from "../lib/net.js";
+import { chunkToStreamEvents, StreamAssembler } from "./stream-events.js";
 export async function runStream(provider, req, apiKey, options = {}) {
     const idleTimeoutMs = positive(options.idleTimeoutMs, 60_000);
-    const maxRetries = Math.max(0, Math.floor(options.maxRetries ?? 1));
+    // A non-idempotent backend (for example a CLI that resumes a session or
+    // performs work per spawn) must not replay the turn on a transient error.
+    const maxRetries = provider.capabilities?.retryable === false
+        ? 0
+        : Math.max(0, Math.floor(options.maxRetries ?? 1));
     let retried = 0;
-    let text = "";
-    let usage;
-    let toolCalls;
+    const assembler = new StreamAssembler();
     let sawDone = false;
     const send = async function* ({ clientRequestId }) {
         yield* attemptChunks(provider, { ...req, clientRequestId }, apiKey, {
@@ -24,29 +27,44 @@ export async function runStream(provider, req, apiKey, options = {}) {
             },
             onReset: options.onReset,
         })) {
+            // Prefix-safe retry replaces the whole stream; clear the assembly
+            // state before applying the replacement chunk.
             if (chunk.reset)
-                text = chunk.delta ?? "";
-            else if (chunk.delta)
-                text += chunk.delta;
+                assembler.reset();
+            for (const event of chunkToStreamEvents(chunk))
+                assembler.push(event);
             if (chunk.delta)
-                options.onDelta?.(chunk.delta, text);
-            if (chunk.usage)
-                usage = chunk.usage;
-            if (chunk.toolCalls)
-                toolCalls = chunk.toolCalls;
+                options.onDelta?.(chunk.delta, assembler.text);
             if (chunk.done)
                 sawDone = true;
         }
     }
     catch (err) {
+        const partial = assembler.text;
+        const calls = assembler.toolCalls();
         if (err instanceof IncompleteStreamError) {
-            return { text: err.partialText || text, usage, toolCalls, incomplete: true, retried };
+            return {
+                text: partial || err.partialText,
+                reasoning: assembler.thinking || undefined,
+                usage: assembler.usage,
+                toolCalls: calls.length > 0 ? calls : undefined,
+                incomplete: true,
+                retried,
+            };
         }
-        if (err && typeof err === "object" && !err.partialText && text)
-            err.partialText = text;
+        if (err && typeof err === "object" && !err.partialText && partial)
+            err.partialText = partial;
         throw err;
     }
-    return { text, usage, toolCalls, incomplete: !sawDone, retried };
+    const assembled = assembler.snapshot();
+    return {
+        text: assembled.text,
+        reasoning: assembled.thinking || undefined,
+        usage: assembled.usage,
+        toolCalls: assembled.toolCalls.length > 0 ? assembled.toolCalls : undefined,
+        incomplete: !sawDone,
+        retried,
+    };
 }
 async function* attemptChunks(provider, req, apiKey, options) {
     const parent = options.signal;
@@ -70,7 +88,7 @@ async function* attemptChunks(provider, req, apiKey, options) {
     };
     resetIdle();
     try {
-        for await (const chunk of provider.stream({ ...req, signal: child.signal }, apiKey)) {
+        for await (const chunk of provider.stream({ ...req, signal: child.signal, idleTimeoutMs: options.idleTimeoutMs }, apiKey)) {
             resetIdle();
             yield chunk;
             if (chunk.done)

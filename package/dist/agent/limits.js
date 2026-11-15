@@ -11,6 +11,24 @@ export function toolOutputLimit() {
     return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_TOOL_OUTPUT_LIMIT;
 }
 /**
+ * Hard ceiling for a single tool message that reaches the model.
+ *
+ * Per-tool limits (read/grep/shell/read_many) should already keep output much
+ * smaller; this is the last line of defense at the one place that writes
+ * `role:"tool"` messages, so a future tool cannot silently feed the model a
+ * multi-megabyte payload.
+ */
+export const DEFAULT_TOOL_MESSAGE_LIMIT = 1_000_000;
+export function toolMessageLimit() {
+    const raw = Number(process.env["FASTCODE_TOOL_MESSAGE_LIMIT"]);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_TOOL_MESSAGE_LIMIT;
+}
+export function boundToolMessage(text, limit = toolMessageLimit()) {
+    if (text.length <= limit)
+        return text;
+    return text.slice(0, limit) + `\n[fastcode: tool output truncated at ${limit} chars]`;
+}
+/**
  * Bounded text accumulator.
  *
  * mode "head" keeps the first N characters (listings, search hits);

@@ -8,6 +8,17 @@
 export declare const DEFAULT_TOOL_OUTPUT_LIMIT = 30000;
 export declare function toolOutputLimit(): number;
 /**
+ * Hard ceiling for a single tool message that reaches the model.
+ *
+ * Per-tool limits (read/grep/shell/read_many) should already keep output much
+ * smaller; this is the last line of defense at the one place that writes
+ * `role:"tool"` messages, so a future tool cannot silently feed the model a
+ * multi-megabyte payload.
+ */
+export declare const DEFAULT_TOOL_MESSAGE_LIMIT = 1000000;
+export declare function toolMessageLimit(): number;
+export declare function boundToolMessage(text: string, limit?: number): string;
+/**
  * Bounded text accumulator.
  *
  * mode "head" keeps the first N characters (listings, search hits);

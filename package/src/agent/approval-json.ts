@@ -64,6 +64,41 @@ export function encodeGateAsk(request: ApprovalRequest): GateAskEvent {
     };
 }
 
+export interface GateDecisionEvent {
+    event: "gate:decision";
+    version: number;
+    id: string;
+    decision: {
+        kind: string;
+        scope?: string;
+        reason?: string;
+        feedback?: string;
+    };
+    error?: string;
+}
+
+/**
+ * Output frame for a resolved decision. Headless mode has no session log, so
+ * this frame is its only durable record; TUI mode records an `approval` fact.
+ */
+export function encodeGateDecision(request: ApprovalRequest, decision: ApprovalDecision, error?: string): GateDecisionEvent {
+    const payload =
+        decision.kind === "allow"
+            ? { kind: "allow", scope: decision.scope }
+            : decision.kind === "deny"
+                ? { kind: "deny", ...(decision.reason ? { reason: decision.reason } : {}) }
+                : decision.kind === "feedback"
+                    ? { kind: "feedback", feedback: decision.text }
+                    : { kind: decision.kind };
+    return {
+        event: "gate:decision",
+        version: GATE_PROTOCOL_VERSION,
+        id: request.id,
+        decision: payload,
+        ...(error ? { error } : {}),
+    };
+}
+
 export interface GateDecisionResult {
     decision: ApprovalDecision;
     error?: string;

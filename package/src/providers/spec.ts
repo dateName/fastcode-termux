@@ -13,6 +13,9 @@ const ENV_MAP: Record<string, string> = {
     account_id: "CLOUDFLARE_ACCOUNT_ID",
     project_id: "GOOGLE_CLOUD_PROJECT",
     deployment: "AZURE_OPENAI_DEPLOYMENT",
+    endpoint_id: "RUNPOD_ENDPOINT_ID",
+    resource: "AZURE_OPENAI_RESOURCE",
+    location: "GOOGLE_CLOUD_LOCATION",
 };
 
 export function resolveBaseUrl(spec: RequestSpec): string {

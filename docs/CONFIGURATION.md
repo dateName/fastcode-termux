@@ -1,21 +1,31 @@
 # 配置与密钥
 
-## 1. 两个文件，各管各的
+## 1. 数据目录与文件职责
+
+默认 `~/.fastcode/`（可用 `FASTCODE_HOME` 整体迁移）：
 
     ~/.fastcode/
-      config.json   主服务商、主模型、主题、agent 开关、已启用技能/插件
-      auth.json     只放 API Key（单独文件，Termux 上权限 0600）
-      skills/       安装的 SKILL.md
-      plugins/      插件包
-      cache/        缓存
-      sessions/     会话记录（预留）
-      logs/         日志（预留）
-      model-meta.json  可选：覆盖模型上下文窗口 / charsPerToken（见 §4）
+      config.json       主配置：provider/model/theme/agentMode/sharedDirs/egress/shellPoolSize/capabilities
+      auth.json         仅 API Key（provider 级，权限 0600；删除后需重新 /login）
+      trusted.json      已信任目录 + 记住的工具审批（catalogHash 绑定；删除后重新信任）
+      model-meta.json   可选：覆盖上下文窗口 / charsPerToken / supportsTools
+      skills/           已安装 SKILL.md（含 .fastcode-source 完整性基线）
+      plugins/          常驻插件包（PLUGIN.md）
+      cache/            registry / 下载缓存（可安全删除）
+      sessions/         JSONL 事实流 + <id>.projection.json（会话历史；删除即丢失历史）
+      logs/             debug 日志（FASTCODE_DEBUG=1 时写入；可安全删除）
 
-改 config.json 永远不会动到 auth.json；反之亦然。
-目录可用环境变量 FASTCODE_HOME 整体迁移，例如放到外置存储：
+- 改 `config.json` 永远不会动到 `auth.json`；反之亦然。
+- 备份建议：`config.json`、`auth.json`、`trusted.json`、`model-meta.json`；`sessions/` 视需要。
+- `config.json` 损坏时启动会回退默认值，并保留首次发现的副本为 `config.json.bak`、在 stderr 提示一次；不会静默丢弃原文件。
+- `auth.json` 损坏时按空凭据启动，并保留副本为 `auth.json.corrupt.bak`、在 stderr 提示一次；不会静默假装未保存过 key。
+- 会话 JSONL 写入失败时进入 `degraded`：stderr 提示一次，`close` 跳过 projection/prune（不把残缺历史固化成已验证副本）；`FASTCODE_SESSION_LOG=0` 为完全不落盘模式。
+- 失败路径与退出码映射见 `docs/ERROR_SEMANTICS.md`。
+- 可安全清理：`cache/`、`logs/`；`skills/`、`plugins/` 用命令卸载；`sessions/` 用剪枝或删除。
+- 常用定位：`fastcode config` 打印路径，`fastcode config path` 只打印 `config.json`。
+- 目录可用环境变量 `FASTCODE_HOME` 整体迁移，例如放到外置存储：
 
-    export FASTCODE_HOME=/data/data/com.termux/files/home/fastcode-data
+      export FASTCODE_HOME=/data/data/com.termux/files/home/fastcode-data
 
 ## 2. config.json 字段
 
@@ -33,19 +43,18 @@
 | sharedDirs | 额外允许读写的目录（相对项目根、`~/`、绝对路径） | [] |
 | maxAgentTurns | 单次请求最多工具轮次 | 24 |
 | requestIdleTimeoutMs | 流式空闲超时（毫秒） | 60000 |
-| contextBudgetChars | 旧字符预算（阶段 4 起由 token 阈值取代，保留但不再参与压缩） | 400000 |
 | reasoningEffort | 思考强度 auto/low/medium/high/max | auto |
 | shellPoolSize | **resident** shell 池并发数；安全默认 2，最大 6；`/threads <1-6>` 修改；不限制 one-shot 路径 | 2 |
 | capabilities | 缓存的 provider/model 能力；`toolCalling` 记 `native` / `pseudo` | `{ "toolCalling": {} }` |
-| egress | 应用层 egress 策略；见 §2.1 | `{ "enabled": false, "mode": "audit", ... }` |
+| egress | 应用层 egress 策略；见 §2.1 | `{ "enabled": true, "mode": "block", ... }` |
 
 ### 2.1 egress 策略
 
 ```json
 {
   "egress": {
-    "enabled": false,
-    "mode": "audit",
+    "enabled": true,
+    "mode": "block",
     "denyPaths": [],
     "denyGlobs": [],
     "denyContentMarkers": ["AKIA[0-9A-Z]{16}", "-----BEGIN [A-Z ]*PRIVATE KEY-----"],
@@ -55,19 +64,20 @@
 }
 ```
 
-- `enabled`：是否执行 block 拦截；`false` 时只审计。
-- `mode`：`off` / `audit` / `block`。`off` 是完整 kill switch；默认 `audit` 只发 `egress_denied`，不改变工具结果；`enabled:true + mode:"block"` 才拒绝执行。
-- `denyPaths` / `denyGlobs`：追加到内置敏感路径规则，不能删除内置规则；deny 恒胜于任何 allow。
+- `enabled`：是否执行 block 拦截；默认 `true`。
+- `mode`：`off` / `audit` / `block`。默认 `block`；`audit` 只发 `egress_denied`、不改变工具结果；`off` 是完整 kill switch。`enabled:true + mode:"block"` 才拒绝执行。
+- `denyPaths` / `denyGlobs`：追加到内置敏感路径规则，不能删除内置规则；deny 恒胜于任何 allow。内置不可移除项为 `$FASTCODE_HOME/auth.json`（密钥文件）与 `$FASTCODE_HOME/sessions/`（历史对话），跟随 `FASTCODE_HOME` 动态解析。
 - `denyContentMarkers`：正则字符串，追加到内置标记；非法正则会忽略。内置标记与 `.env.example`/`.envrc` 放行规则不可由配置删除。
 - `maxScanBytes`：outbound 内容/工具输出扫描预算；block 态超预算返回 `EGRESS_DENY`（`scan_budget_exceeded`），audit 态只记录。
 - `scanToolOutput`：是否在工具输出返回模型前扫描内容标记。
 - block 拒绝返回 `code:"EGRESS_DENY"`，不生成审批请求，不写 `trusted.json`；`FASTCODE_ALLOW_DANGEROUS`、`FASTCODE_TRUST_ALL`、`sharedDirs` 不能覆盖。
-- 配置变更通过 config 指纹缓存即时生效。首版默认 audit，建议 soak 1–2 周后再切 block。
+- 配置变更通过 config 指纹缓存即时生效。默认即阻断（`auth.json` + `sessions/` 恒拦截）；如需先观察，可临时改为 `mode:"audit"`。
 
-SSE 连接另有一层 25s「无数据」超时（抛 `NetworkStallError`，已收到的文本保留）；
-`requestIdleTimeoutMs` 是外层兜底（默认 60s），两者可以独立触发。
-推理型模型（实测 DeepSeek Flash + 工具提示）首 token 可能超过 25s；此时用
-`FASTCODE_SSE_IDLE_MS=90000 fastcode` 启动，或把该变量写进 `~/.bashrc`。
+流式空闲超时以 `config.json` 的 `requestIdleTimeoutMs` 为唯一准绳（默认 60000ms），
+SSE 解析层与外层重试层共用同一个值，不会再出现 25s 先于 60s 触发的双计时。
+`FASTCODE_SSE_IDLE_MS` 仅作为直接调用 `streamSSE` 时的回退默认值；聊天路径以配置为准。
+推理型模型（实测 DeepSeek Flash + 工具提示）首 token 可能较慢；此时把
+`requestIdleTimeoutMs` 调大（或临时 `FASTCODE_SSE_IDLE_MS=90000` 给独立调用方）。
 
 流式请求中断后会重试一次，并用最长公共前缀跳过已收到的文本；若新流内容不一致，
 丢弃旧前缀、以新流为准（不会拼接）。连接级 429 连续失败到上限时抛 `QuotaError`。
@@ -165,6 +175,8 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 环境变量与 auth.json 都是「服务商级」的，对同一 provider 的所有模型通用；
 切换模型不会要求重新输入 Key。
 
+内部变量：`FASTCODE_SANDBOX` / `FASTCODE_SANDBOX_ROOT` 由 shell 工具为子进程注入，用于标记工作区根；普通用户不需要设置。
+
 | 服务商 | 环境变量 |
 |---|---|
 | DeepSeek | DEEPSEEK_API_KEY |
@@ -189,12 +201,16 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_STABLE_UI | 设为 1 强制稳定界面 |
 | FASTCODE_BASE_URL | 自定义服务商基地址 |
 | FASTCODE_MODEL | 自定义服务商默认模型 |
+| FASTCODE_AUTH_HEADER | 自定义服务的认证头名（如 `x-api-key` / `api-key`）；默认 `authorization` |
+| FASTCODE_AUTH_PREFIX | 认证头的值前缀；设置自定义头时默认空串，未设置时默认 `Bearer ` |
+| FASTCODE_EXTRA_HEADERS | 额外请求头，JSON 对象（仅字符串值），如 `{"x-org":"acme"}` |
 | FASTCODE_UPDATE_REGISTRY | fastcode update 查询地址 |
 | FASTCODE_SKILLS_REGISTRY | 覆盖 skills 注册表地址；空字符串或纯空白视为未设置，回落到 `skillsRegistry`；两者都空时按名称/owner-repo 安装会被拒绝，直接 URL 安装仍可用 |
 | FASTCODE_DEBUG | 设为 1 打开低流量 stderr 调试日志（timeout 钳位、配置缓存失效等） |
 | FASTCODE_ALLOW_PATHS | 额外允许访问的根目录，多个用系统分隔符（Termux 为冒号） |
 | FASTCODE_ALLOW_SHARED_STORAGE | 设为 0 关闭 Termux 默认放行的 ~/storage/shared |
 | FASTCODE_TOOL_OUTPUT_LIMIT | 工具输出上限（字符），默认 30000，边产边截断 |
+| FASTCODE_TOOL_MESSAGE_LIMIT | 单条 tool 消息进入历史的硬上限（字符），默认 1000000；各工具自身限额之外的最终兜底 |
 | FASTCODE_SESSION_LOG | 设为 0 关闭 JSONL 会话落盘 |
 | FASTCODE_SESSION_CACHE_MB | 会话缓存上限 MB，默认 256，超出先删最旧 |
 | FASTCODE_FSYNC | 1 强制 checkpoint 后 fsync；0 关闭；不设时仅在 `$FASTCODE_HOME` 位于 `/sdcard`、`/storage/emulated` 下启用。会话 close（含 `/exit`）仍会对 JSONL 与 projection 做 best-effort fsync |
@@ -205,8 +221,8 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_HEAP_LIMIT_MB | heap 强制压缩阈值（MB），默认 220 |
 | FASTCODE_SERVER_COMPACTION | 实验性 server-aware 预留；当前调用方未传 opaque state，实际不改变本地压缩 |
 | FASTCODE_MAX_SPAWN_PER_TURN | 每轮最多新建 shell 进程数（resident + one-shot 共用），默认 8；这是每轮新建速率，不是全局并发上限。达上限时 one-shot 立即失败，resident 路径可能排队等已有 shell |
-| FASTCODE_TOOL_PROTOCOL | `legacy`（默认）/ `native` / `auto`；原生 tools 返回 400 时自动降级并缓存 `pseudo` |
-| FASTCODE_SSE_IDLE_MS | SSE 无数据超时（毫秒），默认 25000；推理型模型首 token 很慢时可调大 |
+| FASTCODE_TOOL_PROTOCOL | `auto`（默认）/ `native` / `legacy`；`auto` 对兼容 provider 用原生 tools，遇到不支持或 400 时自动降级并缓存 `pseudo`；`legacy` 强制伪协议 |
+| FASTCODE_SSE_IDLE_MS | 直接调用 SSE 解析器时的无数据超时（毫秒），默认 25000；聊天路径由 `requestIdleTimeoutMs` 决定 |
 | FASTCODE_TRUST_ALL | 设为 1 跳过项目信任确认 |
 | FASTCODE_ALLOW_DANGEROUS | 设为 1 临时放行非 Hard Block 的普通/Soft Gate 命令；Hard Block 永不受影响 |
 | FASTCODE_SHELL_ALLOWLIST | 只允许匹配这些正则的命令，分号分隔 |
@@ -220,10 +236,16 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_TOKEN_BUDGET | 单次用户请求累计输入 token 预算；耗尽时返回错误并保留已生成文本；不设或 0 关闭 |
 | FASTCODE_COST_BUDGET_USD | 单次用户请求累计费用预算（USD，按 provider 返回的 usage 计）；不设或 0 关闭 |
 | FASTCODE_LOOP_EXEMPT | 逗号分隔的工具名，完全跳过循环检测（例如 `shell,apply_patch`） |
+| RUNPOD_ENDPOINT_ID | catalog `runpod` 的 `{endpoint_id}` 占位符 |
+| AZURE_OPENAI_RESOURCE / AZURE_OPENAI_DEPLOYMENT | catalog `azure` 的 `{resource}` / `{deployment}` 占位符；key 用 `AZURE_OPENAI_API_KEY` |
+| CLOUDFLARE_ACCOUNT_ID | catalog `cloudflare` 的 `{account_id}`；token 用 `CLOUDFLARE_API_TOKEN` 或 `CF_API_TOKEN` |
+| AWS_REGION / AWS_BEARER_TOKEN_BEDROCK | catalog `bedrock` 的 `{region}` 与 Bearer key |
+| GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_LOCATION / GOOGLE_ACCESS_TOKEN | catalog `vertex` 的占位符与 OAuth token |
 
 ### 模型元数据与循环检测
 
-`lib/model-meta.ts` 内置 13 个 provider 默认模型的上下文窗口与 `charsPerToken`。
+`lib/model-meta.ts` 内置 13 个核心 provider 默认模型的上下文窗口与 `charsPerToken`；
+catalog provider 未提供已验证默认模型时使用通用回退值，可在 `~/.fastcode/model-meta.json` 覆盖。
 OpenAI 兼容端点通常不返回窗口大小，因此静态表是压缩与 `/context` 的依据。
 可用 `~/.fastcode/model-meta.json`（或 `$FASTCODE_HOME/model-meta.json`）覆盖：
 
@@ -372,7 +394,7 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
     /login deepseek                 # 从 model 选择继续
     /login deepseek deepseek-flash   # 从 masked key 输入继续
 
-- Provider/model picker 支持 ↑/↓、Enter、`1`–`9` 编号选择、Esc 取消；新 provider 默认预选其 defaultModel。
+- Provider/model picker 支持 ↑/↓ 翻页、Enter、Esc 取消；窗口固定 9 行，`1`–`9` 选择**当前窗口内**的第 N 项（翻页后编号仍连续），新 provider 默认预选其 defaultModel。
 - 模型列表由 `provider.listModels()` 返回，provider 离线时使用内置/缓存列表并明确标记 `(offline)`；列表仍支持手动输入 model ID。
 - 无需 Key 的 provider 直接完成 model 配置；`/model <id>`、`/provider <id>` 和完整 `/login provider model key` 快捷路径仍然有效。
 
@@ -393,16 +415,45 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
 - 若模型返回 400 且错误提到 reasoning/thinking/unsupported，
   客户端会去掉该参数重试一次。
 
+### 6.3 Provider catalog（55 个）
+
+内置 13：anthropic / openai / google / deepseek / openrouter / groq / mistral / xai / moonshot / zhipu / qwen / ollama / custom。
+
+catalog 42（OpenAI 兼容，`providers/catalog.ts`）：
+- 聚合/网关：aihubmix、aiwave、hefu、4sapi、aigateway、dmxapi、atlascloud、venice、baseten、atomicchat、featherless、sophnet、omnirouter、edenai、orcarouter、runpod、opencode-zen、opencode-go
+- 国内：minimax、volcengine、qianfan、hunyuan、stepfun、spark、siliconflow、302ai
+- 国际：together、fireworks、perplexity、cerebras、deepinfra、nvidia、github-models、huggingface、requesty、vllm、lmstudio、cohere
+- 云平台占位符：azure、cloudflare、bedrock、vertex（所需环境变量见 §4）
+
+未提供已验证默认模型的 catalog 条目在 model picker 中提供「Enter model ID manually…」；
+填入 Key 后可用在线 `/models` 列表。`Replicate`、`小米/京东云/天翼云/联通云/快手`、`oc2api/work2api`
+暂未内置（非 OpenAI 方言或无固定 base URL），可用 `custom` 接入。
+
+### 6.4 其他选择器
+
+以下命令无参数时打开与 `/model` 相同的选择器窗口（固定 9 行、`1`–`9` 选当前页、↑/↓ 翻页、Enter 确认、Esc 取消）：
+
+    /theme      # 颜色主题
+    /threads    # resident shell 并发 1–6
+    /agent      # agent 模式 on/off
+    /effort     # 思考强度 auto/low/medium/high/max
+    /skills enable|disable|info   # 省略 name 时列出已安装技能
+    /plugin enable|disable|info   # 省略 name 时列出插件
+    /attach · /kill               # 省略 id 时列出后台 shell 会话
+
+带参数时仍保留快捷路径，例如 `/theme neon`、`/threads 4`、`/agent off`、`/effort high`。
+删除类命令（`/skills uninstall`、`/plugin remove`、`/logout`）仍要求显式参数，避免误选。
+
 ## 7. 长任务相关配置（0.1.8-beta.0）
 
 | 字段 | 作用 | 默认 |
 |---|---|---|
 | maxAgentTurns | 单次请求最多工具轮次；到上限提示“输入 继续” | 24 |
 | requestIdleTimeoutMs | 流式空闲超时；每次收到 chunk 重置 | 60000 |
-| contextBudgetChars | 旧字符预算（阶段 4 起由 token 阈值取代，保留但不再参与压缩） | 400000 |
 | shellPoolSize | **resident** shell 池并发数；默认 2，最大 6，可用 `/threads` 调整；不限制 one-shot 路径 | 2 |
 
 达到轮次上限或断流时历史不会丢：直接输入 `继续` 即可接着做。
+旧版 `contextBudgetChars` 已移除；读取旧配置时该字段会被忽略，压缩使用 token 阈值。
 历史压缩保留首条请求与最近 6 轮（按 2×N 条消息，即默认 12 条），把中间区写入 `summary-*.md` 并插入 `[context compacted …]` 标记；
 摘要优先 Notes/Outcomes/Files，超限条目带 marker，新压缩会清理本会话旧摘要。
 `/compact` 现在会写 `compacted` fact；`/clear` 会写 `cleared` fact，resume 只重建 cleared 之后的事实。
@@ -410,11 +461,15 @@ checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
 
 ### 双轨工具协议
 
-默认 `legacy`（模型输出 `<fastcode_tool>` 伪协议），行为与旧版一致。
-`FASTCODE_TOOL_PROTOCOL=auto` 时，OpenAI 兼容 provider 优先原生 function calling；
+默认 `auto`：OpenAI 兼容 provider（含 DeepSeek）优先原生 function calling；
 Anthropic / Google / 未知 provider 自动用伪协议（fail closed）。
 原生请求被 400 拒绝时，本次立即改用伪协议重试，并把 `capabilities.toolCalling` 记为 `pseudo`，
-后续不再尝试原生。可用 `legacy` 强制回退、`native` 强制原生（调试用）。
+后续不再尝试原生。可用 `legacy` 强制回退伪协议、`native` 强制原生并绕过缓存（调试用）。
+如需固定单个 `provider::model` 的能力，可写 `capabilities.toolCalling["deepseek::deepseek-flash"] = "native" | "pseudo"`。
+
+这里的「原生」只指 **OpenAI `tool_calls` 方言**（请求 `{type:"function"}` schema、流解析 `delta.tool_calls`、历史 `role:"tool"` + `tool_call_id`）。
+白名单为 `openai/openrouter/deepseek/groq/mistral/xai/moonshot/zhipu/qwen/ollama`；Google 走 Google 的 OpenAI 兼容端点但目前不在白名单，Anthropic 的 `tool_use`/`tool_result` 与 Gemini 原生 `functionCall` 没有 adapter。
+`native` 强制会绕过白名单，对非该方言的 provider 可能 400 或无效；200 但忽略 `tools` 不会触发自动降级，需 `legacy` 或按模型钉 `pseudo`。
 
 ### 后台 shell
 
@@ -427,6 +482,7 @@ shell 工具有两条执行路径，预算互不共享：
 | resident | POSIX 且命令未被判定为交互/REPL | `shellPoolSize`：默认 **2**，`/threads <1-6>` 最大 6（仅 resident） | 排队等待空闲 resident（受命令 timeout 限制） |
 | one-shot | Windows，或命令命中交互/REPL 判定 | `FASTCODE_MAX_SPAWN_PER_TURN`：默认 **8/轮**（每轮新建速率，不是全局并发上限） | 立即返回 `spawn limit reached`，**不排队** |
 
+- 每个 shell job 只保留最近 **256KB** 输出窗口；更早的内容会被丢弃。runner 另有单条 tool 消息硬上限（`FASTCODE_TOOL_MESSAGE_LIMIT`，默认 1MB）。
 - `/threads` 只调整 resident 池，不影响 one-shot，也不构成“全局最多 2/6 个进程”的承诺。
 - `FASTCODE_MAX_SPAWN_PER_TURN` 同时计入新建 resident 和 one-shot；同一轮若新建 2 个 resident，本轮只剩 6 次 one-shot 配额。
 - `shellPoolStats().active` 和 `doctor` 的 `active` 统计所有仍在运行的 shell job（resident + one-shot）；`pool/maxPool` 只统计 resident。二者会不一致。
@@ -451,8 +507,8 @@ shell 工具有两条执行路径，预算互不共享：
 | `fastcode` | 启动 TUI |
 | `fastcode "prompt"` | 启动 TUI 并带初始提示（会进入对话） |
 | `fastcode --version` / `-v` | 显示版本 |
-| `fastcode --help` / `-h` | 显示全部命令与选项 |
-| `fastcode provider` / `provider <id>` | 列出 provider / 设置默认 provider |
+| `fastcode --help` / `-h` / `help` | 显示全部命令与选项（三种写法等价） |
+| `fastcode provider` / `provider <id> [model]` | 列出 provider / 设置默认 provider（无已验证默认模型时必须同时给 model） |
 | `fastcode model` / `model <id>` | 列出当前 provider 的模型 / 设置默认模型 |
 | `fastcode config` / `config path` | 打印配置与数据目录 / 只打印 config.json 路径 |
 | `fastcode sessions` / `sessions show <id>` | 列出会话 / 打印某会话事实与投影摘要 |
@@ -468,18 +524,41 @@ API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`�
 
 ### 8.2 TUI 斜杠命令（纯客户端操作）
 
-| 命令 | 作用 |
-|---|---|
-| `/help` (`h`, `?`) / `/about` (`version`) | 命令列表 / 版本、平台、链接 |
-| `/config` / `/theme [id]` / `/system [prompt]` / `/reset` / `/whoami` | 配置、主题、系统提示词、重置（不动 key）、Key 状态 |
-| `/provider [id]` / `/model [id]` / `/effort [auto\|low\|medium\|high\|max]` | provider / 模型 / 思考强度 |
-| `/login [provider] [model] [key]` / `/logout <provider> [model\|--all]` | 绑定 / 删除 Key（auth v3 为 provider 级，model 参数仅为兼容） |
-| `/clear` (`cls`) / `/compact` / `/context` / `/cost` | 清空历史 / 强制压缩 / 上下文阈值与 heap / 本会话用量与费用 |
-| `/expand` / `/cancel` / `/steer <text>` / `/exit` (`quit`, `q`) | 展开输出 / 取消运行 / 引导当前运行 / 退出（运行中需二次确认） |
-| `/agent [on\|off\|status]` / `/tools` / `/cwd` | agent 开关 / 工具列表 / 沙箱根目录 |
-| `/jobs` / `/attach <id>` / `/kill <id>` / `/bg` | 后台会话列表 / 查看新输出 / 结束 / 后台机制说明 |
-| `/threads [1-6]` (`pool`) | 查看/调整 resident shell 并发（默认 2，最大 6；不影响 one-shot） |
-| `/skills ...` / `/plugin ...` / `/edit` | 技能 / 常驻插件 / 用 `$EDITOR` 编辑提示词 |
+| 命令 | 作用 | 示例 |
+|---|---|---|
+| `/help` (`h`, `?`) | 列出全部斜杠命令 | `/help` |
+| `/about` (`version`) | 版本、平台、Node、链接 | `/about` |
+| `/config` | 打印生效配置与数据路径 | `/config` |
+| `/theme [id]` | 主题选择器；带 id 直接切换 | `/theme` → picker |
+| `/system [prompt]` | 查看或设置系统提示词 | `/system 你是一个简洁助手` |
+| `/reset` | 恢复默认 provider/model/theme/system prompt（不动 Key） | `/reset` |
+| `/whoami` | 当前 Key 来源（文件/env）与全部已存 Key（掩码） | `/whoami` |
+| `/provider [id]` | provider 选择器；带 id 直接切换（无已验证默认模型时进入模型选择） | `/provider` / `/provider together` |
+| `/model [id]` | 当前 provider 的模型选择器；带 id 直接设置 | `/model` |
+| `/effort [level]` | 思考强度选择器 `auto/low/medium/high/max` | `/effort` / `/effort high` |
+| `/login [provider] [model] [key]` | provider → model → Key 向导 | `/login` / `/login deepseek deepseek-flash <key>` |
+| `/logout <provider> [model\|--all]` | 删除已存 Key（provider 级） | `/logout deepseek --all` |
+| `/agent [on\|off\|status]` | agent 模式选择器 / 显式开关 / 状态 | `/agent` → picker |
+| `/tools` | 列出 15 个 agent 工具 | `/tools` |
+| `/cwd` | 显示当前工作目录与沙箱根 | `/cwd` |
+| `/plugin [...]` | 常驻插件：`list/import/enable/disable/remove/info`；`enable/disable/info` 省略名字时打开选择器 | `/plugin enable` |
+| `/skills [...]` | 技能：`list/search/install/uninstall/enable/disable/info/verify/registry`；`enable/disable/info` 省略名字时打开选择器 | `/skills info` |
+| `/clear` (`cls`) | 清空当前会话历史并写 `cleared` fact | `/clear` |
+| `/compact` | 强制压缩历史并写 `compacted` fact | `/compact` |
+| `/context` | 当前 token 估算、压缩阈值、heap | `/context` |
+| `/cost` | 本会话 token 与费用 | `/cost` |
+| `/expand` | 切换工具输出展开/折叠 | `/expand` |
+| `/cancel` | 取消当前 run（保留部分输出） | `/cancel` |
+| `/steer <text>` | 运行中追加引导 | `/steer 改用更小的改动` |
+| `/exit` (`quit`, `q`) | 退出；run 中需 5s 内二次确认 | `/exit` |
+| `/jobs` | 列出后台 shell 会话 | `/jobs` |
+| `/attach [id]` | 查看后台会话的新输出；省略 id 时打开会话选择器 | `/attach` |
+| `/kill [id]` | 终止后台会话进程树；省略 id 时打开会话选择器 | `/kill` |
+| `/bg` | 说明长命令自动转后台机制 | `/bg` |
+| `/threads [1-6]` (`pool`) | resident shell 并发选择器 / 设置 | `/threads` → picker |
+| `/edit` | 用 `$EDITOR` 编辑当前输入 | `/edit` |
+
+说明：`/provider`、`/model`、`/theme`、`/threads`、`/agent`、`/effort` 无参数时都会打开同一套选择器；带参数时保留快捷路径。
 
 说明：`/system` 本身不发模型请求，但会改变后续对话的系统提示词；`/agent`、`/theme`、`/config`、`/reset`、`/whoami` 等只改本地状态/配置。
 

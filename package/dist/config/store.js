@@ -38,8 +38,6 @@ export const DEFAULT_CONFIG = {
     maxAgentTurns: 24,
     /** Abort a stream that receives no data for this long (ms). */
     requestIdleTimeoutMs: 60_000,
-    /** Approximate character budget before history compaction kicks in. */
-    contextBudgetChars: 400_000,
     /** Thinking depth: auto = send nothing, provider default. */
     reasoningEffort: "auto",
     /** Resident shell concurrency: safe default 2, max 6. `/threads` changes it. */
@@ -56,6 +54,8 @@ export const DEFAULT_CONFIG = {
 };
 export const AUTH_VERSION = 3;
 let configCache;
+let configWarningShown = false;
+let authWarningShown = false;
 function configFingerprint(file) {
     try {
         const info = statSync(file);
@@ -89,7 +89,23 @@ export function loadConfig() {
             const raw = JSON.parse(readFileSync(config, "utf8"));
             value = { ...DEFAULT_CONFIG, ...raw };
         }
-        catch {
+        catch (err) {
+            // A corrupted config must not silently reset the user's settings.
+            // Keep a copy for recovery and say so once per process.
+            try {
+                const backup = config + ".bak";
+                if (!existsSync(backup))
+                    copyFileSync(config, backup);
+            }
+            catch {
+                // Best effort; the warning below still fires.
+            }
+            if (!configWarningShown) {
+                configWarningShown = true;
+                const detail = err instanceof Error ? err.message : String(err);
+                process.stderr.write(`[fastcode] config.json is not valid JSON; using defaults. ` +
+                    `Original kept at ${config}.bak (${detail}).\n`);
+            }
             value = { ...DEFAULT_CONFIG };
         }
     }
@@ -99,6 +115,7 @@ export function loadConfig() {
 export function saveConfig(cfg) {
     const { config } = getPaths();
     atomicWrite(config, JSON.stringify(cfg, null, 2));
+    lockdown(config);
     invalidateConfigCache();
 }
 /** Composite id used by the legacy v2 format; kept for API compatibility. */
@@ -127,7 +144,23 @@ export function loadAuth() {
     try {
         raw = JSON.parse(readFileSync(auth, "utf8"));
     }
-    catch {
+    catch (err) {
+        // Match config.json's recovery stance: keep a copy, warn once, and do
+        // not silently pretend the user never stored any credentials.
+        try {
+            const backup = auth + ".corrupt.bak";
+            if (!existsSync(backup))
+                copyFileSync(auth, backup);
+        }
+        catch {
+            // Best effort; the warning below still fires.
+        }
+        if (!authWarningShown) {
+            authWarningShown = true;
+            const detail = err instanceof Error ? err.message : String(err);
+            process.stderr.write(`[fastcode] auth.json is not valid JSON; no credentials were loaded. ` +
+                `Original kept at ${auth}.corrupt.bak (${detail}).\n`);
+        }
         return empty;
     }
     if (!raw || typeof raw !== "object")

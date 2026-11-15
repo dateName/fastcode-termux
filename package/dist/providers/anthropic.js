@@ -78,7 +78,7 @@ export const anthropicProvider = {
         });
         let usageInput = 0;
         let usageOutput = 0;
-        for await (const ev of streamSSE(res)) {
+        for await (const ev of streamSSE(res, { idleTimeoutMs: req.idleTimeoutMs })) {
             let data;
             try {
                 data = JSON.parse(ev.data);

@@ -21,7 +21,7 @@ export function toolCapabilityKey(providerId: string, model: string): string {
 }
 
 export function resolveToolProtocol(config: any, providerId: string, model: string, env = process.env): ToolProtocol {
-    const mode = String(env["FASTCODE_TOOL_PROTOCOL"] ?? "legacy").trim().toLowerCase();
+    const mode = String(env["FASTCODE_TOOL_PROTOCOL"] ?? "auto").trim().toLowerCase();
     if (mode === "legacy")
         return "legacy";
     if (mode === "native")
@@ -53,7 +53,8 @@ export function withToolCapability(config: any, providerId: string, model: strin
 }
 
 export function isNativeUnsupportedError(message: string): boolean {
-    return /\b400\b/.test(message)
-        && /tool|function/i.test(message)
-        && /not supported|unsupported|unrecognized|unknown|invalid|does not support/i.test(message);
+    // Structural check: a 4xx about tools/functions means this endpoint did
+    // not accept native tool_calls. Do not require specific wording — the real
+    // 400 ("tool_calls must be followed by tool messages") has none of it.
+    return /\b(400|422|501)\b/.test(message) && /tool|function/i.test(message);
 }

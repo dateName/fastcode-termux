@@ -7,7 +7,7 @@
  */
 import meow from "meow";
 import { readPackageMeta } from "./lib/pkg.js";
-import { installSkill, listInstalledSkills, uninstallSkill, searchRegistry } from "./skills/manager.js";
+import { installSkill, listInstalledSkills, uninstallSkill, searchRegistry, resolveRegistry } from "./skills/manager.js";
 import { loadConfig, saveConfig, resolveProviderKey } from "./config/store.js";
 import { getPaths } from "./config/paths.js";
 import { PROVIDERS, getProvider } from "./providers/index.js";
@@ -17,6 +17,7 @@ import { existsSync } from "node:fs";
 import { latestSessionFile, listSessions, projectionPath, readSession, resolveSessionFile } from "./session/log.js";
 import { readProjection, sessionMetaFromFile } from "./session/projection.js";
 import { forgetToolApproval, listToolApprovals, listTrusted, trustProject, untrustProject } from "./config/trust.js";
+import { isValidModelId } from "./commands/model.js";
 const NL = String.fromCharCode(10);
 const HELP = [
     "",
@@ -25,10 +26,11 @@ const HELP = [
     "  Usage",
     "    $ fastcode                       Launch the TUI",
     "    $ fastcode \"explain this repo\"   Launch the TUI with an initial prompt",
+    "    $ fastcode help                  Show this help",
     "",
     "  Model & provider (no TUI needed)",
     "    $ fastcode provider              List providers",
-    "    $ fastcode provider <id>         Set the default provider",
+    "    $ fastcode provider <id> [model] Set the default provider (model required if none is known)",
     "    $ fastcode model                 List models for the current provider",
     "    $ fastcode model <id>            Set the default model",
     "    $ fastcode config                Print config file and data paths",
@@ -56,20 +58,32 @@ const HELP = [
     "    --version, -v   Show version",
     "    --help, -h      Show this help",
     "",
-    "  Files (on Termux, edit them directly with nano):",
-    "    config.json   provider, model, theme, agent mode, enabled skills",
-    "    auth.json     API keys only, kept in a SEPARATE file (chmod 0600)",
+    "  Data directory (default ~/.fastcode, override with FASTCODE_HOME):",
+    "    config.json       provider, model, theme, agent mode, enabled skills/plugins, egress",
+    "    auth.json         API keys only, separate file (chmod 0600)",
+    "    trusted.json      trusted folders + remembered tool approvals",
+    "    model-meta.json   optional model context / charsPerToken overrides",
+    "    skills/           installed SKILL.md folders",
+    "    plugins/          always-active plugin packs",
+    "    sessions/         JSONL history + <id>.projection.json",
+    "    cache/ + logs/    caches and debug logs (safe to delete)",
     "",
     "  API keys may also come from ENV (DEEPSEEK_API_KEY, ANTHROPIC_API_KEY,",
     "  OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY,",
     "  MISTRAL_API_KEY, XAI_API_KEY, MOONSHOT_API_KEY, ZHIPUAI_API_KEY,",
     "  DASHSCOPE_API_KEY) or from /login inside the TUI.",
-    "  Override the data directory with FASTCODE_HOME.",
     "",
     "  Approval UI:  --ui tty|native|plain|json   (default tty)",
     "",
 ].join(NL);
 export async function parseCli(): Promise<any> {
+    // meow's autoHelp covers `--help` but not `-h`; handle both (and `help`)
+    // here so every documented spelling prints the same formatted help.
+    const argv = process.argv.slice(2);
+    if (argv.includes("-h") || argv.includes("--help") || argv[0] === "help") {
+        console.log(HELP);
+        return { done: true };
+    }
     const cli = meow(HELP, {
         importMeta: import.meta,
         flags: {
@@ -109,9 +123,19 @@ export async function parseCli(): Promise<any> {
             console.error("Unknown provider: " + rest[0] + ". Run: fastcode provider");
             process.exit(1);
         }
-        saveConfig({ ...cfg, providerId: next.id, model: next.defaultModel });
+        const modelArg = rest.slice(1).join(" ").trim();
+        if (!next.defaultModel && !modelArg) {
+            console.error("Provider " + next.id + " has no verified default model. Use: fastcode provider " + next.id + " <model>");
+            process.exit(1);
+        }
+        if (modelArg && !isValidModelId(modelArg)) {
+            console.error("Invalid model ID. Use 1-200 letters, numbers, or . _ : / + -; configuration was not changed.");
+            process.exit(1);
+        }
+        const nextModel = modelArg || next.defaultModel;
+        saveConfig({ ...cfg, providerId: next.id, model: nextModel });
         console.log("Provider: " + next.id + " (" + next.label + ")");
-        console.log("Model:    " + next.defaultModel);
+        console.log("Model:    " + nextModel);
         console.log("Saved to " + paths.config);
         console.log("API keys stay in " + paths.auth + " (untouched)");
         return { done: true };
@@ -121,7 +145,7 @@ export async function parseCli(): Promise<any> {
         const paths = getPaths();
         if (rest.length === 0) {
             const provider = getProvider(cfg.providerId);
-            console.log("Provider: " + cfg.providerId + "   Model: " + cfg.model);
+            console.log("Provider: " + cfg.providerId + "   Model: " + (cfg.model || "(not set)"));
             if (provider) {
                 let models = [];
                 try {
@@ -145,7 +169,11 @@ export async function parseCli(): Promise<any> {
             console.log("Or edit: " + paths.config);
             return { done: true };
         }
-        const id = rest.join(" ");
+        const id = rest.join(" ").trim();
+        if (!isValidModelId(id)) {
+            console.error("Invalid model ID. Use 1-200 letters, numbers, or . _ : / + -; configuration was not changed.");
+            process.exit(1);
+        }
         saveConfig({ ...cfg, model: id });
         console.log("Model: " + id + "   (provider " + cfg.providerId + ")");
         console.log("Saved to " + paths.config);
@@ -172,6 +200,10 @@ export async function parseCli(): Promise<any> {
         }
         if (rest[0] === "show") {
             const idOrFile = rest[1] ?? all[0].id;
+            if (rest[1] && !existsSync(resolveSessionFile(rest[1]))) {
+                console.error("No such session: " + rest[1]);
+                process.exit(1);
+            }
             const entries = readSession(idOrFile);
             for (const entry of entries) {
                 if (entry.type === "message")
@@ -241,8 +273,15 @@ export async function parseCli(): Promise<any> {
             return { done: true };
         }
         if (first === "trust" && typeof cli.flags.forget === "string") {
-            const key = String(cli.flags.forget);
-            console.log(forgetToolApproval(key) ? "Forgot approval: " + key : "No such approval: " + key);
+            const key = String(cli.flags.forget).trim();
+            if (!key) {
+                console.error("Usage: fastcode trust --forget <key>");
+                process.exit(1);
+            }
+            const forgotten = forgetToolApproval(key);
+            console.log(forgotten ? "Forgot approval: " + key : "No such approval: " + key);
+            if (!forgotten)
+                process.exitCode = 1;
             return { done: true };
         }
         const dir = rest[0] ?? process.cwd();
@@ -263,8 +302,10 @@ export async function parseCli(): Promise<any> {
                 console.log("No skills installed. Try: fastcode skills install <id>");
             }
             else {
+                const widest = Math.max(...installed.map((s) => s.name.length));
+                console.log("Installed skills (" + installed.length + "):");
                 for (const s of installed)
-                    console.log(s.name + "\t" + s.source + "\t" + s.path);
+                    console.log("  " + s.name.padEnd(widest) + "  " + s.source + "  " + s.path);
             }
             return { done: true };
         }
@@ -295,11 +336,21 @@ export async function parseCli(): Promise<any> {
                 process.exit(1);
             }
             const cfg = loadConfig();
-            const hits = await searchRegistry(args.join(" "), cfg.skillsRegistry);
-            if (hits.length === 0)
+            const registry = resolveRegistry(process.env["FASTCODE_SKILLS_REGISTRY"], cfg.skillsRegistry);
+            if (!registry) {
+                console.error("No skills registry configured. Set FASTCODE_SKILLS_REGISTRY or config.skillsRegistry.");
+                process.exit(1);
+            }
+            const hits = await searchRegistry(args.join(" "), registry);
+            if (hits.length === 0) {
                 console.log("No matches.");
-            for (const h of hits.slice(0, 20)) {
-                console.log(h.slug + "\t" + (h.description ?? ""));
+            }
+            else {
+                const shown = hits.slice(0, 20);
+                const widest = Math.max(...shown.map((h) => h.slug.length));
+                console.log("Matches (" + hits.length + ", showing " + shown.length + "):");
+                for (const h of shown)
+                    console.log("  " + h.slug.padEnd(widest) + "  " + (h.description ?? ""));
             }
             return { done: true };
         }

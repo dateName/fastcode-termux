@@ -13,4 +13,8 @@ export interface EgressConfig {
     scanToolOutput: boolean;
 }
 export declare const DEFAULT_CONTENT_MARKERS: string[];
+/**
+ * Built-in denyPaths (auth.json + sessions/) are appended at normalize time so
+ * they follow FASTCODE_HOME and cannot be removed by user configuration.
+ */
 export declare const DEFAULT_EGRESS_CONFIG: EgressConfig;

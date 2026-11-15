@@ -96,14 +96,32 @@ export function compactMessages(messages, config = DEFAULT_COMPACTION_CONFIG, op
             " If an earlier detail is missing, re-read that file with a tool.]\n\n" +
             summary,
     };
-    const next = [...messages.slice(0, headCount), marker, ...messages.slice(tailStart)];
+    let next = [...messages.slice(0, headCount), marker, ...messages.slice(tailStart)];
+    let afterTokens = messageTokens(next, options);
+    // If summarization barely helped (the oversized message is in the verbatim
+    // tail), slim the offenders in place. Without this the same blob makes the
+    // next turn cross the threshold again, forever.
+    if (afterTokens > beforeTokens * NO_PROGRESS_RATIO) {
+        next = next.map((message) => {
+            const content = message.content ?? "";
+            if ((message.role === "tool" || message.role === "user") && content.length > NO_PROGRESS_SLIM_THRESHOLD) {
+                return {
+                    ...message,
+                    content: content.slice(0, NO_PROGRESS_SLIM_KEEP) +
+                        `\n[... ${content.length - NO_PROGRESS_SLIM_KEEP} chars elided by compaction ...]`,
+                };
+            }
+            return message;
+        });
+        afterTokens = messageTokens(next, options);
+    }
     return {
         messages: next,
         compacted: true,
         reason,
         source: "local",
         beforeTokens,
-        afterTokens: messageTokens(next, options),
+        afterTokens,
         beforeChars,
         afterChars: messageChars(next),
         droppedMessages: middle.length,
@@ -112,6 +130,12 @@ export function compactMessages(messages, config = DEFAULT_COMPACTION_CONFIG, op
         summaryFile,
     };
 }
+/** CompactMessages returns the same turn again if it recovers less than this. */
+const NO_PROGRESS_RATIO = 0.9;
+const NO_PROGRESS_SLIM_THRESHOLD = 20_000;
+const NO_PROGRESS_SLIM_KEEP = 8_000;
+/** Only scan the head of a message when building the summary. */
+const SUMMARY_SCAN_LIMIT = 256 * 1024;
 function messageTokens(messages, options) {
     return estMessagesTokens(messages, { providerId: options.providerId, model: options.model });
 }
@@ -127,35 +151,38 @@ export function buildSummary(messages, config, options) {
     for (const message of messages) {
         if (!message.content)
             continue;
+        const content = message.content.length > SUMMARY_SCAN_LIMIT
+            ? message.content.slice(0, SUMMARY_SCAN_LIMIT)
+            : message.content;
         if (message.role === "user") {
-            if (message.content.startsWith("FastCode executed the requested local tools.")) {
-                for (const line of message.content.split(/\r?\n/)) {
+            if (content.startsWith("FastCode executed the requested local tools.")) {
+                for (const line of content.split(/\r?\n/)) {
                     if (/error|failed|not found|denied|timed out/i.test(line))
                         outcomes.push(clip(line, 240));
                 }
             }
             else {
-                requests.push(clip(message.content, 300));
+                requests.push(clip(content, 300));
             }
-            collectFiles(message.content, files);
+            collectFiles(content, files);
             continue;
         }
         if (message.role === "assistant") {
-            const calls = parseToolCalls(message.content).calls;
+            const calls = parseToolCalls(content).calls;
             for (const call of calls)
                 actions.push(describeCall(call));
-            const visible = stripToolCalls(message.content);
+            const visible = stripToolCalls(content);
             if (visible)
                 notes.push(clip(visible, 300));
-            collectFiles(message.content, files);
+            collectFiles(content, files);
             continue;
         }
-        const lines = message.content.split(/\r?\n/);
+        const lines = content.split(/\r?\n/);
         for (const line of lines) {
             if (/error|failed|not found|denied|timed out/i.test(line))
                 outcomes.push(clip(line, 240));
         }
-        collectFiles(message.content, files);
+        collectFiles(content, files);
     }
     const fileList = Array.from(files);
     const sections = [
@@ -210,7 +237,13 @@ function describeCall(call) {
     return tool;
 }
 function collectFiles(text, files) {
-    const matches = text.match(/[A-Za-z0-9_@./\\-]+\.[A-Za-z0-9]{1,8}\b/g);
+    // The character class is bounded so the engine cannot backtrack from every
+    // start position to the end of an enormous line (the 1.2MB O(n²) hang).
+    // It also stays aligned with looksLikeProjectFile's 240-char rejection.
+    const sample = text.length > COLLECT_FILES_SAMPLE_BYTES
+        ? text.slice(0, COLLECT_FILES_SAMPLE_BYTES)
+        : text;
+    const matches = sample.match(/[A-Za-z0-9_@./\\-]{1,240}\.[A-Za-z0-9]{1,8}\b/g);
     if (!matches)
         return;
     for (const match of matches) {
@@ -221,6 +254,8 @@ function collectFiles(text, files) {
             return;
     }
 }
+/** File names are a summary hint, not a full transcript scan. */
+const COLLECT_FILES_SAMPLE_BYTES = 64 * 1024;
 function looksLikeProjectFile(value) {
     if (value.length <= 3 || value.length > 240)
         return false;
@@ -236,7 +271,12 @@ function limitLines(lines, max, label) {
     return [...lines.slice(0, max), `(${lines.length - max} more ${label} not listed)`];
 }
 function clip(text, max) {
-    const oneLine = String(text).replace(/\s+/g, " ").trim();
+    const input = String(text);
+    // Bound the whitespace-collapse pass as well: `/\s+/g` over a multi-MB
+    // string is the second hot spot in the summary path.
+    const bound = Math.max(4096, max * 8);
+    const bounded = input.length > bound ? input.slice(0, bound) : input;
+    const oneLine = bounded.replace(/\s+/g, " ").trim();
     return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
 }
 /** Delete a summary file only when it is one of our summary-*.md artifacts. */

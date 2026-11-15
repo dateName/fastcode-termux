@@ -23,9 +23,13 @@ export const DEFAULT_CONTENT_MARKERS = [
     "sk-[A-Za-z0-9]{32,}",
 ];
 
+/**
+ * Built-in denyPaths (auth.json + sessions/) are appended at normalize time so
+ * they follow FASTCODE_HOME and cannot be removed by user configuration.
+ */
 export const DEFAULT_EGRESS_CONFIG: EgressConfig = {
-    enabled: false,
-    mode: "audit",
+    enabled: true,
+    mode: "block",
     denyPaths: [],
     denyGlobs: [],
     denyContentMarkers: [...DEFAULT_CONTENT_MARKERS],

@@ -28,7 +28,6 @@ export interface RunOptions {
     signal?: AbortSignal;
     cwd?: string;
     idleTimeoutMs?: number;
-    contextBudgetChars?: number;
     compaction?: CompactionConfig;
     contextWindow?: number;
     serverOpaqueState?: string;
@@ -42,8 +41,8 @@ export interface RunOptions {
     onDelta?: (delta: string, text: string) => void;
     requestApproval?: ApprovalResolver;
 }
-export type AgentStopReason = "complete" | "max_turns" | "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "incomplete" | "stream_error";
-export type AgentErrorKind = "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "stream_error";
+export type AgentStopReason = "complete" | "max_turns" | "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "incomplete" | "stream_error" | "protocol_error";
+export type AgentErrorKind = "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "stream_error" | "protocol_error" | "incomplete";
 export type AgentEvent = {
     type: "compaction";
     beforeChars: number;
@@ -59,6 +58,7 @@ export type AgentEvent = {
     type: "assistant_raw";
     text: string;
     toolCalls?: NativeToolCall[];
+    reasoning?: string;
 } | {
     type: "assistant_text";
     text: string;

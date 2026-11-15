@@ -29,8 +29,23 @@ export const pluginCommand = {
         }
         if (sub === "enable") {
             const name = args[1];
-            if (!name)
-                return { message: "Usage: /plugin enable <name>" };
+            if (!name) {
+                const plugins = listInstalledPlugins();
+                if (plugins.length === 0)
+                    return { message: "No plugins installed. Import one with /plugin import <path> [name]." };
+                return {
+                    message: "Choose a plugin to enable.",
+                    picker: {
+                        title: "Enable plugin",
+                        current: state.enabledPlugins[0],
+                        items: plugins.map((plugin) => ({ value: plugin.name, label: plugin.name, hint: plugin.description })),
+                        onSelect: (value) => {
+                            actions.enablePlugin(value);
+                            actions.pushSystemMessage(`Enabled plugin ${value}.`);
+                        },
+                    },
+                };
+            }
             const plugin = getPlugin(name);
             if (!plugin)
                 return { message: `Plugin not found: ${name}` };
@@ -39,8 +54,27 @@ export const pluginCommand = {
         }
         if (sub === "disable") {
             const name = args[1];
-            if (!name)
-                return { message: "Usage: /plugin disable <name>" };
+            if (!name) {
+                const plugins = listInstalledPlugins();
+                if (plugins.length === 0)
+                    return { message: "No plugins installed." };
+                return {
+                    message: "Choose a plugin to disable.",
+                    picker: {
+                        title: "Disable plugin",
+                        current: state.enabledPlugins[0],
+                        items: plugins.map((plugin) => ({
+                            value: plugin.name,
+                            label: plugin.name,
+                            hint: state.enabledPlugins.includes(plugin.name) ? "enabled" : "disabled",
+                        })),
+                        onSelect: (value) => {
+                            actions.disablePlugin(value);
+                            actions.pushSystemMessage(`Disabled plugin ${value}.`);
+                        },
+                    },
+                };
+            }
             actions.disablePlugin(name);
             return { message: `Disabled plugin ${name}.` };
         }
@@ -53,22 +87,37 @@ export const pluginCommand = {
         }
         if (sub === "info") {
             const name = args[1];
-            if (!name)
-                return { message: "Usage: /plugin info <name>" };
+            if (!name) {
+                const plugins = listInstalledPlugins();
+                if (plugins.length === 0)
+                    return { message: "No plugins installed." };
+                return {
+                    message: "Choose a plugin to inspect.",
+                    picker: {
+                        title: "Plugin info",
+                        items: plugins.map((plugin) => ({ value: plugin.name, label: plugin.name, hint: plugin.description })),
+                        onSelect: (value) => {
+                            const plugin = getPlugin(value);
+                            actions.pushSystemMessage(plugin ? pluginInfoText(plugin) : `Plugin not found: ${value}`);
+                        },
+                    },
+                };
+            }
             const plugin = getPlugin(name);
             if (!plugin)
                 return { message: `Plugin not found: ${name}` };
-            return {
-                message: [
-                    `Plugin: ${plugin.name}`,
-                    `Path: ${plugin.path}`,
-                    `Description: ${plugin.description}`,
-                    `Skills: ${plugin.skills.map((s) => s.name).join(", ") || "none"}`,
-                    "",
-                    plugin.body.slice(0, 4000),
-                ].join("\n"),
-            };
+            return { message: pluginInfoText(plugin) };
         }
         return { message: "Usage: /plugin [list|import|enable|disable|remove|info]" };
     },
 };
+function pluginInfoText(plugin) {
+    return [
+        `Plugin: ${plugin.name}`,
+        `Path: ${plugin.path}`,
+        `Description: ${plugin.description}`,
+        `Skills: ${plugin.skills.map((s) => s.name).join(", ") || "none"}`,
+        "",
+        plugin.body.slice(0, 4000),
+    ].join("\n");
+}

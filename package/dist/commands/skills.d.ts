@@ -7,5 +7,30 @@ export declare const skillsCommand: {
         actions: any;
     }): Promise<{
         message: string;
+        picker?: undefined;
+    } | {
+        message: string;
+        picker: {
+            title: string;
+            current: any;
+            items: {
+                value: any;
+                label: any;
+                hint: any;
+            }[];
+            onSelect: (value: any) => void;
+        };
+    } | {
+        message: string;
+        picker: {
+            title: string;
+            items: {
+                value: any;
+                label: any;
+                hint: any;
+            }[];
+            onSelect: (value: any) => void;
+            current?: undefined;
+        };
     }>;
 };

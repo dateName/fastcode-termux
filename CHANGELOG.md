@@ -2,6 +2,56 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
+## Unreleased（2026-11-15 审计修复）
+
+> 状态：基于 0.1.8-beta.0 工作树；仅本地 build 与 PC 回归，未提交、未发布。来源：`yq.txt` 审计整合 + 本项目文档要求。
+
+### 稳定性 / 限界
+- `read_file` 的 `offset/limit` 分支先按字节预算裁剪再入结果：单行超长文件不再绕过 `FASTCODE_READ_MAX_BYTES`。
+- runner 写入 `role:"tool"` 前统一按 `FASTCODE_TOOL_MESSAGE_LIMIT`（默认 1MB）兜底；`grep` 超长命中行裁剪到 500 字符；shell 每个 job 保留窗口从 1MB 收紧到 256KB。
+- 压缩摘要只采样前 64KB、`collectFiles` 正则加 `{1,240}` 上界；回收率 <10% 时对 >20KB 的 tool/user 消息就地瘦身，修复“每轮必压”。
+
+### 协议 / 失败语义
+- 外来方言（Hermes/Qwen/Kimi/Mistral/Llama/antml 等）解析 0 条时返回 `protocol_error`，不再静默记 `complete`；`stripToolCalls` 不再误删外来块。
+- 原生流式：无 `index` 的多 chunk 归并为同一次调用；对象型 `arguments` 归一为 JSON 字符串；非流式 `application/json` 响应直接映射完整 text/tool_calls。
+- 请求前 `pairToolMessages` 修复悬空 `tool_calls`；abort/loop 提前 break 时为未执行调用补 `role:"tool"` 占位。
+- `--ui plain` 的 error 写 stderr、`--ui json` 发出 error 事件；失败进程退出码非 0。headless 补 `onProtocolFallback`/`onNativeOk` 能力持久化。
+- 400 `insufficient tool messages` 不再被误诊为配额；`stream_error` 重置 `lastVisible`；`retryStream` 尾部按配额抛 `QuotaError`。
+
+### 配置 / 权限 / 诊断
+- `config.json` 损坏时保留 `config.json.bak` 并在 stderr 提示一次；POSIX 数据目录 0700，`config.json` 与会话 JSONL 0600。
+- 聊天路径的 SSE 与外层共用 `requestIdleTimeoutMs`，消除 25s/60s 双计时；`doctor` 同时上报请求空闲超时、SSE 回退与 tool 消息上限。
+- `custom` provider 支持 `FASTCODE_AUTH_HEADER` / `FASTCODE_AUTH_PREFIX` / `FASTCODE_EXTRA_HEADERS`；`probeProvider` 使用 `provider.modelsPath`，`modelsPath:null` 不误报 offline。
+- 注册 `npm run verify:artifacts` / `npm run bench`；`sessions show <不存在>`、`trust --forget` 空值/不存在、非法 model ID 返回非零；初始化错误默认不打印 minified 堆栈。
+
+### 失败语义与方言
+- **会话写失败**：`session.append` 失败只写 stderr 并置 `degraded`；`close()` 跳过 projection/fsync/prune，避免把残缺 JSONL 固化成“已验证副本”；`close()` 幂等，重复调用只写一条 `session_end`；`FASTCODE_SESSION_LOG=0` 不再写空投影。
+- **审批决策落案**：TUI 写 `approval` fact（decision/scope/requestId/approvalKey 哈希）；headless 无 session log，改发 `gate:decision` 帧；事件与 `trusted.json` 授权状态分离。
+- **错误归因**：`probeProviderDetailed()` 返回 `{ok, reason, status}`，区分“无 /models 端点”“HTTP 4xx/5xx”“超时”；picker 显示原因而不是笼统 offline。
+- **incomplete**：新增 `error.kind="incomplete"`；stdio 后端收到 `done` 后启用 terminal latch，忽略后续记录。
+- **方言扩展**：支持 Hermes/Qwen `<tool_call>`、Mistral `[TOOL_CALLS]`（pre-v11 数组 + v11 `func[CALL_ID]{...}`）、Kimi K2 section（函数名取自 ID 头）、Llama `<|python_tag|>` 与裸 JSON（`parameters`→`arguments`）。
+- **结构性防线**：`parseToolCalls` 返回 `detectedDialects`；检测到标记但 0 调用时一律 `protocol_error`，不再静默 `complete`。
+- 退出码语义与上述失败路径见 `docs/ERROR_SEMANTICS.md`。
+
+### 执行后端抽象（基础层）
+- 新增规范事件闭集 `StreamEvent`（text/thinking/tool-call/usage/turn-end）与唯一 `StreamAssembler`；`runStream` 只负责 idle/retry/abort，文本、thinking、工具调用与 usage 的折叠集中到一处，新增变体由 `assertNever` 编译期提示。
+- `ChatChunk` 增加可选 `reasoning`；thinking 不再在归一化层丢失，`assistant_raw` 与会话事实可保留。
+- 新增 `providers/stdioBackend.ts`：CLI 以规范 NDJSON 产出文本/思考/工具提议/usage/结束；**工具只提议、宿主执行**；子进程只收 allowlist 环境；stderr 脱敏；abort 先关读取侧再按进程组终止。该后端**默认不注册**，启用范围待定。
+- 新增 `lib/child-env.ts`、`lib/process-tree.ts`、`lib/values.ts`；进程树实现下移到基础层，shell 与后端层共用。
+- 错误语义补强：持续协议失败使用独立 `stopReason:"protocol_error"` 并让 headless 非零退出；`incomplete` headless 非零；非幂等后端用 `capabilities.retryable:false` 禁止重放；`auth.json` 损坏保留 `.corrupt.bak` 并提示一次。
+- 设计说明见 `docs/EXECUTION_BACKENDS.md`。
+
+### 结构治理（L0–L2）
+- `docs/MODULES.md` 升格为目录契约：新增/删除源码必须登记、每行写依赖方向、受控上行说明、同名命名空间表。
+- 补 `src/lib/debug.ts`、`src/commands/threads.ts`、`src/ui/picker-window.ts` 的登记；修正 `AUDIT.md` 标题与 `LOCALIZATION_REPORT.md` 的说明。
+- 仓库内新增 `CONTRIBUTING.md`，内联 `AGENTS.md` 的关键硬约束（clone 后可见）。
+- 移除死代码 `src/agent/context.ts` 与死字段 `contextBudgetChars`（含 `dist` 产物）；旧配置中的该字段会被忽略。
+- `docs/CONFIGURATION.md` 标注内部变量 `FASTCODE_SANDBOX` / `FASTCODE_SANDBOX_ROOT`。
+- 未做目录搬迁；基线同步未执行（本地 HEAD `70eaea9`，`4d2e1c3b` 本地不存在，工作树有未提交改动）。
+
+### 验证
+- `typecheck` / `lint` / `build` 通过；Windows `npm test` **ALL PASS (325 checks)**；`verify:artifacts` 通过。Termux 真机未复跑。
+
 ## 0.1.8-beta.0（npm beta 已发布）
 
 > 状态：`package/package.json` = `0.1.8-beta.0`；工作树基于 tag `v0.1.7`（`be6e604`）+ 2026-11-09 修复；已在本地 build/打包，并发布到 npm 的 `beta` tag。
@@ -16,6 +66,21 @@
 ### 审批
 - `Deny with feedback` 现在等待用户输入原因：TUI/plain 文本模式、JSON 要求 `input`、native 用 `termux-dialog text`；空输入/缺失输入 fail-closed，不再把提示语当反馈。
 
+### Egress
+- 默认改为阻断：`enabled:true + mode:"block"`；命中返回 `EGRESS_DENY`，不生成审批、不写 `trusted.json`。
+- 内置不可移除 `denyPaths`：`$FASTCODE_HOME/auth.json`（密钥）与 `$FASTCODE_HOME/sessions/`（历史对话），读取/复制/移动/改写均拦截；跟随 `FASTCODE_HOME` 动态解析。
+- 仍可 `mode:"audit"` 只审计或 `mode:"off"` 完全关闭；shell 命令内的文件路径尚未纳入 `denyPaths`。
+
+### 工具协议
+- `FASTCODE_TOOL_PROTOCOL` 默认由 `legacy` 改为 `auto`：兼容 provider（含 DeepSeek）优先原生 `tool_calls`，减少 DSML 标记泄露。
+- 原生请求被 400 拒绝时自动降级 `pseudo` 并缓存 `capabilities.toolCalling[provider::model]`；`native` 强制原生、`legacy` 强制伪协议。
+- 未知 provider 仍 fail closed 到伪协议。
+
+### Provider catalog
+- 新增 42 个 OpenAI 兼容 provider（聚合网关、国内厂商、国际厂商、云平台占位符），总数 **55**（13 内置 + 42 catalog）。
+- `runpod/azure/cloudflare/bedrock/vertex` 的 baseUrl 占位符从环境变量解析（`RUNPOD_ENDPOINT_ID`、`AZURE_OPENAI_*`、`CLOUDFLARE_ACCOUNT_ID`、`AWS_REGION`、`GOOGLE_CLOUD_*`）。
+- 未验证默认模型的 catalog 条目在 model picker 提供「Enter model ID manually…」；`Replicate`、小米/京东云/天翼云/联通云/快手、`oc2api/work2api` 暂不内置。
+
 ### 工具压缩流 / 投影恢复
 - `/compact` 写 `compacted` fact（含 `summaryRef`）；`/clear` 写 `cleared` fact；resume 不再复活旧历史。
 - 摘要顺序 Notes → Outcomes → Files → Requests → Actions；超限条目带 marker；新压缩清理本会话旧 `summary-*.md`。
@@ -24,11 +89,17 @@
 
 ### TUI / 版权 / 文档
 - compact 状态栏 `effort` 重复渲染修复，只显示一次。
+- Provider/model picker 翻页编号修复：窗口固定 9 行，每页显示 `1`–`9` 连续编号，数字键选择当前可见项；`qwen`/`ollama`/`custom` 等后段 provider 翻页后可见。
+- `/theme`、`/threads`、`/agent` 无参数时改用与 `/model`/`/effort` 相同的选择器（9 行窗口、`1`–`9` 选当前页、Esc 取消）；带参数快捷路径保留。
+- `/skills enable|disable|info`、`/plugin enable|disable|info` 省略名字时打开选择器；`/attach`、`/kill` 省略 id 时列出后台 shell 会话。删除类命令仍要求显式参数。
+- 修复 `fastcode -h`：现在与 `--help`、`help` 输出同一份格式化帮助；帮助内补充数据目录（config/auth/trusted/model-meta/skills/plugins/sessions/cache/logs）说明。
+- `fastcode provider <id>` 在 catalog provider 无已验证默认模型时要求同时给 model；TUI `/provider <id>` 进入模型选择。
+- `docs/CONFIGURATION.md` §1 补齐数据目录文件职责与备份/清理建议；§8.2 改为逐条斜杠命令说明（31 个）；`docs/DEPLOYMENT.md` 增加仓库/安装目录结构。
 - 根 `LICENSE` 与 `package/LICENSE` 保留原始 `Copyright (c) 2026 SimpleLittleDev` + MIT 全文，并补 FastCode-Termux 自有版权行、上游来源与修改说明；README / package README 增加 License 段。
 - README / README.zh / package README 补齐 CLI 子命令、TUI 斜杠命令与设置入口；`docs/CONFIGURATION.md` §8 为完整命令速查（含 `/threads`、`/steer`、trust/skills/sessions/doctor/update 等）。
 
 ### 验证与未完成
-- `typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过。
+- `typecheck` / `lint` / `build` 通过；Windows `npm test` **292/292**；`verify-artifacts` 通过。
 - 已生成 `release/` 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`；npm 已发布 `beta=0.1.8-beta.0`；GitHub Release 二进制资产因 Actions billing 锁定待补。Termux 真机未复跑。
 - 仍未完成：跨会话孤儿 summary 全局 GC、全局并发上限/统一排队、`contextBudgetChars` 死字段、server-aware 实际接线、Termux 真机复跑。
 

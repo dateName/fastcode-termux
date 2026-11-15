@@ -36,6 +36,9 @@ export declare function createSessionLog(meta?: Record<string, any>): {
     file: string;
     append: (entry: Record<string, any>) => number;
     count(): number;
+    /** True after at least one write failed (or the log is otherwise unreliable). */
+    degraded(): boolean;
+    lastError(): string;
     close(info?: SessionCloseInfo): void;
 };
 export declare function openSessionLog(file: string, meta?: Record<string, any>): {
@@ -43,6 +46,9 @@ export declare function openSessionLog(file: string, meta?: Record<string, any>)
     file: string;
     append: (entry: Record<string, any>) => number;
     count(): number;
+    /** True after at least one write failed (or the log is otherwise unreliable). */
+    degraded(): boolean;
+    lastError(): string;
     close(info?: SessionCloseInfo): void;
 };
 export declare function listSessions(): {

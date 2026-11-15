@@ -21,6 +21,8 @@ export interface RunStreamOptions {
 }
 export interface RunStreamResult {
     text: string;
+    /** Thinking/reasoning text, kept separate from the visible answer. */
+    reasoning?: string;
     usage?: ChatChunk["usage"];
     toolCalls?: ChatChunk["toolCalls"];
     incomplete: boolean;

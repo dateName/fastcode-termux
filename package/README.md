@@ -429,16 +429,20 @@ npm publish --access public
 | --- | --- | --- |
 | Project trust | First run in a folder asks before agent tools load; the list lives in ~/.fastcode/trusted.json | fastcode trust / untrust / trusted, FASTCODE_TRUST_ALL=1 |
 | Dangerous-command guard | Hard Block for destructive/system/sensitive-file commands and credential exfil; `.env` writes/deletes/moves, critical credential reads and egress are non-overridable | FASTCODE_ALLOW_DANGEROUS=1 only for Soft Gate |
-| Egress policy | application-layer tool/payload/output policy; default audit-only, `enabled:true + mode:"block"` returns `EGRESS_DENY` | `config.egress`: enabled, mode, denyPaths, denyGlobs, denyContentMarkers, maxScanBytes |
+| Egress policy | application-layer tool/payload/output policy; default `enabled:true + mode:"block"` returns `EGRESS_DENY` (`audit` only records, `off` disables) | `config.egress`: enabled, mode, denyPaths, denyGlobs, denyContentMarkers, maxScanBytes |
 | Unified tool-output cap | Output is truncated while it is produced, not sliced afterwards (default 30000 characters) | FASTCODE_TOOL_OUTPUT_LIMIT |
+| Tool-message hard cap | A single tool message is capped before it enters history (default 1,000,000 characters); single-line reads, grep hits and shell windows are clipped earlier | FASTCODE_TOOL_MESSAGE_LIMIT |
+| Scriptable exit codes | `--ui plain/json` report errors and exit non-zero on failure; startup errors avoid the minified bundle stack | FASTCODE_DEBUG=1 for full stacks |
+| Execution backends | HTTP providers plus a canonical NDJSON CLI backend foundation; a CLI only proposes tool calls, the host executes them; child env is allowlisted and stderr is redacted | CLI backend is not enabled by default; see `docs/EXECUTION_BACKENDS.md` |
+| Failure semantics | `done.stopReason` is the business result; exit codes are a process-level channel; a failed session write degrades and never freezes a partial projection; approval decisions are events, not grants | See `docs/ERROR_SEMANTICS.md` |
 | Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash (cache cap 256MB by default) | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
 | Checkpoints/projection | `*.projection.json` (~200KB cap) with tool/model/cwd fingerprint; tool payloads folded to edit facts, dropped-message markers, summary markers protected; unpaired tool calls completed on resume | FASTCODE_FSYNC, FASTCODE_SESSION_LOG |
 | Exit save point | `/exit` aborts the run, stops shells, then writes `session_end{reason,compaction}` + projection and best-effort fsyncs both; busy runs require a second `/exit` within 5s; Esc/Ctrl+C keep partial output | `/exit` (`/quit`, `/q`), double Ctrl+C |
 | Patch transaction | parse → plan → apply; CRLF/mode kept; symlinks refused; move never overwrites | `/expand` for the full diff |
 | Process tree | abort or `/kill` kills children/grandchildren; `/exit` uses SIGTERM → wait → SIGKILL for resident shells | POSIX process group, Windows `taskkill /T` |
-| Compaction | token/heap threshold; Notes/Outcomes/Files first; summary written to `summary-*.md`; `/compact` records a `compacted` fact; old summaries cleaned | FASTCODE_COMPACTION=0, FASTCODE_COMPACTION_RATIO, FASTCODE_COMPACTION_KEEP_TURNS, FASTCODE_COMPACTION_SUMMARY_TOKENS, FASTCODE_HEAP_LIMIT_MB |
-| Background shell | Commands over ~2s return a session id; poll incrementally. `/threads` caps the **resident** pool (default 2, max 6); one-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget and are not globally capped | `/jobs`, `/attach`, `/kill`, `/threads`, FASTCODE_MAX_SPAWN_PER_TURN |
-| Approval hook | Sensitive/large patches need approval; without a resolver they are denied (fail closed) | pending UI not implemented yet |
+| Compaction | token/heap threshold; Notes/Outcomes/Files first; summary written to `summary-*.md`; `/compact` records a `compacted` fact; old summaries cleaned; summary scans sample the first 64KB and oversized tool/user messages are slimmed when compaction makes no progress | FASTCODE_COMPACTION=0, FASTCODE_COMPACTION_RATIO, FASTCODE_COMPACTION_KEEP_TURNS, FASTCODE_COMPACTION_SUMMARY_TOKENS, FASTCODE_HEAP_LIMIT_MB |
+| Background shell | Commands over ~2s return a session id; poll incrementally. `/threads` caps the **resident** pool (default 2, max 6); one-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget and are not globally capped; each job keeps the last 256KB | `/jobs`, `/attach`, `/kill`, `/threads`, FASTCODE_MAX_SPAWN_PER_TURN |
+| Approval hook | Sensitive/large patches need approval; without a resolver they are denied (fail closed) | `--ui tty\|native\|plain\|json`; once/session/always; `fastcode trust --forget <key>` |
 
 ## 🙏 Credits
 

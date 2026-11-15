@@ -34,7 +34,7 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 
 | Feature | Description |
 |---|---|
-| 💬 Multi-model chat | **13 providers**, switch with `/provider` and `/model` |
+| 💬 Multi-model chat | **55 providers** (13 built-in + 42 OpenAI-compatible catalog), switch with `/provider` and `/model` |
 | 🛠️ Local coding agent | read/write files, grep, patch, run shell commands (on by default) |
 | 🔎 Code navigation | search a project, locate by structure, batch-read files |
 | 🧩 Agent Skills | install `SKILL.md` skills; directory sha256 locks with `/skills verify --confirm` re-baseline |
@@ -45,7 +45,7 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 💾 Resume & facts | append-only facts + `*.projection.json`; resume restores cwd/provider/model and unpaired tool calls |
 | 🧠 Context control | `/context`, `/compact`, `/clear`; token/heap-triggered local compaction with `summary-*.md`; `/compact`/`/clear` persist facts and old summaries are cleaned |
 | 🖥️ Background shell | long commands return a session id; `/jobs` `/attach` `/kill`; resident `sh -s` pool (default 2, up to 6 via `/threads`; one-shot commands use a separate per-turn spawn budget) |
-| 🧰 Dual tool protocol | pseudo `<fastcode_tool>` or native `tool_calls`; `FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
+| 🧰 Dual tool protocol | pseudo `<fastcode_tool>` or native `tool_calls` (default `auto`; native = OpenAI dialect, other providers fail closed to pseudo); `FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
 | 📱 Mobile commands | `/cancel` `/steer` `/expand` `/edit` (external editor for IME issues) |
 
 **Key bindings**
@@ -64,8 +64,12 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 🔒 Project trust | first run in an unknown folder asks before agent tools load | `fastcode trust` / `untrust` / `trusted`; `FASTCODE_TRUST_ALL=1` |
 | 🧱 File sandbox | file tools stay inside the project; `../` and symlink escapes are rejected | `config.sharedDirs`, `FASTCODE_ALLOW_PATHS` |
 | 🚫 Dangerous-command guard | non-overridable Hard Block for root/source/wildcard/system deletes, force-push to protected branches, `git clean -fdx`, disk/container/system commands, sensitive-file writes/deletes/moves, sensitive-file egress (`sensitive_file_egress`), critical credential reads (`id_*`, `/etc/shadow`, `/etc/sudoers`), dynamic eval/source/-c, reverse-shell entries and curl\|sh; bare `printenv`, `git reset --hard` are Soft Gate and approve through the resolver | `FASTCODE_ALLOW_DANGEROUS=1` only for Soft Gate |
-| 🛰️ Egress policy | application-layer tool/payload/output policy; default audit-only, `enabled:true + mode:"block"` returns `EGRESS_DENY`; cannot be overridden by trust/sharedDirs | `config.egress`: `enabled`, `mode`, `denyPaths`, `denyGlobs`, `denyContentMarkers`, `maxScanBytes` |
+| 🛰️ Egress policy | application-layer tool/payload/output policy; default `enabled:true + mode:"block"` returns `EGRESS_DENY` (`audit` only records, `off` disables); cannot be overridden by trust/sharedDirs | `config.egress`: `enabled`, `mode`, `denyPaths`, `denyGlobs`, `denyContentMarkers`, `maxScanBytes` |
 | ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
+| 🧮 Tool-message hard cap | a single tool message is capped before it enters history (default 1,000,000 chars); single-line reads, grep hits and shell windows are clipped earlier | `FASTCODE_TOOL_MESSAGE_LIMIT` |
+| 🧪 Scriptable exit codes | `--ui plain/json` report errors and exit non-zero on failure; startup errors avoid dumping the minified bundle stack | `FASTCODE_DEBUG=1` for full stacks |
+| 🔌 Execution backends | HTTP providers plus a canonical NDJSON CLI backend foundation; a CLI only proposes tool calls, the host executes them; child env is allowlisted and stderr is redacted | CLI backend is not enabled by default; see `docs/EXECUTION_BACKENDS.md` |
+| 🧭 Failure semantics | `done.stopReason` is the business result; exit codes are a process-level channel; a failed session write degrades and never freezes a partial projection; approval decisions are events, not grants | See `docs/ERROR_SEMANTICS.md` |
 | 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
 | 🧾 Patch transaction | parse → plan → apply; CRLF/mode preserved; symlinks refused; move never overwrites | `/expand` for full diff |
 | 🛑 Process tree | abort/`/kill` kills children and grandchildren; `/exit` aborts the run and kills resident shells | POSIX process group; Windows `taskkill /T` |
@@ -218,8 +222,8 @@ Offline model lists show built-in/cached choices with a notice; a model ID can a
 | Command | Purpose |
 |---|---|
 | `fastcode` / `fastcode "prompt"` | open the TUI / open it with an initial prompt |
-| `fastcode --version` / `-v` / `--help` / `-h` | version / all commands |
-| `fastcode provider [id]` / `model [id]` | list or set the default provider / model |
+| `fastcode --version` / `-v` / `--help` / `-h` / `help` | version / all commands |
+| `fastcode provider [id] [model]` / `model [id]` | list or set the default provider / model (model is required when the provider has no verified default) |
 | `fastcode config` / `config path` | show config + paths / print only config.json |
 | `fastcode sessions` / `sessions show <id>` / `resume [id\|latest]` | list / inspect / resume sessions |
 | `fastcode trust [dir]` / `untrust [dir]` / `trusted` / `trust --forget <key>` | trust management and remembered approvals |

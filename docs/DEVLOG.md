@@ -589,3 +589,148 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 - Windows：`npm test` **282/282**；`verify-artifacts` 通过（`dist/cli.js` + `dist/agent/guards.js` 5 个标记，bundle 2,150,507 B）。
 - 打包：`release/` 已生成 `fastcode-portable-0.1.8-beta.0.tar.gz|zip`、`datename-fastcode-termux-0.1.8-beta.0.tgz`、`SHA256SUMS`。
 - 发布：npm 已发布 `beta=0.1.8-beta.0`（`latest` 仍为 0.1.6）；GitHub tag/main 已推送，但 GitHub Release 二进制资产因 Actions billing 锁定待补。Termux 真机未复跑。
+
+---
+
+## 审计修复（2026-11-15，未提交/未发布）
+
+### 背景
+
+`yq.txt` 把多轮审计收敛为 A–D 四条缺陷线：A 工具输出限界失效 → 压缩正则 O(n²) → 事件循环卡死；B 原生流式合并与外来方言静默吞掉；C 错误生命周期（配额误诊、悬空 tool_calls、旧文本落盘、QuotaError 死代码）；D provider/wire 边界。F/J/G/C/A/K/B/D/E/H 为同一轮 CLI/配置/会话层审计项。
+
+### A 线：限界与压缩收敛
+
+- `readFileRange` 改为先算 `budget = maxBytes - returnedBytes - 1`，对单行做 UTF-8 安全裁切后再 `push`；`readTextFileResult` 的整文件路径原本就有界。
+- `limits.ts` 新增 `toolMessageLimit()` / `boundToolMessage()`；runner 在两处写 `role:"tool"` 前统一兜底（默认 1MB）。
+- `compaction.ts`：摘要扫描采样 256KB；`collectFiles` 只扫前 64KB、正则 `{1,240}`；`clip` 的 `\s+` 限长；`afterTokens > beforeTokens * 0.9` 时把 >20KB 的 tool/user 内容瘦身到 8KB。
+- `grep` 命中行裁剪 500 字符；shell job 保留窗口 1MB → 256KB。
+
+### B 线：协议与失败显式化
+
+- `protocol.ts`：`DSML_BLOCK_RE` 只消费含 `<invoke>` 的块；新增已知外来标记检测，0 调用且命中时返回 `errors`，runner 走既有 `protocol_error` 注入路径；`stripToolCalls` 保留外来块原文。
+- `native-tools.ts`：`resolveIndex` 在无 `index` 时按 `delta.id`、未命名单条目或尾条目归并；对象型 `arguments` 序列化后累加。
+- `openaiCompatible.ts`：`content-type: application/json` 且非 SSE 时直接解析完整 `choices[0].message` 的 text/tool_calls。
+- `protocol-mode.ts`：`isNativeUnsupportedError` 改为 `400/422/501 + tool/function` 结构判定；仍由 runner 的 `fellBack` 保证只降级一次。
+
+### C 线：错误生命周期与退出码
+
+- `runner.ts`：每轮请求前 `pairToolMessages(history)`；native 批次提前 break 时对未执行 `tool_call_id` 补占位；`stream_error` 分支 `lastVisible = partial`（空则重置）。
+- `app.ts` 配额提示收窄到 402/429 或 billing/quota/balance 类关键词，不再命中 `insufficient tool messages`。
+- `net.ts`：`isQuotaError` 同步收窄；`retryStream` 失败尾部在配额错误时抛 `QuotaError`。
+- `headless.ts`：plain 的 error 写 stderr，json 保留 error 事件；任一 error 或 `stopReason:"stream_error"` 时 `process.exitCode = 1`；补 `onProtocolFallback`/`onNativeOk` 并 `saveConfig`。
+- `index.ts`：初始化错误默认只打印 message，`FASTCODE_DEBUG=1` 才打印堆栈。
+
+### 配置 / 权限 / 诊断 / provider 边界
+
+- `config/paths.ts`：`ensureDir` 在 POSIX 上 chmod 0700；`config/store.ts`：`saveConfig` 0600，`config.json` 解析失败保留 `.bak` 并提示一次；`session/log.ts` 以 0600 创建 JSONL。
+- `stream.ts` / `http.ts` / `anthropic.ts` / `openaiCompatible.ts`：把 `requestIdleTimeoutMs` 传入 SSE 层，`doctor` 同时上报请求空闲与 SSE 回退。
+- `custom.ts`：新增 `FASTCODE_AUTH_HEADER` / `FASTCODE_AUTH_PREFIX` / `FASTCODE_EXTRA_HEADERS`。
+- `providers/index.ts`：`probeProvider` 先 `resolveBaseUrl` 再拼 `provider.modelsPath`；`modelsPath:null` 返回可达，避免 picker 恒 offline。
+- `package.json`：注册 `verify:artifacts` / `bench`；`sessions show` 不存在 id、`trust --forget` 空值/不存在、非法 model ID 返回非零。
+
+### 验证与回滚
+
+- `npm run typecheck` / `lint` / `build` 通过；Windows `npm test` **ALL PASS (325 checks)**；`npm run verify:artifacts` 通过。
+- 新增 smoke：单行超长读取、外来方言、无 index 归并、对象参数、压缩大消息、probe modelsPath、custom 认证头、grep 长行。
+- 回滚：本轮未提交；`git checkout -- package/src package/dist scripts/smoke-test.mjs` 可回到 0.1.8-beta.0 工作树状态（保留发布准备的其他未提交改动）。
+- 未做：Termux 真机复跑、方言解析器扩展、厂商端点联机验证、PR CI 门禁、`/egress` 命令、ProxyAgent。
+
+---
+
+## 执行后端抽象（2026-11-15，基础层，CLI 后端默认不注册）
+
+### 目标与边界
+
+现有 `Provider.stream()` 已经是 `AsyncIterable<ChatChunk>`，不假设 HTTP；问题在事件词汇太窄、折叠逻辑分散、以及外部 CLI 自执行工具会绕过治理链。本轮把「后端翻译」与「事件折叠」拆开，并固定一条边界：**外部 CLI 只能提议工具调用，所有执行回到 `runAgentTool → registry.execute`。**
+
+### 落点
+
+- `src/agent/stream-events.ts`（新增）：`StreamEvent` 闭集与 `StreamAssembler`。`usage` 在 `turn-end` 前；`turn-end` 后忽略；工具调用在结束时冻结；中断只保留文本/思考，不保留未完成工具调用；`reset()` 服务前缀安全重试。
+- `src/agent/stream.ts`：`runStream` 改为只做 idle/retry/abort，文本/thinking/toolCalls/usage 全部由装配器产出；`RunStreamResult` 增加 `reasoning`。
+- `src/types.ts`：`ChatChunk.reasoning?`；`Provider` 增加 `transport / capabilities / authKind` 声明式字段；`modelsPath` 继续用于无 `/models` 的后端。
+- `src/agent/runner.ts` / `src/app.ts`：`assistant_raw` 可携带 `reasoning`，会话事实保留 thinking；可见回答不变。
+- `src/lib/child-env.ts`（新增）：子进程环境 allowlist（默认 PATH/HOME/TMPDIR/locale/终端），未列入变量不继承；`redactSecrets()` 去 ANSI、`sk-…`、`Bearer …`、`api_key=…`。
+- `src/lib/process-tree.ts`（新增）：进程组 SIGTERM → grace → SIGKILL；`agent/process-tree.ts` 保留兼容 re-export。
+- `src/lib/values.ts`（新增）：`assertNever`。
+- `src/providers/stdioBackend.ts`（新增）：`createStdioProvider()` 每轮 spawn 一个可执行文件，stdin 一行用户消息，stdout 读规范 NDJSON；工具只收集为 `toolCalls`，不在 provider 层执行；abort 先关读取侧再终止进程树；stderr 尾部脱敏。**不加入 `PROVIDERS`，无 UI/配置入口。**
+
+### 规范 NDJSON
+
+`text-delta / thinking-delta / tool-call / usage / done`；适配新 CLI 只需一个薄包装脚本，不在 FastCode 内为每个厂商写解析器。详见 `docs/EXECUTION_BACKENDS.md`。
+
+### 错误返回落案补强
+
+- **持续协议失败**：runner 统计 `protocolErrors`；`max_turns` 且存在协议失败时改记 `stopReason:"protocol_error"`，并 yield `error.kind="protocol_error"`；headless 退出码非 0。之前会落到 `max_turns` 且可能 0。
+- **流提前结束**：`incomplete` 在 headless 也标记失败（保留部分文本），不再被脚本当成成功。
+- **非幂等后端**：`Provider.capabilities.retryable === false` 时 `runStream` 不再重放；stdio 后端默认声明 false。
+- **auth.json 损坏**：与 config 对称，保留 `auth.json.corrupt.bak`、stderr 提示一次、返回空凭据。
+- 本轮后续已补：独立 approval 事实、headless `gate:decision`、probe 错误归因、session degraded/幂等 close、`incomplete` error 事件/terminal latch、五种方言。退出码映射见 `docs/ERROR_SEMANTICS.md`；`aborted` 130 按建议暂不做。
+
+### 验证与回滚
+
+- `typecheck` / `lint` / `build` 通过；Windows smoke **325/325**；`verify:artifacts` 通过。
+- 新增回归：事件装配顺序/结束后忽略、thinking 保留、环境 allowlist、stderr 脱敏、规范 NDJSON 映射、工具只提议不执行、子进程不泄露未列入 secret、abort 及时收敛、protocol_error、incomplete、非幂等不重放。
+- 回滚：未提交；`git checkout -- package/src package/dist scripts/smoke-test.mjs` 回到上一工作树状态。
+- 未做：把 stdio provider 接入配置/命令/UI；会话续接 id；外部模型目录；只读 CLI 的首个端到端；Termux 真机。
+
+---
+
+## 失败语义与方言扩展（2026-11-15）
+
+### 会话写失败（P0）
+
+- `session.append` 写失败：stderr 提示一次、`degraded` 标志、返回 0；不走 `pushSystem`（避免递归写）。
+- `close()` 在 degraded 或 `FASTCODE_SESSION_LOG=0` 时跳过 projection/fsync/prune；`close()` 幂等，重复调用只写一条 `session_end`。
+
+### 审批事实与 headless 口径
+
+- TUI：决策写 `approval` fact（`decision/scope/requestId/approvalKey` sha256 前 8 位）；`trusted.json` 仍是授权状态，不由 fact 推断。
+- headless：无 session log，发 `gate:decision` 帧（含 decision/error），不落盘。
+
+### 错误归因与终止态
+
+- `probeProviderDetailed()` 返回 `{ok, reason, status}`；picker 显示“无 /models / HTTP 404 / 超时”，不再笼统 offline。
+- `incomplete` 新增 `error.kind`；stdio 收到 `done` 后 terminal latch，忽略后续记录。
+- `stopReason → exitCode` 映射文档化：`complete/max_turns=0`，`token_budget/cost_budget/loop_detected/aborted/stream_error/incomplete/protocol_error=1`；不统一 130。
+
+### 五种文本方言
+
+- Hermes/Qwen：`<tool_call>{"name":...,"arguments":{...}}</tool_call>`，arguments 直接是对象。
+- Mistral：pre-v11 JSON 数组；v11+ `func[CALL_ID]{...}`，`{` 是参数起点；无结束标记。
+- Kimi K2：section/call/argument 标记，函数名从 `functions.{name}:{idx}` 提取。
+- Llama：`<|python_tag|>{...}` 与裸 JSON；`parameters` 归一为 `arguments`。
+- `parseToolCalls` 返回 `detectedDialects`；检测到标记但 0 调用 → `protocol_error`；runner 也把非空 `detectedDialects` 视为失败，防止 B5 复发。
+
+### 验证
+
+- Windows smoke **325/325**；新增 degraded 会话、幂等 close、审批决策帧、probe 归因、incomplete error、terminal latch、五种方言与 `protocol_error` 回归。
+- `typecheck` / `lint` / `build` / `verify:artifacts` 通过；Termux 与真实 provider 待复跑。
+
+---
+
+## 结构治理 L0–L2（2026-11-15，未提交）
+
+### L0：目录契约
+
+- `docs/MODULES.md` 增加「目录契约」：新增/删除 `src/**/*.ts` 必须登记；每行写依赖方向；允许层级为入口 → 编排 → 领域 → 基础；新增跨层依赖必须说明理由。
+- 标注两处已知受控上行：`config/store → agent/policy/defaults`（零依赖 defaults）与 `lib/diagnostics → 各层`（诊断探针）。
+- 基线核对：本地 HEAD `70eaea9`（origin/main ahead 1）；yq 提到的 `4d2e1c3b` 本地不存在；工作树有未提交改动，**未执行 pull/sync**。
+
+### L1：文档补漏（不动目录）
+
+- `MODULES.md` 补 `src/lib/debug.ts`、`src/commands/threads.ts`、`src/ui/picker-window.ts`；新增同名/命名空间表。
+- `docs/AUDIT.md` 标题改为「0.1.6-beta 起（当前工作树 0.1.8-beta.0）」；历史正文保留。
+- `LOCALIZATION_REPORT.md` 增加说明：文件名沿用历史，实际是交接/验收报告。
+- 新增仓库内 `CONTRIBUTING.md`，内联 AGENTS 的关键约束（clone 后可见）。
+- `CONFIGURATION.md` 标注内部变量 `FASTCODE_SANDBOX` / `FASTCODE_SANDBOX_ROOT`。
+
+### L2：死代码清理
+
+- 删除 `src/agent/context.ts`（零引用）与 `src/config/store.ts` 的 `contextBudgetChars`、`RunOptions.contextBudgetChars`；旧配置中的该字段被忽略。
+- 删除对应 `dist/agent/context.js` / `.d.ts`。
+- 同名文件不批量改名；只在 MODULES 标注命名空间。
+
+### 验证与回滚
+
+- `typecheck` / `lint` / `build` / `smoke` / `verify:artifacts` 通过。
+- 未做目录搬迁；回滚：`git checkout -- package/src package/dist docs scripts`，或按本批单 commit revert。

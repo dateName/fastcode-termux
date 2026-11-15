@@ -1,4 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { createHash } from "node:crypto";
 /**
  * FastCode App component — the heart of the TUI.
  *
@@ -25,10 +26,11 @@ import { StatusBar } from "./ui/StatusBar.js";
 import { MessageBubble } from "./ui/Message.js";
 import { Prompt } from "./ui/Prompt.js";
 import { Picker } from "./ui/Picker.js";
+import { pickerWindowStart } from "./ui/picker-window.js";
 import { COMMANDS, findCommand, parseSlash } from "./commands/index.js";
 import { maskLoginEcho, saveScopedKey } from "./commands/login.js";
 import { isValidModelId } from "./commands/model.js";
-import { getProvider, getProviderOrThrow, probeProvider, PROVIDERS } from "./providers/index.js";
+import { getProvider, getProviderOrThrow, probeProviderDetailed, PROVIDERS } from "./providers/index.js";
 import { loadConfig, saveConfig, resolveApiKey, resolveProviderKey, getLegacy, } from "./config/store.js";
 import { getTheme } from "./config/themes.js";
 import { createStartupTranscript } from "./lib/startup.js";
@@ -82,7 +84,7 @@ function streamErrorMessage(message, provider, model) {
         return `Authentication failed for ${provider.label} · ${model}. The key may be wrong or not allowed for this model.\n` +
             `Check with \`/whoami\`, or re-save: \`/login ${provider.id} ${model} <key>\`.`;
     }
-    if (/\b(402|429)\b/.test(message) || /quota|insufficient|rate limit|billing|balance/i.test(message)) {
+    if (/\b(402|429)\b/.test(message) || /quota|rate limit|billing|insufficient (?:balance|quota|credit|funds)|exceeded .*(?:quota|balance|limit)/i.test(message)) {
         return `Request blocked: ${provider.label} reports no remaining quota / rate limit for ${model}.\n` +
             `Top up the account or switch model/provider. (${message.slice(0, 200)})`;
     }
@@ -268,7 +270,8 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 return;
             }
             if (/^[1-9]$/.test(inputChar)) {
-                chooseItem(picker, Number(inputChar) - 1);
+                const start = pickerWindowStart(picker.items.length, pickerIndex);
+                chooseItem(picker, start + Number(inputChar) - 1);
                 return;
             }
             return;
@@ -445,16 +448,20 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         const { key } = resolveProviderKey(provider.id, provider.authEnv);
         let models = [];
         let online = false;
+        let probeReason = "";
         try {
             models = uniqueModelList(await provider.listModels(key));
-            online = await probeProvider(provider, key);
+            const probe = await probeProviderDetailed(provider, key);
+            online = probe.ok;
+            probeReason = probe.reason;
         }
-        catch {
+        catch (err) {
             online = false;
+            probeReason = err?.message ?? "probe failed";
         }
         if (setup.id !== modelSetupIdRef.current)
             return;
-        if (!models.some((model) => model.id === provider.defaultModel))
+        if (provider.defaultModel && !models.some((model) => model.id === provider.defaultModel))
             models.unshift({ id: provider.defaultModel, label: "provider default" });
         const manualModelValue = "__fastcode_manual_model_id__";
         const items = [
@@ -469,9 +476,9 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         const currentIndex = items.findIndex((item) => item.value === currentModel);
         setPendingLogin({ ...setup, step: "model", provider: provider.id, model: currentModel });
         setPickerIndex(currentIndex >= 0 ? currentIndex : 0);
-        pushSystem(`Models for ${provider.label}: ${models.length}${online ? "" : " (offline — showing built-in/cached models)"}.`);
+        pushSystem(`Models for ${provider.label}: ${models.length}${online ? "" : ` (${probeReason || "offline"}; showing built-in/cached models)`}.`);
         setPicker({
-            title: `Configure model · ${provider.label}${online ? "" : " · offline list"}`,
+            title: `Configure model · ${provider.label}${online ? "" : ` · offline: ${probeReason || "unreachable"}`}`,
             current: currentModel,
             items,
             onSelect: (id) => {
@@ -656,6 +663,29 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             timer.unref?.();
         });
     }, [pushSystem, ui]);
+    // Approval decisions are events; trusted.json is authorization state. Keep
+    // them separate: record the decision + scope + request id + a stable key
+    // digest so resume can explain what was approved without treating the
+    // fact as a grant.
+    const recordApprovalFact = useCallback((request, decision) => {
+        if (!sessionRef.current)
+            return;
+        const approvalKey = createHash("sha256")
+            .update(JSON.stringify({ tool: request.tool, args: request.args }))
+            .digest("hex")
+            .slice(0, 8);
+        sessionRef.current.append({
+            type: "approval",
+            requestId: request.id,
+            tool: request.tool,
+            decision: decision.kind,
+            approvalKey,
+            ...(request.tier !== undefined ? { tier: request.tier } : {}),
+            ...(decision.kind === "allow" ? { scope: decision.scope } : {}),
+            ...(decision.kind === "deny" && decision.reason ? { reason: decision.reason } : {}),
+            ...(decision.kind === "feedback" ? { feedback: true } : {}),
+        });
+    }, []);
     const actions = useMemo(() => ({
         setProvider: (id) => setConfig((c) => ({ ...c, providerId: id })),
         setModel: (id) => setConfig((c) => ({ ...c, model: id })),
@@ -903,7 +933,11 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                     steerQueueRef.current = [];
                     return queued;
                 },
-                requestApproval,
+                requestApproval: async (request) => {
+                    const decision = await requestApproval(request);
+                    recordApprovalFact(request, decision);
+                    return decision;
+                },
                 onDelta: (delta, full) => {
                     if (!sawDeltaRef.current) {
                         sawDeltaRef.current = true;
@@ -937,7 +971,12 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                         break;
                     case "assistant_raw":
                         lastRawFact = ev.text;
-                        sessionRef.current.append({ type: "assistant_raw", content: ev.text, toolCalls: ev.toolCalls });
+                        sessionRef.current.append({
+                            type: "assistant_raw",
+                            content: ev.text,
+                            toolCalls: ev.toolCalls,
+                            ...(ev.reasoning ? { reasoning: ev.reasoning } : {}),
+                        });
                         break;
                     case "assistant_text":
                         pushSystem(ev.text);
@@ -1068,6 +1107,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         history,
         pushSystem,
         pushUser,
+        recordApprovalFact,
         requestApproval,
         runSlash,
     ]);

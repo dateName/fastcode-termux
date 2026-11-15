@@ -97,9 +97,57 @@ export async function* streamChatCompletion(req, opts) {
             throw new Error(res.status + " " + res.statusText + ": " + detail.slice(0, 500));
         }
     }
+    // Some gateways ignore `stream: true` and return one complete JSON body.
+    // Map that shape directly; feeding it to the SSE parser yields nothing.
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (contentType.includes("application/json") && !contentType.includes("event-stream")) {
+        const bodyText = await res.text();
+        let payload;
+        try {
+            payload = JSON.parse(bodyText);
+        }
+        catch {
+            throw new Error("Non-stream response was not valid JSON: " + bodyText.slice(0, 200));
+        }
+        const choice = payload?.choices?.[0];
+        const message = choice?.message ?? choice?.delta ?? {};
+        const content = typeof message.content === "string"
+            ? message.content
+            : Array.isArray(message.content)
+                ? message.content.map((part) => part?.text ?? "").join("")
+                : "";
+        if (content)
+            yield { delta: content, done: false };
+        const completeCalls = Array.isArray(message.tool_calls)
+            ? message.tool_calls
+                .map((call, index) => {
+                const args = call?.function?.arguments;
+                return {
+                    id: call?.id || `call_${index}`,
+                    name: call?.function?.name,
+                    arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+                };
+            })
+                .filter((call) => Boolean(call.name))
+            : [];
+        const parsedUsage = payload?.usage
+            ? {
+                inputTokens: payload.usage.prompt_tokens,
+                outputTokens: payload.usage.completion_tokens,
+                totalTokens: payload.usage.total_tokens,
+            }
+            : undefined;
+        yield {
+            delta: "",
+            done: true,
+            ...(parsedUsage ? { usage: parsedUsage } : {}),
+            ...(completeCalls.length > 0 ? { toolCalls: completeCalls } : {}),
+        };
+        return;
+    }
     let usage;
     const toolCalls = new Map();
-    for await (const ev of streamSSE(res)) {
+    for await (const ev of streamSSE(res, { idleTimeoutMs: req.idleTimeoutMs })) {
         if (ev.data === "[DONE]")
             break;
         let payload;

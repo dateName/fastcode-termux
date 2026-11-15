@@ -1,3 +1,4 @@
+import type { NativeToolCall } from "../types.js";
 import { type RequestSpec } from "./spec.js";
 export interface ModelInfo {
     id: string;
@@ -21,11 +22,21 @@ export interface StreamOptions {
 }
 export declare function toRequestSpec(opts: StreamOptions): RequestSpec;
 export declare function streamChatCompletion(req: any, opts: StreamOptions): AsyncGenerator<{
-    delta: string;
+    delta: any;
     done: boolean;
     reasoning?: undefined;
     usage?: undefined;
     toolCalls?: undefined;
+} | {
+    toolCalls?: NativeToolCall[];
+    usage?: {
+        inputTokens: any;
+        outputTokens: any;
+        totalTokens: any;
+    };
+    delta: string;
+    done: boolean;
+    reasoning?: undefined;
 } | {
     delta: string;
     done: boolean;
@@ -36,7 +47,7 @@ export declare function streamChatCompletion(req: any, opts: StreamOptions): Asy
     delta: string;
     done: boolean;
     usage: any;
-    toolCalls: import("../types.js").NativeToolCall[];
+    toolCalls: NativeToolCall[];
     reasoning?: undefined;
 } | {
     delta: string;

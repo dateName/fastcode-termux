@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import parse from "bash-parser";
 import { terminateProcessTree } from "./process-tree.js";
 import { normalizeTimeoutMs } from "./tools/validate.js";
-const OUTPUT_LIMIT = 1024 * 1024;
+// Retained output window per shell job. 256KB keeps one runaway command from
+// feeding a megabyte into the model/history; the runner also enforces its own
+// hard per-message cap.
+const OUTPUT_LIMIT = 256 * 1024;
 const DEFAULT_BACKGROUND_MS = 2000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 export const DEFAULT_SHELL_POOL_SIZE = 2;

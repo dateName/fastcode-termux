@@ -18,8 +18,6 @@ export declare const DEFAULT_CONFIG: {
     maxAgentTurns: number;
     /** Abort a stream that receives no data for this long (ms). */
     requestIdleTimeoutMs: number;
-    /** Approximate character budget before history compaction kicks in. */
-    contextBudgetChars: number;
     /** Thinking depth: auto = send nothing, provider default. */
     reasoningEffort: string;
     /** Resident shell concurrency: safe default 2, max 6. `/threads` changes it. */

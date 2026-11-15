@@ -14,12 +14,13 @@ import { getPaths } from "../config/paths.js";
 import { configCacheStatus, loadConfig, resolveApiKey, resolveProviderKey } from "../config/store.js";
 import { debugEnabled } from "./debug.js";
 import { PROVIDERS } from "../providers/index.js";
+import { CATALOG_PROVIDERS } from "../providers/catalog.js";
 import { listInstalledSkills, resolveRegistry } from "../skills/manager.js";
 import { listInstalledPlugins } from "../plugins/manager.js";
 import { findUnclosedSessions, fsyncMode, loggingEnabled, listSessions, sessionCacheLimitBytes } from "../session/log.js";
 import { isTrusted } from "../config/trust.js";
 import { DEFAULT_DENY_PATTERNS, loopExemptTools } from "../agent/guards.js";
-import { toolOutputLimit } from "../agent/limits.js";
+import { toolMessageLimit, toolOutputLimit } from "../agent/limits.js";
 import { grepMaxBytes, readManyMaxBytes, readMaxBytes, readScanMaxBytes } from "../agent/tools/readers.js";
 import { normalizeEgressConfig } from "../agent/policy/egress.js";
 import { compactionConfigFromEnv, heapExceeded } from "../agent/compaction.js";
@@ -117,6 +118,7 @@ export function collectDiagnostics() {
         shellDenyPatterns: DEFAULT_DENY_PATTERNS.length,
         allowDangerous: ["1", "true", "yes", "on"].includes((process.env["FASTCODE_ALLOW_DANGEROUS"] ?? "").trim().toLowerCase()),
         toolOutputLimit: toolOutputLimit(),
+        toolMessageLimit: toolMessageLimit(),
         readMaxBytes: readMaxBytes(),
         readScanMaxBytes: readScanMaxBytes(),
         readManyMaxBytes: readManyMaxBytes(),
@@ -145,9 +147,13 @@ export function collectDiagnostics() {
         shellPoolMax: shells.maxPool,
         shellSpawns: shells.spawns,
         shellMaxSpawn: shells.maxSpawnPerTurn,
+        requestIdleMs: Number(config.requestIdleTimeoutMs) > 0 ? Number(config.requestIdleTimeoutMs) : 60_000,
         sseIdleMs: positiveEnv("FASTCODE_SSE_IDLE_MS") || 25_000,
+        customAuthHeader: (process.env["FASTCODE_AUTH_HEADER"] ?? "").trim() || null,
+        customAuthPrefix: process.env["FASTCODE_AUTH_PREFIX"] !== undefined,
+        customAuthExtraHeaders: Boolean((process.env["FASTCODE_EXTRA_HEADERS"] ?? "").trim()),
         toolProtocol: resolveToolProtocol(config, config.providerId, config.model),
-        toolProtocolMode: (process.env["FASTCODE_TOOL_PROTOCOL"] ?? "legacy").trim().toLowerCase(),
+        toolProtocolMode: (process.env["FASTCODE_TOOL_PROTOCOL"] ?? "auto").trim().toLowerCase(),
         toolCapability: config.capabilities?.toolCalling?.[toolCapabilityKey(config.providerId, config.model)] ?? "unknown",
         loopExempt: Array.from(loopExemptTools()),
         modelMetaFile: modelMetaOverridePath(),
@@ -158,6 +164,8 @@ export function collectDiagnostics() {
             env: p.authEnv,
             keyPresent: p.authEnv.length === 0 || Boolean(resolveProviderKey(p.id, p.authEnv).key),
         })),
+        providerCount: PROVIDERS.length,
+        catalogCount: CATALOG_PROVIDERS.length,
     };
 }
 function positiveEnv(name) {
@@ -181,7 +189,7 @@ export function formatDiagnostics(info) {
     lines.push("  session log   " + (info.sessionLogEnabled ? "on" : "off") + "   cache cap " + info.sessionCacheMb + "MB, " + info.sessionsCount + " file(s), " + (info.sessionsBytes / 1024 / 1024).toFixed(2) + "MB used");
     lines.push("  session fsync " + info.sessionFsync + "   unclosed " + info.unclosedSessions + "   " + (info.sessionsDir ?? "(unavailable)"));
     lines.push("  shell guard   " + info.shellDenyPatterns + " legacy soft patterns" + (info.allowDangerous ? "   [FASTCODE_ALLOW_DANGEROUS is ON]" : ""));
-    lines.push("  tool output   " + info.toolOutputLimit + " chars max (streaming cap)");
+    lines.push("  tool output   " + info.toolOutputLimit + " chars max (streaming cap) · " + info.toolMessageLimit + " chars per tool message");
     lines.push(`  read limits   read ${info.readMaxBytes}B · scan ${info.readScanMaxBytes}B · read_many ${info.readManyMaxBytes}B · grep ${info.grepMaxBytes}B`);
     lines.push(`  egress        ${info.egress.enabled ? "enforce" : "audit-only"} · mode ${info.egress.mode} · scan ${info.egress.maxScanBytes}B · paths ${info.egress.denyPaths} · globs ${info.egress.denyGlobs} · markers ${info.egress.denyContentMarkers}`);
     lines.push(`  budgets       ${info.tokenBudget > 0 ? "tokens ≤ " + info.tokenBudget : "token budget off"} · ${info.costBudgetUsd > 0 ? "$" + info.costBudgetUsd : "cost budget off"}`);
@@ -189,9 +197,14 @@ export function formatDiagnostics(info) {
     lines.push(`  shell pool    ${info.shellActive} active · ${info.shellPool}/${info.shellPoolMax} resident · ${info.shellSpawns} spawns · cap ${info.shellMaxSpawn}/turn`);
     lines.push(`  loop exempt   ${info.loopExempt.length > 0 ? info.loopExempt.join(", ") : "(none)"}`);
     lines.push(`  model meta    ctx ${info.modelMeta.contextWindow} · ~${info.modelMeta.charsPerToken} chars/token · ${info.modelMeta.supportsTools ? "tools" : "no tools"} · ${info.modelMetaFile}`);
-    lines.push(`  sse timeout   ${info.sseIdleMs}ms idle`);
+    lines.push(`  sse timeout   ${info.requestIdleMs}ms request idle (config) · ${info.sseIdleMs}ms env fallback`);
     lines.push(`  tool protocol ${info.toolProtocol} (${info.toolProtocolMode}) · cached ${info.toolCapability}`);
     lines.push(`  provider      ${info.providerId} · model ${info.model}`);
+    if (info.customAuthHeader || info.customAuthPrefix || info.customAuthExtraHeaders) {
+        lines.push(`  custom auth   header ${info.customAuthHeader ?? "authorization"}` +
+            `${info.customAuthPrefix ? " · prefix set" : ""}${info.customAuthExtraHeaders ? " · extra headers set" : ""}`);
+    }
+    lines.push(`  provider list ${info.providerCount} total (${info.catalogCount} catalog)`);
     lines.push(`  config cache  ${info.configCache ? "warm" : "cold"} · debug ${info.debug ? "on" : "off"}`);
     let apiKeyStatus;
     if (info.keyPresent)

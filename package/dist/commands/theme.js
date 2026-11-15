@@ -1,17 +1,26 @@
 import { THEMES } from "../config/themes.js";
 export const themeCommand = {
     name: "theme",
-    description: "List or switch the color theme. Usage: /theme [id]",
+    description: "Pick or switch the color theme. Usage: /theme [id]",
     run({ args, state, actions }) {
         if (args.length === 0) {
-            const lines = ["Themes:"];
-            for (const id of Object.keys(THEMES)) {
-                const marker = id === state.theme ? "● " : "  ";
-                lines.push(`${marker}${id}  — ${THEMES[id].label}`);
-            }
-            lines.push("");
-            lines.push("Switch with `/theme <id>`.");
-            return { message: lines.join("\n") };
+            const ids = Object.keys(THEMES);
+            return {
+                message: `Theme: ${state.theme}`,
+                picker: {
+                    title: "Color theme",
+                    current: state.theme,
+                    items: ids.map((id) => ({
+                        value: id,
+                        label: THEMES[id].label,
+                        hint: id,
+                    })),
+                    onSelect: (value) => {
+                        actions.setTheme(value);
+                        actions.pushSystemMessage(`Theme set to ${value}.`);
+                    },
+                },
+            };
         }
         const id = args[0];
         if (!THEMES[id])

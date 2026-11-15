@@ -46,6 +46,8 @@ export interface ChatRequest {
     reasoningEffort?: ReasoningEffort;
     /** AbortSignal for cancellation (Esc / Ctrl+C). */
     signal?: AbortSignal;
+    /** Effective stream idle timeout (config.requestIdleTimeoutMs). */
+    idleTimeoutMs?: number;
     /** Stable idempotency key reused across retries of the same logical request. */
     clientRequestId?: string;
     /** Native function-calling schemas (auto mode only). */
@@ -54,6 +56,8 @@ export interface ChatRequest {
 export interface ChatChunk {
     /** Token text appended to the response. */
     delta: string;
+    /** Thinking/reasoning text appended to the response (never rendered as answer). */
+    reasoning?: string;
     /** True on the final chunk. */
     done: boolean;
     /** Complete native tool calls (OpenAI-style) on the final chunk. */
@@ -92,10 +96,26 @@ export interface Provider {
     defaultModel: string;
     /** Static or dynamic list of supported models. */
     listModels(apiKey: string | undefined): Promise<ProviderModel[]>;
-    /** Stream a chat completion. */
-    stream(req: ChatRequest, apiKey: string | undefined): ChatStream;
-    /** Whether this provider/model honors ChatRequest.reasoningEffort. */
-    supportsReasoning?(model: string): boolean;
+        /** Stream a chat completion. */
+        stream(req: ChatRequest, apiKey: string | undefined): ChatStream;
+        /** Whether this provider/model honors ChatRequest.reasoningEffort. */
+        supportsReasoning?(model: string): boolean;
+        /** Model-list path; null means the provider has no /models endpoint. */
+        modelsPath?: string | null;
+        /** How the provider reaches the model. HTTP is the default. */
+        transport?: "http" | "stdio";
+        /** Declarative capabilities used by pickers and diagnostics. */
+        capabilities?: {
+            streaming?: boolean;
+            toolCalling?: boolean;
+            reasoning?: boolean;
+            usage?: boolean;
+            resumable?: boolean;
+            /** false = do not replay the turn (non-idempotent CLI backends). */
+            retryable?: boolean;
+        };
+        /** Authentication shape; absent means an API key resolved by authEnv. */
+        authKind?: "api-key" | "local-login" | "none";
 }
 export interface PickerItem {
     value: string;

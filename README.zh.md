@@ -32,7 +32,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 
 | 特性 | 描述 |
 |---|---|
-| 💬 多模型聊天 | **13 个服务商**，用 `/provider`、`/model` 随时切换 |
+| 💬 多模型聊天 | **55 个服务商**（13 内置 + 42 个 OpenAI 兼容 catalog），用 `/provider`、`/model` 随时切换 |
 | 🛠️ 本地编码代理 | 读写文件、grep、打补丁、运行 shell 命令（默认开启） |
 | 🔎 代码导航 | 搜索项目、按结构定位、批量读取文件 |
 | 🧩 Agent Skills | 安装 `SKILL.md` 技能扩展行为；目录 sha256 完整性锁定，`/skills verify --confirm` 重新基线 |
@@ -43,7 +43,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 💾 恢复 | 事实流 + `*.projection.json`；resume 恢复 cwd/provider/model 与未配对 tool_call |
 | 🧠 上下文 | `/context`、`/compact`、`/clear`；token/heap 触发本地压缩并落盘 `summary-*.md`；`/compact`/`/clear` 会写事实，旧摘要会清理 |
 | 🖥️ 后台 shell | 长命令返回 session id；`/jobs` `/attach` `/kill`；POSIX 常驻 `sh -s` 池默认 2，可用 `/threads` 调至 6；one-shot 命令走独立每轮 spawn 预算 |
-| 🧰 双轨协议 | 伪协议 `<fastcode_tool>` 或原生 `tool_calls`；`FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
+| 🧰 双轨协议 | 伪协议 `<fastcode_tool>` 或原生 `tool_calls`（默认 `auto`；原生仅指 OpenAI 方言，其他 provider 失败即回落伪协议）；`FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
 | 📱 手机命令 | `/cancel` `/steer` `/expand` `/edit`（外部编辑器绕开 IME 问题） |
 
 **快捷键**
@@ -62,8 +62,12 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 🔒 项目信任 | 首次在未知文件夹运行时，会在代理工具加载前询问 | `fastcode trust` / `untrust` / `trusted`；`FASTCODE_TRUST_ALL=1` |
 | 🧱 文件沙箱 | 文件工具限制在项目内；`../` 与软链接逃逸都会被拒绝 | `config.sharedDirs`、`FASTCODE_ALLOW_PATHS` |
 | 🚫 危险命令拦截 | 根/源码/通配符/系统路径删除、force-push 受保护分支、`git clean -fdx`、磁盘/容器/系统命令、敏感文件写入/删除/移动、敏感文件外传（`sensitive_file_egress`）、关键凭据读取（`id_*`、`/etc/shadow`、`/etc/sudoers`）、动态 eval/source/-c、反弹 shell 入口、`curl\|sh` 走不可授权的 Hard Block；`.env` 删除/写入/外发也是 Hard Block；裸 `printenv`、`git reset --hard` 属 Soft Gate，通过 resolver 审批 | `FASTCODE_ALLOW_DANGEROUS=1` 仅作用于 Soft Gate |
-| 🛰️ Egress 策略 | 应用层工具/载荷/输出策略；默认 audit-only，`enabled:true + mode:"block"` 返回 `EGRESS_DENY`；trust/sharedDirs 不能覆盖 | `config.egress`：`enabled`、`mode`、`denyPaths`、`denyGlobs`、`denyContentMarkers`、`maxScanBytes` |
+| 🛰️ Egress 策略 | 应用层工具/载荷/输出策略；默认 `enabled:true + mode:"block"` 返回 `EGRESS_DENY`（`audit` 只记录、`off` 关闭）；trust/sharedDirs 不能覆盖 | `config.egress`：`enabled`、`mode`、`denyPaths`、`denyGlobs`、`denyContentMarkers`、`maxScanBytes` |
 | ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
+| 🧮 tool 消息硬上限 | 单条 tool 消息进入 history 前兜底截断（默认 1,000,000 字符）；单行读取、grep 命中行与 shell 窗口更早裁剪 | `FASTCODE_TOOL_MESSAGE_LIMIT` |
+| 🧪 脚本退出码 | `--ui plain/json` 失败时输出错误并返回非零退出码；初始化错误默认不打印压缩后的 bundle 堆栈 | `FASTCODE_DEBUG=1` 查看完整堆栈 |
+| 🔌 执行后端 | HTTP provider + 规范 NDJSON CLI 后端基础层；CLI 只提议工具调用、由宿主执行；子进程环境 allowlist、stderr 脱敏 | CLI 后端默认不启用；见 `docs/EXECUTION_BACKENDS.md` |
+| 🧭 失败语义 | `done.stopReason` 是业务结果，退出码只管进程级异常；会话写失败降级、不固化残缺投影；审批决策是事件，不是授权 | 见 `docs/ERROR_SEMANTICS.md` |
 | 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
 | 🧾 补丁事务 | parse → plan → apply；保持 CRLF/mode；拒绝符号链接；move 不覆盖 | `/expand` 查看完整 diff |
 | 🛑 进程树/退出 | abort/`/kill` 杀子进程与孙进程；`/exit` 中止当前运行并清理所有 resident shell；SIGTERM/SIGHUP/fatal 同样清理 | POSIX 进程组；`lib/lifecycle.ts`；Windows `taskkill /T` |
@@ -215,8 +219,8 @@ echo 'export DEEPSEEK_API_KEY=sk-你的key' >> ~/.bashrc
 | 命令 | 作用 |
 |---|---|
 | `fastcode` / `fastcode "解释这个仓库"` | 进入 TUI / 带初始问题启动 |
-| `fastcode --version` / `-v` / `--help` / `-h` | 版本 / 全部命令 |
-| `fastcode provider [id]` / `model [id]` | 列出或设置默认 provider / 模型 |
+| `fastcode --version` / `-v` / `--help` / `-h` / `help` | 版本 / 全部命令 |
+| `fastcode provider [id] [model]` / `model [id]` | 列出或设置默认 provider / 模型（provider 无已验证默认模型时需同时给 model） |
 | `fastcode config` / `config path` | 查看配置与路径 / 只打印 config.json |
 | `fastcode sessions` / `sessions show <id>` / `resume [id\|latest]` | 列出 / 查看 / 恢复会话 |
 | `fastcode trust [dir]` / `untrust [dir]` / `trusted` / `trust --forget <key>` | 信任目录与记住的审批 |

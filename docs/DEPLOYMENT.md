@@ -38,6 +38,22 @@ Termux 安装依赖：
     npm install -g ./package            # 或用 npm 全局安装（bin 会优先加载 cli.js）
     cd package && npm install && npm link
 
+### 仓库 / 安装目录结构
+
+    fastcode-termux/
+      bin/fastcode.mjs      启动 shim（优先 dist/cli.js，其次 dist/index.js，最后 src + tsx）
+      package/
+        src/                源码（开发态；发布包通常不含）
+        dist/cli.js         自包含 bundle（运行时只需它）
+        dist/*.js           tsc 产物（回退路径）
+        scripts/            smoke-test / verify-artifacts / bench
+        node_modules/       smoke 与开发依赖（只跑 bundle 时不需要）
+      scripts/install.sh    Termux / Linux / macOS 安装脚本
+      docs/                 架构、模块、配置、部署、审计
+      release/              本地打包资产（tar.gz/zip/tgz/SHA256SUMS）
+
+用户数据目录（`~/.fastcode`）的文件职责见 `docs/CONFIGURATION.md` §1。
+
 ## 方式 B：免安装便携包（Release 附件）
 
 运行时 `dist/cli.js` 已自包含，解压后不需要 npm install。0.1.8-beta.0 发布构建后，到 Release 页面下载

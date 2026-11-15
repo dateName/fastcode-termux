@@ -41,9 +41,19 @@ export function getPaths() {
     cached = paths;
     return paths;
 }
-export function ensureDir(dir) {
+export function ensureDir(dir, mode = 0o700) {
     if (!existsSync(dir))
-        mkdirSync(dir, { recursive: true });
+        mkdirSync(dir, { recursive: true, mode });
+    // mkdirSync's mode is masked by umask; enforce it on POSIX so the data
+    // directory is consistently 0700 instead of inheriting 0755.
+    if (!isWindows()) {
+        try {
+            chmodSync(dir, mode);
+        }
+        catch {
+            // FAT / shared storage may not honor chmod; best effort.
+        }
+    }
 }
 /** Tighten permissions on a file storing secrets where the OS supports it. */
 export function lockdown(file) {

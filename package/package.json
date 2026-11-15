@@ -29,6 +29,8 @@
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node ../scripts/smoke-test.mjs",
+    "verify:artifacts": "node scripts/verify-artifacts.mjs",
+    "bench": "node scripts/bench.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

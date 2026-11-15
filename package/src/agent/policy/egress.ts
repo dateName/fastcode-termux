@@ -8,6 +8,7 @@
  * `egress.enabled=true` and `egress.mode="block"` to enforce.
  */
 import { basename, relative, resolve } from "node:path";
+import { getPaths } from "../../config/paths.js";
 import { isCriticalReadTarget, isSensitiveTarget, isSharedStoragePath } from "../guards.js";
 import type { EgressAudit, ToolCall } from "../tools/types.js";
 import { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG, type EgressConfig, type EgressMode } from "./defaults.js";
@@ -51,17 +52,35 @@ function positiveInt(value: any, fallback: number): number {
 
 export function normalizeEgressConfig(raw: any): EgressConfig {
     const source = raw && typeof raw === "object" ? raw : {};
-    const mode: EgressMode = source.mode === "block" ? "block" : source.mode === "off" ? "off" : "audit";
+    const mode: EgressMode = source.mode === "block" || source.mode === "off" || source.mode === "audit"
+        ? source.mode
+        : DEFAULT_EGRESS_CONFIG.mode;
     return {
-        enabled: source.enabled === true,
+        enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_EGRESS_CONFIG.enabled,
         mode,
-        denyPaths: strings(source.denyPaths),
+        // Built-in denyPaths cannot be removed by configuration.
+        denyPaths: Array.from(new Set([...builtinDenyPaths(), ...strings(source.denyPaths)])),
         denyGlobs: strings(source.denyGlobs),
         // Built-in markers cannot be removed by configuration.
         denyContentMarkers: Array.from(new Set([...DEFAULT_CONTENT_MARKERS, ...strings(source.denyContentMarkers)])),
         maxScanBytes: positiveInt(source.maxScanBytes, DEFAULT_EGRESS_CONFIG.maxScanBytes),
         scanToolOutput: source.scanToolOutput !== false,
     };
+}
+
+/**
+ * Paths the agent must never read, copy, move, or rewrite: the credential file
+ * and the on-disk conversation history. Resolved from FASTCODE_HOME at call
+ * time so a moved home or a test sandbox is picked up correctly.
+ */
+function builtinDenyPaths(): string[] {
+    try {
+        const paths = getPaths();
+        return [paths.auth, paths.sessions];
+    }
+    catch {
+        return [];
+    }
 }
 
 interface CompiledPolicy {

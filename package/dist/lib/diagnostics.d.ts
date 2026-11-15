@@ -40,6 +40,7 @@ export declare function collectDiagnostics(): {
     shellDenyPatterns: number;
     allowDangerous: boolean;
     toolOutputLimit: number;
+    toolMessageLimit: number;
     readMaxBytes: number;
     readScanMaxBytes: number;
     readManyMaxBytes: number;
@@ -68,7 +69,11 @@ export declare function collectDiagnostics(): {
     shellPoolMax: number;
     shellSpawns: number;
     shellMaxSpawn: number;
+    requestIdleMs: number;
     sseIdleMs: number;
+    customAuthHeader: string;
+    customAuthPrefix: boolean;
+    customAuthExtraHeaders: boolean;
     toolProtocol: import("../agent/protocol-mode.js").ToolProtocol;
     toolProtocolMode: string;
     toolCapability: any;
@@ -81,5 +86,7 @@ export declare function collectDiagnostics(): {
         env: string[];
         keyPresent: boolean;
     }[];
+    providerCount: number;
+    catalogCount: number;
 };
 export declare function formatDiagnostics(info: any): string;

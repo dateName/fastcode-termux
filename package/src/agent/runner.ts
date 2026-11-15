@@ -6,6 +6,8 @@ import type { SideEffects, ToolResult } from "./tools/types.js";
 import { estMessagesTokens, estTokens, getModelMeta } from "../lib/model-meta.js";
 import { compactMessages, DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
 import { isLoopExempt, isReadOnlyToolCall, toolCallFingerprint } from "./guards.js";
+import { boundToolMessage } from "./limits.js";
+import { pairToolMessages } from "../session/projection.js";
 import { isNativeUnsupportedError, type ToolProtocol } from "./protocol-mode.js";
 import type { ApprovalResolver } from "./approval.js";
 import { formatToolResults, parseToolCalls, stripToolCalls } from "./protocol.js";
@@ -38,7 +40,6 @@ export interface RunOptions {
     signal?: AbortSignal;
     cwd?: string;
     idleTimeoutMs?: number;
-    contextBudgetChars?: number;
     compaction?: CompactionConfig;
     contextWindow?: number;
     serverOpaqueState?: string;
@@ -61,9 +62,10 @@ export type AgentStopReason =
     | "loop_detected"
     | "aborted"
     | "incomplete"
-    | "stream_error";
+    | "stream_error"
+    | "protocol_error";
 
-export type AgentErrorKind = "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "stream_error";
+export type AgentErrorKind = "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "stream_error" | "protocol_error" | "incomplete";
 
 export type AgentEvent =
     | {
@@ -78,7 +80,7 @@ export type AgentEvent =
         source: "local" | "server";
         summaryFile?: string;
     }
-    | { type: "assistant_raw"; text: string; toolCalls?: NativeToolCall[] }
+    | { type: "assistant_raw"; text: string; toolCalls?: NativeToolCall[]; reasoning?: string }
     | { type: "assistant_text"; text: string }
     | { type: "tool_call"; id: string; call: ToolCall; native?: boolean }
     | { type: "tool_result"; id: string; call: ToolCall; ok: boolean; output: string; sideEffects?: SideEffects; code?: string; hint?: string; truncated?: boolean; totalLines?: number; returnedLines?: number; totalBytes?: number; returnedBytes?: number; filesRead?: number; filesSkipped?: number; matches?: number }
@@ -163,6 +165,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
     let spentCost = 0;
     let stopReason: AgentStopReason = "complete";
     let errorMessage = "";
+    let protocolErrors = 0;
     let naturalFinish = false;
     let toolCallSeq = 0;
     let protocol: ToolProtocol = options.protocol ?? "legacy";
@@ -177,6 +180,12 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             history = [...history, { role: "system", content: "[user steering] " + steering }];
             yield { type: "notice", text: "Steering applied to the next request." };
         }
+        // A dangling assistant(tool_calls) makes every subsequent request a
+        // 400 ("tool messages must follow"). Repair before building the body so
+        // aborts/loop stops can never poison the history.
+        const paired = pairToolMessages(history);
+        if (paired.repaired)
+            history = paired.messages;
         const contextWindow = options.contextWindow ?? getModelMeta(provider.id, model).contextWindow;
         const compacted = compactMessages(history, options.compaction ?? DEFAULT_COMPACTION_CONFIG, {
             contextWindow,
@@ -250,8 +259,9 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             }
             stopReason = "stream_error";
             const partial = stripToolCalls(String((err as { partialText?: string })?.partialText ?? "")).trim();
-            if (partial)
-                lastVisible = partial;
+            // Reset, don't keep: a 402 before the first byte has no partial, and
+            // reusing the previous turn's text wrote a stale assistant message.
+            lastVisible = partial;
             yield { type: "error", kind: "stream_error", message: errorMessage, text: partial || undefined };
             break;
         }
@@ -279,6 +289,10 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             errorMessage = `Connection ended before the response finished${streamed.retried > 0 ? ` (retried ${streamed.retried}×)` : ""}. ` +
                 "Partial output is kept — type 继续 to continue.";
             yield { type: "notice", text: errorMessage };
+            // Terminal state gets both a notice (kept in the transcript) and an
+            // error event so headless/JSON consumers see a non-complete stop
+            // without inferring it from the notice text.
+            yield { type: "error", kind: "incomplete", message: errorMessage, text: partial || undefined };
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
             break;
         }
@@ -287,16 +301,19 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             lastVisible = visibleText;
         const nativeCalls: NativeToolCall[] = protocol === "native" && options.allowTools !== false ? (streamed.toolCalls ?? []) : [];
         if (nativeCalls.length > 0) {
-            yield { type: "assistant_raw", text: streamed.text, toolCalls: nativeCalls };
+            yield { type: "assistant_raw", text: streamed.text, toolCalls: nativeCalls, ...(streamed.reasoning ? { reasoning: streamed.reasoning } : {}) };
             if (visibleText)
                 yield { type: "assistant_text", text: visibleText };
             history = [...history, { role: "assistant", content: streamed.text, toolCalls: nativeCalls }];
-            for (const native of nativeCalls) {
+            const nativeIds = nativeCalls.map((native) => native.id || `tc_${++toolCallSeq}`);
+            const executed = new Set<string>();
+            for (let nativeIndex = 0; nativeIndex < nativeCalls.length; nativeIndex += 1) {
+                const native = nativeCalls[nativeIndex];
                 if (signal?.aborted) {
                     stopReason = "aborted";
                     break;
                 }
-                const id = native.id || `tc_${++toolCallSeq}`;
+                const id = nativeIds[nativeIndex];
                 let call: ToolCall;
                 let parseError = "";
                 try {
@@ -307,6 +324,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                 }
                 catch (err: any) {
                     parseError = `invalid arguments for ${native.name}: ${err?.message ?? String(err)}`;
+                    protocolErrors += 1;
                     call = { tool: native.name };
                 }
                 const fingerprint = toolCallFingerprint(call, cwd);
@@ -327,11 +345,25 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                 const result: any = parseError
                     ? { ok: false, output: parseError }
                     : await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
+                if (typeof result.output === "string")
+                    result.output = boundToolMessage(result.output);
                 trackSideEffects(activeFiles, result.sideEffects);
                 if (result.egress)
                     yield { type: "egress_denied", ...result.egress };
                 yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result) };
                 history = [...history, { role: "tool", toolCallId: id, content: String(result.output ?? "") }];
+                executed.add(id);
+            }
+            // Aborted or loop-stopped mid-batch: every tool_call_id still needs
+            // a matching tool message, or the next request is invalid.
+            for (const id of nativeIds) {
+                if (executed.has(id))
+                    continue;
+                history = [...history, {
+                    role: "tool",
+                    toolCallId: id,
+                    content: "[not executed: the run stopped before this tool call could run]",
+                }];
             }
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
             if (stopReason === "complete")
@@ -341,19 +373,25 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             continue;
         }
         const parsed = options.allowTools === false
-            ? { calls: [] as ToolCall[], consumedEnd: 0, errors: [] as string[] }
+            ? { calls: [] as ToolCall[], consumedEnd: 0, errors: [] as string[], detectedDialects: [] as string[] }
             : parseToolCalls(streamed.text);
         const calls: ToolCall[] = parsed.calls;
-        yield { type: "assistant_raw", text: streamed.text };
+        yield { type: "assistant_raw", text: streamed.text, ...(streamed.reasoning ? { reasoning: streamed.reasoning } : {}) };
         if (calls.length === 0) {
-            if (parsed.errors.length > 0) {
+            const dialectFailure = parsed.detectedDialects.length > 0;
+            if (parsed.errors.length > 0 || dialectFailure) {
                 // Never let a broken tool-call block end the turn silently: the
                 // model would wait forever for a tool result. Inject a visible
                 // tool error and continue so it can re-emit valid markup.
+                protocolErrors += 1;
                 const id = `tc_${++toolCallSeq}`;
                 const call: ToolCall = { tool: "protocol_error" };
+                const dialectNote = dialectFailure
+                    ? `Detected tool-call dialects: ${parsed.detectedDialects.join(", ")}.\n`
+                    : "";
                 const output = "Previous output contained invalid tool-call markup. " +
                     "Re-emit a complete <fastcode_tool>{\"tool\":...}</fastcode_tool> block.\n" +
+                    dialectNote +
                     parsed.errors.join("\n");
                 yield { type: "tool_call", id, call };
                 yield { type: "tool_result", id, call, ok: false, output, code: "INVALID_ARGS", hint: "Re-emit a complete tool call." };
@@ -393,6 +431,8 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             const id = `tc_${++toolCallSeq}`;
             yield { type: "tool_call", id, call };
             const result: any = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
+            if (typeof result.output === "string")
+                result.output = boundToolMessage(result.output);
             results.push({ call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects });
             trackSideEffects(activeFiles, result.sideEffects);
             if (result.egress)
@@ -414,11 +454,21 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
     }
     if (stopReason === "complete" && !naturalFinish)
         stopReason = "max_turns";
+    // Repeated broken markup/arguments must not look like a normal turn cap:
+    // surface it as its own stop reason so scripts get a non-zero exit.
+    if (stopReason === "max_turns" && protocolErrors > 0) {
+        stopReason = "protocol_error";
+        errorMessage = `Tool-call protocol failed ${protocolErrors} time(s); the run stopped before producing a valid tool call.`;
+    }
     let finalText = "";
     if (stopReason === "aborted") {
         const partial = stripToolCalls(currentText).trim() || lastVisible;
         finalText = (partial ? partial + "\n\n" : "") + "[用户中断]";
         yield { type: "error", kind: "aborted", message: "Cancelled.", text: partial };
+    }
+    else if (stopReason === "protocol_error") {
+        finalText = lastVisible || errorMessage;
+        yield { type: "error", kind: "protocol_error", message: errorMessage, text: lastVisible || undefined };
     }
     else if (stopReason === "token_budget" || stopReason === "cost_budget" || stopReason === "loop_detected" || stopReason === "incomplete") {
         finalText = lastVisible || errorMessage;

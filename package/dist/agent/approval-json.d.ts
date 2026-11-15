@@ -31,6 +31,23 @@ export interface GateAskEvent {
     require_input?: string;
 }
 export declare function encodeGateAsk(request: ApprovalRequest): GateAskEvent;
+export interface GateDecisionEvent {
+    event: "gate:decision";
+    version: number;
+    id: string;
+    decision: {
+        kind: string;
+        scope?: string;
+        reason?: string;
+        feedback?: string;
+    };
+    error?: string;
+}
+/**
+ * Output frame for a resolved decision. Headless mode has no session log, so
+ * this frame is its only durable record; TUI mode records an `approval` fact.
+ */
+export declare function encodeGateDecision(request: ApprovalRequest, decision: ApprovalDecision, error?: string): GateDecisionEvent;
 export interface GateDecisionResult {
     decision: ApprovalDecision;
     error?: string;

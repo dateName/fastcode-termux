@@ -1,4 +1,4 @@
-# 安全与健壮性审计报告 — FastCode 0.1.6-beta
+# 安全与健壮性审计报告 — 0.1.6-beta 起（当前工作树 0.1.8-beta.0）
 
 审计对象：src/（114 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
@@ -77,7 +77,7 @@
 
 - 位置：`src/agent/policy/egress.ts`，由 `registry.execute()` 在 prepare 后、approve 前调用。
 - 已覆盖：工具路径读写/删/复制/移动/patch、工具 payload、shell command 内容标记、工具输出回模型前、NDJSON/TUI/session 事件。
-- 不变量：默认 audit；block 态 `EGRESS_DENY` 不生成审批、不写 `trusted.json`；超预算 outbound fail-closed；`ALLOW_DANGEROUS`/`TRUST_ALL`/`sharedDirs` 不可覆盖。
+- 不变量（0.1.6 时默认 audit；**0.1.8-beta.0 起默认 `enabled:true + mode:"block"`，见 DECISIONS D-21**）；block 态 `EGRESS_DENY` 不生成审批、不写 `trusted.json`；超预算 outbound fail-closed；`ALLOW_DANGEROUS`/`TRUST_ALL`/`sharedDirs` 不可覆盖。
 - 未覆盖：provider 网络正文、session JSONL 落盘正文、CLI 子命令输出、skills/plugins prompt 注入、TTS/share/clipboard、debug 日志；shell 路径仍是启发式。
 - 证据：Windows smoke 275/275、Termux 真机 281/281；真机 egress 套件 28/28、共享存储分层矩阵、`FAIL` 无产品级失败。详见 `ARCHITECTURE.md` §5.1。
 
@@ -191,3 +191,30 @@ provider 级 Key 复用、v1/v2 迁移。
 - ReDoS 执行超时、写路径 TOCTOU、egress 未覆盖出口、Tier 3 备份前置等仍按 `CONFIGURATION.md`/`ARCHITECTURE.md` 所列边界处理。
 
 验证：Windows `npm test` **282/282**（POSIX 专属用例跳过）；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 资产；npm `beta=0.1.8-beta.0`；手工核对 one-shot 记账、`/threads` clamp、`session_end` 保存口与 `shutdownShellsAsync`。Termux/POSIX 真机待复跑。
+
+## 七、2026-11-15 审计修复（本地，未提交/未发布）
+
+依据 `yq.txt` 的 A–D 线与 F/J/G/C/A/K/B/D/E/H 审计项：
+
+- **A1 单行读取绕过上限**：`readFileRange` 先算 `budget = maxBytes - returnedBytes - 1`，UTF-8 安全裁切后再入结果；实测 1.2MB 单行 `limit:1` 返回 ≤200000 字节。
+- **A1 结构性兜底**：`limits.ts` 新增 `toolMessageLimit`/`boundToolMessage`，runner 写 `role:"tool"` 前统一按默认 1MB 截断。
+- **A2 压缩正则**：摘要只采样前 64KB，`collectFiles` 正则加 `{1,240}`，`clip` 的 `\s+` 限长；1.2MB 单行压缩 <2s。
+- **A3 压缩不收敛**：回收率 <10% 时把 >20KB 的 tool/user 消息瘦身到 8KB。
+- **B5 方言静默吞掉**：已支持 Hermes/Qwen、Mistral（pre-v11/v11+）、Kimi K2、Llama（tag/裸 JSON）；`parseToolCalls` 返回 `detectedDialects`，检测到标记但 0 调用 → `errors` + `protocol_error`，不再记 `complete`；`stripToolCalls` 只删已识别的良构块。
+- **B1/B2/B4**：无 index 多 chunk 按 id/单条目归并；对象 `arguments` 归一；非流式 JSON 兜底。
+- **C1/C4 配额**：仅 402/429 或 billing/quota/balance 类关键词走配额提示；`retryStream` 抛 `QuotaError`。
+- **C2 悬空 tool_calls**：请求前 `pairToolMessages`；提前 break 补 `role:"tool"` 占位。
+- **C3 旧文本**：`stream_error` 重置 `lastVisible`。
+- **F/J/G/C/K**：headless 失败退出码非 0；目录 0700/文件 0600；config 损坏 `.bak` + 提示；SSE 与 `requestIdleTimeoutMs` 统一。
+- **D2/D4**：custom 认证头/额外头；probe 使用 `modelsPath`，`null` 不误报 offline。
+- **B/D/E**：非法 model ID、`sessions show` 不存在 id、`trust --forget` 空值/不存在返回非零。
+- **失败语义批次（第二轮 yq.txt）**：session append 写失败 → stderr + degraded + 跳过 projection + 幂等 close；TUI `approval` fact / headless `gate:decision` 帧；`probeProviderDetailed` 错误归因；`incomplete` error 事件 + terminal latch；`protocol_error` 独立终止；退出码映射见 `ERROR_SEMANTICS.md`。
+- **方言批次**：Hermes/Qwen、Mistral、Kimi K2、Llama；`detectedDialects` 结构性防线。
+
+仍存边界：
+
+- 用户输入的 `grep` 正则仍无执行超时/子进程隔离（通用 ReDoS 未关闭）；本轮只关闭 `collectFiles` 已知 O(n²)。
+- 写路径 realpath/lstat TOCTOU、egress 未覆盖出口、Tier 3 备份前置、ProxyAgent、`/egress` 命令仍未做。
+- `listModels` 仍静默回退静态表（probe 已能给出原因）；tool-call 生命周期 kind、外部模型目录、CLI 后端接入未做。
+
+验证：Windows `npm test` **325/325**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过；新增错误语义与执行后端回归（protocol_error、incomplete、retryable、auth 损坏、degraded 会话、幂等 close、审批决策帧、probe 归因、terminal latch、五种方言、事件装配、环境白名单、脱敏、NDJSON、只提议、abort）。Termux 真机待复跑。

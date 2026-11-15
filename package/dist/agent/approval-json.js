@@ -36,6 +36,26 @@ export function encodeGateAsk(request) {
     };
 }
 /**
+ * Output frame for a resolved decision. Headless mode has no session log, so
+ * this frame is its only durable record; TUI mode records an `approval` fact.
+ */
+export function encodeGateDecision(request, decision, error) {
+    const payload = decision.kind === "allow"
+        ? { kind: "allow", scope: decision.scope }
+        : decision.kind === "deny"
+            ? { kind: "deny", ...(decision.reason ? { reason: decision.reason } : {}) }
+            : decision.kind === "feedback"
+                ? { kind: "feedback", feedback: decision.text }
+                : { kind: decision.kind };
+    return {
+        event: "gate:decision",
+        version: GATE_PROTOCOL_VERSION,
+        id: request.id,
+        decision: payload,
+        ...(error ? { error } : {}),
+    };
+}
+/**
  * Accept only a well-formed decision for this exact request id and one of its
  * stable option ids. Malformed JSON, wrong ids, unknown options and missing
  * required input all fail closed.

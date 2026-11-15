@@ -11,6 +11,8 @@ import { moonshotProvider } from "./moonshot.js";
 import { zhipuProvider } from "./zhipu.js";
 import { qwenProvider } from "./qwen.js";
 import { customProvider } from "./custom.js";
+import { CATALOG_PROVIDERS } from "./catalog.js";
+import { resolveBaseUrl } from "./spec.js";
 export const PROVIDERS = [
     anthropicProvider,
     openaiProvider,
@@ -24,6 +26,7 @@ export const PROVIDERS = [
     zhipuProvider,
     qwenProvider,
     ollamaProvider,
+    ...CATALOG_PROVIDERS,
     customProvider,
 ];
 export function getProvider(id) {
@@ -38,13 +41,18 @@ export function getProviderOrThrow(id) {
 /**
  * Cheap connectivity check used by the model picker to label a list "offline".
  * `listModels()` silently falls back to the static list, so without this probe
- * the UI cannot tell a live catalog from a cached one.
+ * the UI cannot tell a live catalog from a cached one. The detailed form keeps
+ * the reason: DNS/timeout/401 are "offline", a missing /models is "unsupported".
  */
-export async function probeProvider(provider, apiKey, timeoutMs = 4000) {
+export async function probeProviderDetailed(provider, apiKey, timeoutMs = 4000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const base = String(provider.baseUrl).replace(/[/]+$/, "");
+        // Providers without /models (Bedrock, Vertex, …) cannot be probed this
+        // way; report them as reachable instead of falsely labeling "offline".
+        if (provider.modelsPath === null)
+            return { ok: true, reason: "no /models endpoint (static catalog)" };
+        const base = resolveBaseUrl({ baseUrl: String(provider.baseUrl) }).replace(/[/]+$/, "");
         const headers = { accept: "application/json" };
         if (apiKey) {
             if (provider.id === "anthropic") {
@@ -55,13 +63,25 @@ export async function probeProvider(provider, apiKey, timeoutMs = 4000) {
                 headers["authorization"] = "Bearer " + apiKey;
             }
         }
-        const res = await fetch(base + "/models", { headers, signal: controller.signal });
-        return res.ok;
+        const res = await fetch(base + (provider.modelsPath ?? "/models"), { headers, signal: controller.signal });
+        if (res.ok)
+            return { ok: true, reason: "ok", status: res.status };
+        return {
+            ok: false,
+            reason: `HTTP ${res.status}${res.statusText ? " " + res.statusText : ""}`,
+            status: res.status,
+        };
     }
-    catch {
-        return false;
+    catch (err) {
+        return {
+            ok: false,
+            reason: err?.name === "AbortError" ? `timeout after ${timeoutMs}ms` : (err?.message ?? String(err)),
+        };
     }
     finally {
         clearTimeout(timer);
     }
+}
+export async function probeProvider(provider, apiKey, timeoutMs = 4000) {
+    return (await probeProviderDetailed(provider, apiKey, timeoutMs)).ok;
 }

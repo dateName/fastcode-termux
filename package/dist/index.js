@@ -42,6 +42,9 @@ async function main() {
     render(React.createElement(App, { initialPrompt: cli.prompt, resume: cli.resume, ui: cli.ui ?? "tty" }), { exitOnCtrlC: false });
 }
 main().catch((err) => {
-    console.error(err);
+    const debug = ["1", "true", "yes", "on"].includes((process.env["FASTCODE_DEBUG"] ?? "").trim().toLowerCase());
+    // Avoid dumping the minified bundle stack (with dist paths) on startup
+    // errors; FASTCODE_DEBUG restores the full stack for support.
+    console.error(debug && err instanceof Error && err.stack ? err.stack : `[fastcode] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
 });

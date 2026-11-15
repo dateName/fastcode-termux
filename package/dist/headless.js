@@ -6,15 +6,15 @@
 import readline from "node:readline";
 import { AGENT_SYSTEM_PROMPT } from "./agent/protocol.js";
 import { compactionConfigFromEnv } from "./agent/compaction.js";
-import { resolveToolProtocol } from "./agent/protocol-mode.js";
+import { resolveToolProtocol, withToolCapability } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
 import { setShellPoolSize } from "./agent/shell-session.js";
 import { toolSchemas } from "./agent/tool-schemas.js";
-import { encodeGateAsk, parseGateDecision } from "./agent/approval-json.js";
+import { encodeGateAsk, encodeGateDecision, parseGateDecision } from "./agent/approval-json.js";
 import { decisionForOption, parseApprovalChoice } from "./agent/approval.js";
 import { buildPluginsPrompt } from "./plugins/manager.js";
 import { buildSkillsPrompt } from "./skills/manager.js";
-import { loadConfig, resolveApiKey } from "./config/store.js";
+import { loadConfig, resolveApiKey, saveConfig } from "./config/store.js";
 import { getProviderOrThrow } from "./providers/index.js";
 import { resumeSession } from "./session/projection.js";
 let eventSeq = 0;
@@ -27,7 +27,7 @@ function optionalBudget(name) {
     return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 export async function runHeadless(options) {
-    const config = loadConfig();
+    let config = loadConfig();
     setShellPoolSize(config.shellPoolSize);
     const provider = getProviderOrThrow(config.providerId);
     let apiKey;
@@ -85,9 +85,14 @@ export async function runHeadless(options) {
         if (options.ui === "json") {
             writeEvent(encodeGateAsk(request));
             const line = await nextLine(request.timeoutMs ?? 60_000);
-            if (line === undefined)
-                return { kind: "deny", reason: "approval timeout/EOF" };
+            if (line === undefined) {
+                const decision = { kind: "deny", reason: "approval timeout/EOF" };
+                // No session log in headless: the decision frame is the record.
+                writeEvent(encodeGateDecision(request, decision, "timeout/EOF"));
+                return decision;
+            }
             const parsed = parseGateDecision(request, line);
+            writeEvent(encodeGateDecision(request, parsed.decision, parsed.error));
             if (parsed.error) {
                 writeEvent({ event: "gate:error", version: 1, id: request.id, error: parsed.error });
                 return parsed.decision;
@@ -112,6 +117,7 @@ export async function runHeadless(options) {
         return decisionForOption(option);
     };
     const abort = new AbortController();
+    let failed = false;
     const onSigint = () => abort.abort();
     const onTerminate = () => abort.abort();
     process.once("SIGINT", onSigint);
@@ -137,6 +143,20 @@ export async function runHeadless(options) {
             protocol,
             tools: protocol === "native" ? toolSchemas() : undefined,
             requestApproval,
+            onProtocolFallback: (message) => {
+                config = withToolCapability(config, config.providerId, config.model, "pseudo");
+                saveConfig(config);
+                if (options.ui === "json")
+                    writeEvent({ event: "notice", text: message });
+                else
+                    process.stderr.write(`[fastcode] ${message}\n`);
+            },
+            onNativeOk: () => {
+                if (protocol !== "native")
+                    return;
+                config = withToolCapability(config, config.providerId, config.model, "native");
+                saveConfig(config);
+            },
         })) {
             if (options.ui === "json") {
                 if (event.type === "assistant_text")
@@ -188,10 +208,15 @@ export async function runHeadless(options) {
                     });
                 else if (event.type === "notice")
                     writeEvent({ event: "notice", text: event.text });
-                else if (event.type === "error")
+                else if (event.type === "error") {
+                    failed = true;
                     writeEvent({ event: "error", kind: event.kind, code: event.kind, message: event.message });
-                else if (event.type === "done")
+                }
+                else if (event.type === "done") {
+                    if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error")
+                        failed = true;
                     writeEvent({ event: "done", stopReason: event.stopReason, finalText: event.finalText });
+                }
             }
             else if (event.type === "assistant_text") {
                 process.stdout.write(event.text);
@@ -199,7 +224,15 @@ export async function runHeadless(options) {
             else if (event.type === "notice") {
                 process.stderr.write(`[fastcode] ${event.text}\n`);
             }
+            else if (event.type === "error") {
+                // Plain mode must not fail silently: errors go to stderr and
+                // the process exits non-zero so scripts can detect the failure.
+                failed = true;
+                process.stderr.write(`[fastcode] error (${event.kind}): ${event.message}\n`);
+            }
             else if (event.type === "done" && event.finalText) {
+                if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error")
+                    failed = true;
                 process.stdout.write(event.finalText + "\n");
             }
         }
@@ -210,4 +243,6 @@ export async function runHeadless(options) {
         process.removeListener("SIGHUP", onTerminate);
         rl.close();
     }
+    if (failed)
+        process.exitCode = 1;
 }

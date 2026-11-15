@@ -136,6 +136,8 @@ export function formatSize(bytes) {
         return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+/** One very long source line must not dominate a grep result. */
+const GREP_LINE_MAX_CHARS = 500;
 export async function grepFiles(sandbox, root, options) {
     const re = new RegExp(options.pattern, options.flags ?? "i");
     const maxResults = Math.max(1, options.maxResults ?? 200);
@@ -181,7 +183,10 @@ export async function grepFiles(sandbox, root, options) {
                         continue;
                     printed.add(cursor);
                     const isMatch = cursor === index;
-                    out.line(`${file}:${cursor + 1}${isMatch ? ": " : "- "}${lines[cursor]}`);
+                    const shown = lines[cursor].length > GREP_LINE_MAX_CHARS
+                        ? lines[cursor].slice(0, GREP_LINE_MAX_CHARS) + "…"
+                        : lines[cursor];
+                    out.line(`${file}:${cursor + 1}${isMatch ? ": " : "- "}${shown}`);
                     if (out.full) {
                         truncated = true;
                         return false;
@@ -307,9 +312,14 @@ export async function readFileRange(file, offset, limit, options = {}) {
             totalBytes += Buffer.byteLength(line, "utf8") + 1;
             if (lineNo >= start && collected.length < count) {
                 sawRange = true;
-                collected.push(line);
-                returnedBytes += Buffer.byteLength(line, "utf8") + 1;
-                if (returnedBytes > maxBytes) {
+                // Bound the line *before* it enters the result: a single huge
+                // line (e.g. a 1.2MB minified blob) must not bypass maxBytes.
+                const budget = Math.max(0, maxBytes - returnedBytes - 1);
+                const rawBytes = Buffer.byteLength(line, "utf8");
+                const clipped = rawBytes > budget ? clipUtf8ToBytes(line, budget) : line;
+                collected.push(clipped);
+                returnedBytes += Buffer.byteLength(clipped, "utf8") + 1;
+                if (clipped !== line) {
                     truncated = true;
                     scannedAll = false;
                     break;
@@ -345,6 +355,18 @@ export async function readTextFile(file, limit = readMaxBytes()) {
     return result.truncated
         ? `${result.text}\n[... truncated at ${result.returnedBytes} of ${result.totalBytes} bytes; use read_file offset/limit, grep, or a narrower file ...]`
         : result.text;
+}
+/** Cut a UTF-8 string to at most maxBytes without splitting a code point. */
+function clipUtf8ToBytes(text, maxBytes) {
+    if (maxBytes <= 0)
+        return "";
+    const buffer = Buffer.from(text, "utf8");
+    if (buffer.length <= maxBytes)
+        return text;
+    let end = maxBytes;
+    while (end > 0 && (buffer[end] & 0xc0) === 0x80)
+        end -= 1;
+    return buffer.subarray(0, end).toString("utf8");
 }
 export function readMaxBytes() {
     const raw = Number(process.env["FASTCODE_READ_MAX_BYTES"]);

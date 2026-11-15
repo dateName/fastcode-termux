@@ -66,27 +66,96 @@ export const skillsCommand = {
             return { message: ok ? `Uninstalled "${rest[0]}".` : `No skill named "${rest[0]}".` };
         }
         if (sub === "enable" || sub === "use") {
-            if (rest.length === 0)
-                return { message: "Usage: /skills enable <name>" };
+            if (rest.length === 0) {
+                const installed = listInstalledSkills();
+                if (installed.length === 0)
+                    return { message: "No skills installed. Try `/skills install <name>`." };
+                return {
+                    message: "Choose a skill to enable.",
+                    picker: {
+                        title: "Enable skill",
+                        current: state.enabledSkills[0],
+                        items: installed.map((skill) => ({
+                            value: skill.name,
+                            label: skill.name,
+                            hint: skill.integrity === "ok" ? truncate(skill.description, 60) : skill.integrity,
+                        })),
+                        onSelect: (value) => {
+                            const skill = getSkill(value);
+                            if (!skill) {
+                                actions.pushSystemMessage(`Skill "${value}" is not installed.`);
+                                return;
+                            }
+                            const problem = integrityProblem(skill);
+                            if (problem) {
+                                actions.pushSystemMessage(problem);
+                                return;
+                            }
+                            actions.enableSkill(skill.name);
+                            actions.pushSystemMessage(`Enabled skill "${skill.name}".`);
+                        },
+                    },
+                };
+            }
             const skill = getSkill(rest[0]);
             if (!skill)
                 return { message: `Skill "${rest[0]}" is not installed.` };
-            if (skill.integrity !== "ok") {
-                const reason = skill.integrity === "drift" ? "content drift detected" : "no integrity baseline";
-                return { message: `Skill "${skill.name}" is disabled (${reason}). Run /skills verify ${skill.name} --confirm to re-baseline.` };
-            }
+            const problem = integrityProblem(skill);
+            if (problem)
+                return { message: problem };
             actions.enableSkill(skill.name);
             return { message: `Enabled skill "${skill.name}".` };
         }
         if (sub === "disable" || sub === "off") {
-            if (rest.length === 0)
-                return { message: "Usage: /skills disable <name>" };
+            if (rest.length === 0) {
+                const installed = listInstalledSkills();
+                if (installed.length === 0)
+                    return { message: "No skills installed." };
+                return {
+                    message: "Choose a skill to disable.",
+                    picker: {
+                        title: "Disable skill",
+                        current: state.enabledSkills[0],
+                        items: installed.map((skill) => ({
+                            value: skill.name,
+                            label: skill.name,
+                            hint: state.enabledSkills.includes(skill.name) ? "enabled" : "disabled",
+                        })),
+                        onSelect: (value) => {
+                            actions.disableSkill(value);
+                            actions.pushSystemMessage(`Disabled skill "${value}".`);
+                        },
+                    },
+                };
+            }
             actions.disableSkill(rest[0]);
             return { message: `Disabled skill "${rest[0]}".` };
         }
         if (sub === "info" || sub === "show") {
-            if (rest.length === 0)
-                return { message: "Usage: /skills info <name>" };
+            if (rest.length === 0) {
+                const installed = listInstalledSkills();
+                if (installed.length === 0)
+                    return { message: "No skills installed." };
+                return {
+                    message: "Choose a skill to inspect.",
+                    picker: {
+                        title: "Skill info",
+                        items: installed.map((skill) => ({
+                            value: skill.name,
+                            label: skill.name,
+                            hint: truncate(skill.description, 60),
+                        })),
+                        onSelect: (value) => {
+                            const skill = getSkill(value);
+                            if (!skill) {
+                                actions.pushSystemMessage(`Skill "${value}" is not installed.`);
+                                return;
+                            }
+                            actions.pushSystemMessage(`# ${skill.name}\n_${skill.description}_\n\nSource: ${skill.source}\n\n---\n\n${skill.body}`);
+                        },
+                    },
+                };
+            }
             const skill = getSkill(rest[0]);
             if (!skill)
                 return { message: `Skill "${rest[0]}" is not installed.` };
@@ -133,4 +202,10 @@ function truncate(s, n) {
     if (s.length <= n)
         return s;
     return s.slice(0, n - 1) + "…";
+}
+function integrityProblem(skill) {
+    if (skill?.integrity === "ok")
+        return undefined;
+    const reason = skill?.integrity === "drift" ? "content drift detected" : "no integrity baseline";
+    return `Skill "${skill?.name}" is disabled (${reason}). Run /skills verify ${skill?.name} --confirm to re-baseline.`;
 }

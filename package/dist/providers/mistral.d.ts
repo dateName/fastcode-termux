@@ -6,11 +6,21 @@ export declare const mistralProvider: {
     defaultModel: string;
     listModels: (apiKey: any) => Promise<any>;
     stream: (req: any, apiKey: any) => AsyncGenerator<{
-        delta: string;
+        delta: any;
         done: boolean;
         reasoning?: undefined;
         usage?: undefined;
         toolCalls?: undefined;
+    } | {
+        toolCalls?: import("../types.js").NativeToolCall[];
+        usage?: {
+            inputTokens: any;
+            outputTokens: any;
+            totalTokens: any;
+        };
+        delta: string;
+        done: boolean;
+        reasoning?: undefined;
     } | {
         delta: string;
         done: boolean;

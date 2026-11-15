@@ -12,6 +12,10 @@ export const providerCommand = {
         if (!next) {
             return { message: `Unknown provider "${target}". Try /provider with no args.` };
         }
+        if (!next.defaultModel) {
+            actions.startLogin({ provider: next.id, flow: "model" });
+            return { message: `Choose a model for ${next.label} (no verified default).` };
+        }
         actions.setProvider(next.id);
         actions.setModel(next.defaultModel);
         return {

@@ -30,7 +30,7 @@
 
 - `agent/runner.ts` 不依赖 React；UI 只消费事件。
 - 工具执行统一经过 `ToolRegistry`：prepare → egress → approve → execute。
-- Hard Block 在 `guards.ts`，AST 只做第二意见；egress 在 `agent/policy/egress.ts`，默认 audit；审批在 `approval*`，不反向改 guard/egress 结论。
+- Hard Block 在 `guards.ts`，AST 只做第二意见；egress 在 `agent/policy/egress.ts`，默认 `enabled:true + mode:"block"`（内置 `auth.json`/`sessions`）；审批在 `approval*`，不反向改 guard/egress 结论。
 - 事实流 append-only；投影可重建；剪枝后仍保留带 manifest 的可验证投影。
 
 ## 2. 入口与命令
@@ -73,10 +73,12 @@
   - once/session/always 授权经 `approval-store`；always 写入 trust 并绑定 catalogHash。
 - `agent/tools/types.ts` / registry：`ToolResult` 带 `code/hint/truncated/totalLines/returnedLines/totalBytes/returnedBytes/filesRead/filesSkipped/matches/egress/sideEffects`；错误码 `ENOENT/EEXIST/EISDIR/INVALID_ARGS/SANDBOX_DENY/APPROVAL_DENY/EGRESS_DENY` 等由 registry 统一映射。
 - 工具契约：`read_file` offset/limit（1-based）、`read_many` 总字节预算、`grep` case/glob/context/maxResults、`replace_in_file` expectedMatches、`copy_file` 默认拒绝已存在目标、`delete_file` 目录需 recursive、`move_path` EXDEV 回退；sideEffects 与实际 fs 状态一致。
-- `agent/tools/*`：15 个单文件工具；文件工具走沙箱路径；patch 三阶段 parse/plan/apply。
-- `agent/protocol.ts`：`<fastcode_tool>` JSON 与 DSML 双方言；解析器返回 `{calls, consumedEnd, errors}`；残留标签抢救与重复解析防护。
+- `agent/tools/*`：15 个单文件工具；文件工具走沙箱路径；patch 三阶段 parse/plan/apply。`read_file` 的行区间分支先按字节预算裁剪再入结果；`grep` 超长命中行裁剪到 500 字符。
+- `runner` 写入 `role:"tool"` 前统一按 `toolMessageLimit()`（默认 1MB）兜底；每轮请求前调用 `pairToolMessages()` 修复悬空 `tool_calls`，abort/loop-detected 提前 break 时对未执行调用补 `role:"tool"` 占位。
+- `agent/protocol.ts`：支持 `<fastcode_tool>`、DSML、Hermes/Qwen `<tool_call>`、Mistral `[TOOL_CALLS]`（pre-v11 数组 / v11+ `func[CALL_ID]{...}`）、Kimi K2 section、Llama `<|python_tag|>` 与裸 JSON；解析器返回 `{calls, consumedEnd, errors, detectedDialects}`；残留标签抢救与重复解析防护。`detectedDialects` 非空但 0 调用时返回 `errors`，runner 注入 `protocol_error`，不再静默记 `complete`；参数归一（Hermes 对象 arguments、Mistral 的 `{` 起点、Kimi ID 头取函数名、Llama `parameters`→`arguments`）在解析器内完成。
 - `agent/shell-ast.ts`：纯 JS `bash-parser` 第二意见，只升级 hard；只解析 `-c`、`find -exec`、`eval/source/.`、同段一次赋值；解析失败保持形状结果。
-- `agent/runner.ts` 事件：`tool_call`、`tool_result`（output/sideEffects/code/truncated/行字节）、`usage`、`notice`、`egress_denied`、`error`、`done`；重试通过 `notice` 暴露；纯文本收尾走 `done.finalText`（headless 消费契约，见 G2 未决项）。
+- `agent/runner.ts` 事件：`tool_call`、`tool_result`（output/sideEffects/code/truncated/行字节）、`usage`、`notice`、`egress_denied`、`error`、`done`；`assistant_raw` 可携带 `reasoning`（thinking 与可见回答分离，写入会话事实）。持续协议失败使用 `stopReason:"protocol_error"` 并发 `error.kind="protocol_error"`；`incomplete`/`stream_error`/`protocol_error` 在 headless 均以非零退出码结束。重试通过 `notice` 暴露；纯文本收尾走 `done.finalText`（headless 消费契约，见 G2 未决项）。
+- `agent/stream-events.ts`：`StreamEvent` 闭集（text/thinking/tool-call/usage/turn-end）与唯一 `StreamAssembler`；`runStream` 只负责 idle/retry/abort，语义折叠全部委托给装配器。`assertNever` 保证新增事件变体时所有消费者编译期失败。
 
 ## 5. Guardrails
 
@@ -90,7 +92,7 @@
 ### 5.1 Egress 策略
 
 - `agent/policy/egress.ts` 是纯策略模块；`registry.execute()` 在 prepare 后、approve 前调用，block 态直接返回 `EGRESS_DENY`，不生成审批请求、不写 `trusted.json`。
-- 默认 `enabled:false + mode:"audit"`：工具行为不变，只记录 `egress_denied`；`enabled:true + mode:"block"` 才拦截；`mode:"off"` 是完整 kill switch。
+- 默认 `enabled:true + mode:"block"`：命中即返回 `EGRESS_DENY`；`mode:"audit"` 只记录 `egress_denied` 不改结果；`mode:"off"` 是完整 kill switch。内置不可移除的 `denyPaths` 为 `$FASTCODE_HOME/auth.json` 与 `$FASTCODE_HOME/sessions/`，跟随 `FASTCODE_HOME` 解析。
 - 已覆盖出口：工具路径读写/删/复制/移动/patch、工具 payload、shell command 内容标记、工具输出（返回模型前）、NDJSON/TUI/session 事件。
 - 模式矩阵：`off` 放行且不审计；`audit` 放行并记录 `wouldBlock`；`block`（`enabled:true`）返回 `EGRESS_DENY`，resolver 不会被调用。outbound 扫描预算耗尽在 block 态 fail-closed；local write 内容只做 head/tail 扫描。
 - 分层：shell 重定向到共享存储由 `guards.ts` 无条件硬拦截，独立于 egress 配置；`write_file`/`copy_file` 的共享存储写入走 egress 层，受 `mode` 控制。
@@ -98,7 +100,7 @@
 
 ## 6. 会话与恢复
 
-- `session/log.ts`：append-only JSONL；`session_start` / `user` / `assistant_raw` / `tool_call` / `tool_result` / `notice` / `egress_denied` / `checkpoint` / `compacted` / `cleared` / `session_end`。`cleared` 之后的投影只从其后的事实重建；`sessionMetaFromFacts` 只采用首个 `session_start`，避免 resume 追加的新 start 改变 fingerprint。
+- `session/log.ts`：append-only JSONL；`session_start` / `user` / `assistant_raw` / `tool_call` / `tool_result` / `approval` / `notice` / `egress_denied` / `checkpoint` / `compacted` / `cleared` / `session_end`。`approval` 记决策（decision/scope/requestId/approvalKey），不是授权状态；`trusted.json` 仍是授权源。append 写失败 → stderr + `degraded`，`close()` 幂等且 degraded/日志关闭时跳过 projection/fsync/prune，避免把残缺 JSONL 固化成“已验证副本”。`cleared` 之后的投影只从其后的事实重建；`sessionMetaFromFacts` 只采用首个 `session_start`，避免 resume 追加的新 start 改变 fingerprint。
 - `close(info)` 写 `session_end{reason, compaction}`；`compaction` 是预留的压缩承接位（`source` / `summaryRef` / `pending`），当前默认 `none/null/false`。close/剪枝前写 projection，并对 JSONL 与 projection 做 best-effort fsync；`.projection.json` 保存 manifest：
   - `contentHash`：投影内容 sha256
   - `sessionHash`：源事实 sha256
@@ -109,24 +111,25 @@
 
 ## 7. Provider、流与压缩
 
-- `providers/*`：13 个 provider；`authEnv` 是 provider 级密钥候选；`capabilities.toolCalling` 缓存 native/pseudo；DeepSeek 默认模型为 `deepseek-flash`（显式 `deepseek-v4-pro` 仍可用）。
-- `providers/spec.ts`：URL 路径/query/auth 头模板（`chatPath/modelsPath/query/pathParams/authHeaderName/authPrefix`）；占位符缺失时抛错、不发请求；现有 provider 不传新字段时 URL/header 与旧行为一致；`modelsPath:null` 不发在线列表请求。
-- `lib/http.ts`：SSE 解析、UTF-8 单字节拼接、idle timeout `NetworkStallError`、连通性探测；`doctor --net` 使用该探测。
+- `providers/*`：55 个 provider（13 内置 + `catalog.ts` 的 42 个 OpenAI 兼容条目）；`authEnv` 是 provider 级密钥候选；`capabilities.toolCalling` 缓存 native/pseudo；`FASTCODE_TOOL_PROTOCOL` 默认 `auto`（兼容 provider 走原生，失败降级 `pseudo`）；DeepSeek 默认模型为 `deepseek-flash`（显式 `deepseek-v4-pro` 仍可用）。catalog 中 `runpod/azure/cloudflare/bedrock/vertex` 的 baseUrl 含 `{placeholder}`，由 `providers/spec.ts` 在请求时从环境变量解析。`Provider.transport` 区分 `http`/`stdio`；`providers/stdioBackend.ts` 提供 **默认不注册** 的 CLI 后端基础层（规范 NDJSON、环境 allowlist、abort 进程树终止、只提议工具不执行），详见 `EXECUTION_BACKENDS.md`。`probeProviderDetailed()` 返回 `{ok, reason, status}`：无 `/models` 端点、HTTP 4xx/5xx、超时分别显示，picker 不再把所有失败笼统标成 offline。
+- `providers/spec.ts`：URL 路径/query/auth 头模板（`chatPath/modelsPath/query/pathParams/authHeaderName/authPrefix`）；占位符缺失时抛错、不发请求；现有 provider 不传新字段时 URL/header 与旧行为一致；`modelsPath:null` 不发在线列表请求。`custom` provider 额外支持 `FASTCODE_AUTH_HEADER` / `FASTCODE_AUTH_PREFIX` / `FASTCODE_EXTRA_HEADERS`（JSON 字符串头）。`probeProvider` 使用 `provider.modelsPath`，`modelsPath:null` 视为无 `/models` 端点、不误标 offline。
+- `lib/http.ts`：SSE 解析、UTF-8 单字节拼接、idle timeout `NetworkStallError`、连通性探测；聊天路径由 `requestIdleTimeoutMs` 传入 SSE 层，与 `stream.ts` 外层共享同一空闲超时；`FASTCODE_SSE_IDLE_MS` 仅作直接调用 SSE 时的回退。`doctor --net` 使用该探测。`Provider.capabilities.retryable === false` 时 `runStream` 不重放（stdio/CLI 后端默认如此）。
 - `lib/net.ts`：retryRequest / retryStream，前缀去重，`QuotaError`；重试通过 `notice` 暴露（headless JSON 事件 / plain stderr）。`HTTPS_PROXY/ALL_PROXY` 尚未接入 ProxyAgent（已知边界）。
-- `agent/compaction.ts`：token 阈值、heap 强制、server-aware 互斥（当前调用方未传 opaque state，实际不改变本地压缩）、summary 落盘与旧文件清理；摘要 section 顺序 Notes → Outcomes → Files → Requests → Actions，超限条目带 marker；参数可由 `FASTCODE_COMPACTION_RATIO` / `KEEP_TURNS` / `SUMMARY_TOKENS` 调整。`/compact` 追加 `compacted` fact，`/clear` 追加 `cleared` fact。
+- `agent/compaction.ts`：token 阈值、heap 强制、server-aware 互斥（当前调用方未传 opaque state，实际不改变本地压缩）、summary 落盘与旧文件清理；摘要 section 顺序 Notes → Outcomes → Files → Requests → Actions，超限条目带 marker；参数可由 `FASTCODE_COMPACTION_RATIO` / `KEEP_TURNS` / `SUMMARY_TOKENS` 调整。摘要扫描采样前 64KB，`collectFiles` 字符类有 `{1,240}` 上界；回收率 <10% 时对 >20KB 的 tool/user 消息就地瘦身到 8KB，避免“每轮必压”。`/compact` 追加 `compacted` fact，`/clear` 追加 `cleared` fact。
 - `lib/model-meta.ts`：上下文窗口 / charsPerToken / supportsTools；用户可覆盖。
+- `agent/protocol-mode.ts` 的 `native` **仅指 OpenAI `tool_calls` 方言**：请求用 `{type:"function"}` schema、流解析 `delta.tool_calls`/`message.tool_calls`、历史用 `role:"tool"` + `tool_call_id`（均见 `providers/openaiCompatible.ts`）。`NATIVE_PROVIDERS` 白名单外的 provider（Anthropic、Google、custom）在 `auto` 下 fail closed 到伪协议；Anthropic 的 `tool_use`/`tool_result` 与 Gemini 原生 `functionCall` 需要独立 provider adapter（schema 转换 + 流解析 + 历史转换），当前未实现。`native` 强制会绕过白名单，非该方言的 provider 可能 400 或无效；`isNativeUnsupportedError` 按结构判定 `400/422/501 + tool/function`（只影响首次请求，由 `fellBack` 控制），200 但忽略 `tools` 不会自动降级，需 `legacy` 或 `capabilities.toolCalling[...]="pseudo"` 手动兜底。`lib/native-tools.ts` 在缺失 `index` 时按 `delta.id`/单条目归并，对象型 `arguments` 归一为字符串；`openaiCompatible.ts` 对非流式 `application/json` 响应直接映射完整 text/tool_calls。
 
 ## 8. Shell 与进程树
 
-- `agent/shell-session.ts`：两条执行路径，预算不共享。**resident**：POSIX 非交互命令，`sh -s` 池默认 2、`/threads` 可调至 6；池满时排队；每条命令包在子 shell 中（隔离 `export`/`umask`/`set -e`/`exit`）；含后台操作符时完成标记后回收该 resident。**one-shot**：Windows 或交互/REPL 判定命令，由 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮，新建速率而非全局并发上限）限制，满额立即失败、不排队。`shellPoolStats().active` 统计所有运行中 job，`pool/maxPool` 只统计 resident；跨 turn 未结束的 one-shot 仍占并发。详见 `CONFIGURATION.md` §后台 shell。
-- 超时/取消统一 `terminateProcessTree`：进程组 `SIGTERM` → grace → `SIGKILL`；ESRCH 视为已退出。
+- `agent/shell-session.ts`：两条执行路径，预算不共享。**resident**：POSIX 非交互命令，`sh -s` 池默认 2、`/threads` 可调至 6；池满时排队；每条命令包在子 shell 中（隔离 `export`/`umask`/`set -e`/`exit`）；含后台操作符时完成标记后回收该 resident。**one-shot**：Windows 或交互/REPL 判定命令，由 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮，新建速率而非全局并发上限）限制，满额立即失败、不排队。每个 job 保留最近 **256KB** 输出窗口，再加上 runner 的单条 tool 消息硬上限。`shellPoolStats().active` 统计所有运行中 job，`pool/maxPool` 只统计 resident；跨 turn 未结束的 one-shot 仍占并发。详见 `CONFIGURATION.md` §后台 shell。
+- 超时/取消统一 `lib/process-tree.ts` 的 `terminateProcessTree`：进程组 `SIGTERM` → grace → `SIGKILL`；ESRCH 视为已退出。`agent/process-tree.ts` 保留兼容 re-export，供 shell 会话与后端层复用。
 - 后台任务保留 timeout；转后台只解除前台 AbortSignal。
 - `setsid` 后代仍可能逃逸；不扫描 `ppid=1`，错误信息明确边界。
 - `lib/lifecycle.ts`：SIGTERM/SIGHUP/uncaughtException/unhandledRejection 兜底，幂等调用 `shutdownShells()`；headless 同时响应 SIGTERM/SIGHUP 中止当前 run。
 
 ## 9. 配置、信任、技能
 
-- `config/store.ts`：`config.json` stat 指纹缓存（mtime/size/ctime）；save/verify 显式失效；auth v1/v2 → provider 级 v3 迁移；`config.egress` 默认 `enabled:false + mode:"audit"`；`config.shellPoolSize` 默认 2，TUI/headless 启动时应用到 resident 池；read limits 见 `CONFIGURATION.md`。
+- `config/store.ts`：`config.json` stat 指纹缓存（mtime/size/ctime）；save/verify 显式失效；auth v1/v2 → provider 级 v3 迁移；`config.egress` 默认 `enabled:true + mode:"block"`（内置 `auth.json` + `sessions/` denyPaths）；`config.shellPoolSize` 默认 2，TUI/headless 启动时应用到 resident 池；read limits 见 `CONFIGURATION.md`。`config.json` 解析失败会保留首份副本为 `config.json.bak` 并在 stderr 提示一次；`auth.json` 解析失败保留 `auth.json.corrupt.bak` 并提示一次；`saveConfig` 对文件执行 0600。`config/paths.ts` 的 `ensureDir` 在 POSIX 上将数据目录收紧到 0700，会话 JSONL 以 0600 创建。
 - `config/trust.ts`：项目 realpath + tool approval（catalogHash 绑定）；原子写；`fastcode trust --forget <key>`。
 - `skills/manager.ts`：技能目录 sha256 manifest；漂移禁用；`/skills verify --confirm` 重新基线；默认 registry 为空。
 - `lib/diagnostics.ts`：doctor 输出平台、TMPDIR、内存、auth、session、guard、egress、read limits、缓存、协议、skills；shell pool 行显示 `active · resident/<maxPool> · spawns`（active 含 resident + one-shot，pool 只算 resident）；`doctor --net` 额外探测 registry 连通性。
@@ -134,7 +137,7 @@
 ## 10. 构建与发布
 
 - `npm run build` = `tsc -p tsconfig.build.json` + `node scripts/build.mjs`。
-- `node scripts/verify-artifacts.mjs` 检查 `dist/cli.js` / `dist/agent/guards.js` 的运行时字符串标记；`node scripts/bench.mjs` 记录冷启动/写入/读取/list/grep 基准。两者文件已入库，但 `package.json` 尚未注册 `verify:artifacts` / `bench` 脚本。
+- `node scripts/verify-artifacts.mjs` 检查 `dist/cli.js` / `dist/agent/guards.js` 的运行时字符串标记；`node scripts/bench.mjs` 记录冷启动/写入/读取/list/grep 基准。已注册 `npm run verify:artifacts` / `npm run bench`。
 - `src/cli-main.ts` 不再叫 `cli.ts`，避免 tsc 输出覆盖 `dist/cli.js` bundle。
 - esbuild 输出自包含 `dist/cli.js`；`highlight.js` 裁剪为常用语言子集；`bash-parser` 纯 JS。
 - 便携包必须包含 `bash-parser` 依赖闭包，否则真机 smoke 直接加载 dist 模块会失败。
@@ -155,18 +158,18 @@ npm run typecheck
 npm run lint
 npm run build
 node scripts/smoke-test.mjs   # 或在 package/ 下 npm test
-node package/scripts/verify-artifacts.mjs
-node package/scripts/bench.mjs
+npm run verify:artifacts     # 或在 package/ 下
+npm run bench
 git diff --check
 ```
 
-当前基线（2026-11-09 复核；PC 为当日复跑，Termux 为 2026-11-06 真机记录）：
+当前基线（2026-11-15 复核；PC 为当日复跑，Termux 为 2026-11-06 真机记录）：
 
-- PC：**282/282**（0.1.8-beta.0 本地 build；Windows；POSIX 专属用例跳过）
-- Termux 真机：281/281（历史；2026-11-06 tag 前记录；0.1.8-beta.0 新增用例待复跑）
+- PC：**325/325**（0.1.8-beta.0 + 2026-11-15 审计修复本地 build；Windows；POSIX 专属用例跳过）
+- Termux 真机：281/281（历史；2026-11-06 tag 前记录；0.1.8-beta.0 之后新增用例待复跑）
 - bench（Windows / Node v24.20.0）：cold start 143.74ms、write 200KB 8.86ms、read_many 10×200KB 26.04ms、list 1000 68.19ms、grep 1000 630.06ms
 - bench（Termux / Node v26.4.0）：cold start 893.13ms、write 200KB 32.78ms、read_many 10×200KB 82.57ms、list 1000 153.18ms、grep 1000 865.73ms
 - 回滚演练：`git archive HEAD` 临时目录中的旧 bundle 可启动（`--version` 正常）
-- 0.1.8-beta.0 新增审批 feedback、压缩/投影、`/threads` 等 smoke 用例已随本地 build 运行；Windows 计数为 282。Termux 真机计数待复跑。
+- 2026-11-15 新增用例覆盖单行超长读取、tool 消息硬上限、压缩限界/收敛、无 index 归并/对象参数、悬空 tool_calls、headless 退出码、配额/超时/权限一致性、custom 认证头与 probe modelsPath；失败语义批次覆盖 degraded 会话/幂等 close、审批决策帧、probe 归因、incomplete/terminal latch、`protocol_error`；方言批次覆盖 Hermes/Qwen、Mistral pre-v11/v11+、Kimi K2、Llama tag/裸 JSON。Windows 计数 325；Termux 真机计数待复跑。
 
 改 `src` 后必须重新 build 并提交新的 `dist`；仓库内文档以本文件、`MODULES.md`、`CONFIGURATION.md` 与两份 README 为准。离线开发文档归档在 `config/kai`，不上传。

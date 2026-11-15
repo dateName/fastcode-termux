@@ -56,7 +56,7 @@ export async function* streamSSE(res, options: StreamSseOptions = {}) {
             timer = setTimeout(() => {
                 reject(new NetworkStallError(boundedByTotal
                     ? `SSE total timeout after ${totalMs}ms`
-                    : `SSE idle timeout after ${idleMs}ms (no data received; set FASTCODE_SSE_IDLE_MS to wait longer)`, bytesReceived));
+                    : `SSE idle timeout after ${idleMs}ms (no data received; raise requestIdleTimeoutMs or set FASTCODE_SSE_IDLE_MS)`, bytesReceived));
             }, waitMs);
         });
         let chunk;
