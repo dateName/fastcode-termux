@@ -8,6 +8,7 @@
 > `release/` 已生成当前版本资产；npm `beta` 已发布当前版本（`latest` 仍为 0.1.6）；GitHub Release 资产已上传（Release workflow 最后的 npm 步骤可能因版本已手动发布而失败，不影响资产）。
 
 ### 0.1.8-beta.1 后续修复（2026-11-16）
+- i18n 基础：新增 `src/i18n/` 字符串目录（`catalog/en.ts` 基准 + `catalog/zh.ts`），`t(key, vars)` 支持 `{name}` 插值；新增 `config.language` 与 `FASTCODE_LANG`（env 优先，接受 `zh-CN` 前缀）；`/help`、`/about` 与状态栏提示已接入，其余命令描述待后续抽取。
 - 重复调用：`protocol_error` 同指纹只重发一次；纯外来方言直接 `protocol_error`；只读 loop 阈值 5 且受窗口钳制；`loop_detected` 非 0 退出。
 - 解析触发面：围栏/行内示例不执行，行内示例保留原文；非流式 JSON 的 `content` 不再扫工具标记；外来方言需占主导才报 `UNSUPPORTED_DIALECT`。
 - native：不再注入 `<fastcode_tool>` 语法段，也不解析文本标记；配对 400 修复 history 后原协议重试；能力缓存只在进程内，旧 `config.capabilities.toolCalling` 忽略。

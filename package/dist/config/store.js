@@ -19,6 +19,8 @@ export const DEFAULT_CONFIG = {
     providerId: "anthropic",
     model: "claude-sonnet-5.5",
     theme: DEFAULT_THEME,
+    /** UI language: "en" (default) or "zh". Overridden by FASTCODE_LANG. */
+    language: "en",
     agentMode: true,
     systemPrompt: "You are FastCode, a fast, friendly coding assistant in a terminal UI. " +
         "Prefer concise responses. Use markdown when helpful (especially fenced " +

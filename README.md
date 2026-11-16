@@ -40,6 +40,7 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 🧩 Agent Skills | install `SKILL.md` skills; directory sha256 locks with `/skills verify --confirm` re-baseline |
 | 🧠 Thinking effort | `/effort auto/low/medium/high/max`, shown in the status bar |
 | 🎨 Themes | `/theme` |
+| 🌐 UI language | English / 简体中文 string catalog (`FASTCODE_LANG=zh` or `config.language`); currently covers extracted UI strings only |
 | 💰 Usage | token and cost readout in the status bar |
 | 🤖 Model support | **DeepSeek / OpenAI / Anthropic**, plus Gemini, Qwen, GLM, Kimi, Grok, OpenRouter, Ollama |
 | 💾 Resume & facts | append-only facts + `*.projection.json`; resume restores cwd/provider/model and unpaired tool calls |

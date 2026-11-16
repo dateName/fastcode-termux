@@ -133,6 +133,7 @@
 - `config/trust.ts`：项目 realpath + tool approval（catalogHash 绑定）；原子写；`fastcode trust --forget <key>`。
 - `skills/manager.ts`：技能目录 sha256 manifest；漂移禁用；`/skills verify --confirm` 重新基线；默认 registry 为空。
 - `lib/diagnostics.ts`：doctor 输出平台、TMPDIR、内存、auth、session、guard、egress、read limits、缓存、协议、skills；shell pool 行显示 `active · resident/<maxPool> · spawns`（active 含 resident + one-shot，pool 只算 resident）；`doctor --net` 额外探测 registry 连通性。
+- `i18n/`：轻量 UI 字符串目录（`catalog/en.ts` 为基准，`catalog/zh.ts` 实现全部 `MessageKey`）；`t(key, vars)` 运行时按 `FASTCODE_LANG` > `config.language` > `en` 解析并做 `{name}` 插值。仅覆盖已抽取的用户可见文案，模型提示词不参与。
 
 ## 10. 构建与发布
 

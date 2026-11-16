@@ -149,6 +149,9 @@
 | src/lib/startup.ts | 欢迎语/缺 Key 提示 | store, providers |
 | src/lib/diagnostics.ts | doctor：平台/权限/内存/TMPDIR/请求空闲超时与 SSE 回退/tool 消息上限/custom 认证头/池/协议/未闭合 | 多个模块 |
 | src/lib/pkg.ts | 读取 package.json 版本 | 无 |
+| src/i18n/index.ts | 轻量 i18n：locale 解析（`FASTCODE_LANG` > `config.language` > en）、`t()` 插值与 `{name}` 占位、`setLocale()` | config/store, i18n/catalog |
+| src/i18n/catalog/en.ts | 英文基准字符串目录；`MessageKey` 由该对象推导，其他语言必须实现全部键 | 无 |
+| src/i18n/catalog/zh.ts | 简体中文目录；`Record<MessageKey, string>` 保证键完整 | i18n/catalog/en |
 
 ## 同名 / 命名空间说明（L2）
 
@@ -161,7 +164,7 @@
 | `context.ts` | `src/agent/context.ts` 已移除；`src/commands/context.ts` = `/context` 命令 |
 | `tools.ts` | `src/agent/tools.ts` = 兼容门面；`src/commands/tools.ts` = `/tools` 命令；`src/agent/tools/` = 工具实现 |
 | `manager.ts` | `src/plugins/manager.ts` = 插件；`src/skills/manager.ts` = 技能 |
-| `index.ts` | 入口/注册表按目录区分（`src/index.ts`、`commands/index.ts`、`tools/index.ts`、`providers/index.ts`） |
+| `index.ts` | 入口/注册表按目录区分（`src/index.ts`、`commands/index.ts`、`tools/index.ts`、`providers/index.ts`、`i18n/index.ts`） |
 | `process-tree.ts` | 实现 `src/lib/process-tree.ts`；`src/agent/process-tree.ts` 仅为兼容 re-export |
 | `native-tools.ts` | `src/lib/native-tools.ts` 实际是 OpenAI `tool_calls` 归并器（名字保留，勿按“原生工具”理解） |
 

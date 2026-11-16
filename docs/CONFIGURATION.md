@@ -34,6 +34,7 @@
 | providerId | 主服务商 id | anthropic |
 | model | 主模型 id | claude-sonnet-5.5 |
 | theme | 主题 id | fastcode |
+| language | UI 语言：`en` / `zh`（接受 `zh-CN` 等前缀）；`FASTCODE_LANG` 优先 | en |
 | agentMode | 是否允许本地工具（shell/读写文件） | true |
 | systemPrompt | 系统提示 | 内置 |
 | enabledSkills | 启用的技能名数组 | [] |
@@ -198,6 +199,7 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | 变量 | 作用 |
 |---|---|
 | FASTCODE_HOME | 数据目录（默认 ~/.fastcode） |
+| FASTCODE_LANG | UI 语言（`en` / `zh`，接受 `zh-CN` 等前缀）；优先于 `config.language`；仅覆盖已抽取到字符串目录的文案 |
 | FASTCODE_STABLE_UI | 设为 1 强制稳定界面 |
 | FASTCODE_BASE_URL | 自定义服务商基地址 |
 | FASTCODE_MODEL | 自定义服务商默认模型 |

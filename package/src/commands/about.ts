@@ -1,15 +1,16 @@
 import { platformLabel } from "../lib/platform.js";
+import { t } from "../i18n/index.js";
 export const aboutCommand = {
     name: "about",
     description: "Show version, platform, and links.",
     aliases: ["version"],
     run() {
         const lines = [
-            `FastCode  — multi-LLM TUI coding assistant`,
-            `Platform: ${platformLabel()}  •  Node ${process.version}`,
+            t("about.tagline"),
+            t("about.platform", { platform: platformLabel(), node: process.version }),
             ``,
-            `GitHub:   https://github.com/dateName/fastcode-termux`,
-            `Skills:   configure a registry with /skills registry <url>`,
+            t("about.github", { url: "https://github.com/dateName/fastcode-termux" }),
+            t("about.skills"),
         ];
         return { message: lines.join("\n") };
     },

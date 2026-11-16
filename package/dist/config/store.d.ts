@@ -2,6 +2,8 @@ export declare const DEFAULT_CONFIG: {
     providerId: string;
     model: string;
     theme: string;
+    /** UI language: "en" (default) or "zh". Overridden by FASTCODE_LANG. */
+    language: string;
     agentMode: boolean;
     systemPrompt: string;
     enabledSkills: any[];

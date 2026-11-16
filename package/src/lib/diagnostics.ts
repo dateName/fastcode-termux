@@ -27,6 +27,7 @@ import { compactionConfigFromEnv, heapExceeded } from "../agent/compaction.js";
 import { shellPoolStats } from "../agent/shell-session.js";
 import { resolveToolProtocol, runtimeToolCapability } from "../agent/protocol-mode.js";
 import { getModelMeta, modelMetaOverridePath } from "./model-meta.js";
+import { getLocale } from "../i18n/index.js";
 const NODE_REQUIRED = "18.17";
 function readVersion() {
     return readPackageMeta().version;
@@ -120,6 +121,7 @@ export function collectDiagnostics() {
         termux: platform === "termux",
         termuxVersion: process.env["TERMUX_VERSION"] ?? null,
         stableUi: shouldUseStableTerminalUi(),
+        language: getLocale(),
         tty: Boolean(process.stdout.isTTY),
         configRoot: paths?.root,
         configFile: paths?.config,
@@ -218,6 +220,7 @@ export function formatDiagnostics(info) {
     lines.push(`  platform      ${info.platformLabel}${info.termux ? " (Termux)" : ""}`);
     lines.push(`  terminal      ${info.tty ? "interactive TTY" : "NOT a TTY — the TUI needs a real terminal"}`);
     lines.push(`  stable UI     ${info.stableUi ? "on (anti-flicker)" : "off"}`);
+    lines.push(`  language      ${info.language}${process.env["FASTCODE_LANG"] ? " (FASTCODE_LANG)" : ""}`);
     lines.push("  config root   " + (info.configRoot ?? "(unavailable)"));
     lines.push("  config file   " + (info.configFile ?? "(unavailable)"));
     lines.push("  keys file     " + (info.authFile ?? "(unavailable)") + "   mode " + info.authMode + (info.authMode !== "missing" && info.authMode !== "0600" ? "  [WARN: expected 0600]" : ""));

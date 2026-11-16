@@ -38,6 +38,7 @@ FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它
 | 🧩 Agent Skills | 安装 `SKILL.md` 技能扩展行为；目录 sha256 完整性锁定，`/skills verify --confirm` 重新基线 |
 | 🧠 思考强度 | `/effort` 切换 auto/low/medium/high/max，状态栏显示当前档位 |
 | 🎨 主题 | `/theme` 切换配色 |
+| 🌐 界面语言 | 英文 / 简体中文 字符串目录（`FASTCODE_LANG=zh` 或 `config.language`）；目前仅覆盖已抽取的 UI 文案 |
 | 💰 用量统计 | 状态栏显示 token 与成本 |
 | 🤖 模型支持 | **DeepSeek / OpenAI / Anthropic**，以及 Gemini、通义千问、GLM、Kimi、Grok、OpenRouter、Ollama 等 |
 | 💾 恢复 | 事实流 + `*.projection.json`；resume 恢复 cwd/provider/model 与未配对 tool_call |

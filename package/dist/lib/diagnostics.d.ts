@@ -8,6 +8,7 @@ export declare function collectDiagnostics(): {
     termux: boolean;
     termuxVersion: string;
     stableUi: boolean;
+    language: import("../i18n/index.js").Locale;
     tty: boolean;
     configRoot: any;
     configFile: any;
