@@ -67,6 +67,12 @@ export interface ChatChunk {
         /** Approximate cost in USD if known. */
         costUsd?: number;
     };
+    /**
+     * The provider returned one non-streaming JSON body whose `content` is
+     * plain text (not the pseudo tool-call channel). The runner must not scan
+     * that text for tool markup; structured calls come from `toolCalls`.
+     */
+    suppressPseudoParse?: boolean;
 }
 export type ChatStream = AsyncIterable<ChatChunk>;
 export interface ProviderModel {

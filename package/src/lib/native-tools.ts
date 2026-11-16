@@ -18,11 +18,31 @@ export function mergeToolCallDelta(accumulator: ToolCallAccumulator, delta: Tool
     const args = delta.function?.arguments;
     // Some gateways send the arguments object directly instead of a JSON
     // string. Normalize the shape instead of dropping the payload.
-    if (typeof args === "string")
-        entry.arguments += args;
-    else if (args !== undefined && args !== null)
-        entry.arguments += JSON.stringify(args);
+    const incoming = typeof args === "string"
+        ? args
+        : args !== undefined && args !== null
+            ? JSON.stringify(args)
+            : "";
+    if (incoming) {
+        // Cumulative dialects resend the whole arguments object instead of a
+        // fragment. Detect a complete JSON object and replace, never append
+        // (`{"a":1}` + `{"a":1}` used to become invalid `{"a":1}{"a":1}`).
+        entry.arguments = isCompleteArguments(incoming) ? incoming : entry.arguments + incoming;
+    }
     accumulator.set(index, entry);
+}
+
+function isCompleteArguments(value: string): boolean {
+    const text = value.trim();
+    if (!text.startsWith("{"))
+        return false;
+    try {
+        const parsed = JSON.parse(text);
+        return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    }
+    catch {
+        return false;
+    }
 }
 
 /**
@@ -49,7 +69,17 @@ function resolveIndex(accumulator: ToolCallAccumulator, delta: ToolCallDelta): n
     }
     // No index and no id: streaming chunks of one call arrive in order, so
     // append to the most recent slot rather than inventing one per chunk.
-    return entries[entries.length - 1][0];
+    // Exception: a second complete arguments object is a new call, not a
+    // fragment of the closed one.
+    const last = entries[entries.length - 1];
+    const incoming = typeof delta.function?.arguments === "string"
+        ? delta.function.arguments
+        : delta.function?.arguments
+            ? JSON.stringify(delta.function.arguments)
+            : "";
+    if (isCompleteArguments(last[1].arguments) && isCompleteArguments(incoming))
+        return nextIndex(accumulator);
+    return last[0];
 }
 
 function nextIndex(accumulator: ToolCallAccumulator): number {

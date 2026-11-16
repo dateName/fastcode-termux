@@ -47,8 +47,8 @@ export const DEFAULT_CONFIG = {
         toolCalling: {},
     },
     /**
-     * Application-layer egress policy. Default is audit-only; set
-     * enabled:true + mode:"block" to enforce. See docs/CONFIGURATION.md.
+     * Application-layer egress policy. Default is enabled:true + mode:"block"
+     * (fail-closed). See agent/policy/defaults.ts and docs/CONFIGURATION.md.
      */
     egress: { ...DEFAULT_EGRESS_CONFIG },
 };

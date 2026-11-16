@@ -6,7 +6,7 @@
 import readline from "node:readline";
 import { AGENT_SYSTEM_PROMPT } from "./agent/protocol.js";
 import { compactionConfigFromEnv } from "./agent/compaction.js";
-import { resolveToolProtocol, withToolCapability } from "./agent/protocol-mode.js";
+import { rememberToolCapability, resolveToolProtocol } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
 import { setShellPoolSize } from "./agent/shell-session.js";
 import { toolSchemas } from "./agent/tool-schemas.js";
@@ -14,7 +14,7 @@ import { encodeGateAsk, encodeGateDecision, parseGateDecision } from "./agent/ap
 import { decisionForOption, parseApprovalChoice, type ApprovalDecision, type ApprovalRequest } from "./agent/approval.js";
 import { buildPluginsPrompt } from "./plugins/manager.js";
 import { buildSkillsPrompt } from "./skills/manager.js";
-import { loadConfig, resolveApiKey, saveConfig } from "./config/store.js";
+import { loadConfig, resolveApiKey } from "./config/store.js";
 import { getProviderOrThrow } from "./providers/index.js";
 import { resumeSession } from "./session/projection.js";
 
@@ -130,6 +130,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
 
     const abort = new AbortController();
     let failed = false;
+    let toolCallCount = 0;
+    let httpRequestCount = 0;
+    let lastTurn = 0;
     const onSigint = () => abort.abort();
     const onTerminate = () => abort.abort();
     process.once("SIGINT", onSigint);
@@ -156,8 +159,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             tools: protocol === "native" ? toolSchemas() : undefined,
             requestApproval,
             onProtocolFallback: (message) => {
-                config = withToolCapability(config, config.providerId, config.model, "pseudo");
-                saveConfig(config);
+                rememberToolCapability(config.providerId, config.model, "pseudo");
                 if (options.ui === "json")
                     writeEvent({ event: "notice", text: message });
                 else
@@ -166,14 +168,16 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             onNativeOk: () => {
                 if (protocol !== "native")
                     return;
-                config = withToolCapability(config, config.providerId, config.model, "native");
-                saveConfig(config);
+                rememberToolCapability(config.providerId, config.model, "native");
             },
         })) {
+            if (event.type === "assistant_raw")
+                httpRequestCount += 1;
             if (options.ui === "json") {
                 if (event.type === "assistant_text")
                     writeEvent({ event: "assistant", text: event.text });
-                else if (event.type === "tool_call")
+                else if (event.type === "tool_call") {
+                    toolCallCount += 1;
                     writeEvent({
                         event: "tool_call",
                         id: event.id,
@@ -181,6 +185,38 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
                         args: event.call,
                         ...(event.native ? { native: true } : {}),
                     });
+                }
+                else if (event.type === "loop_detected")
+                    writeEvent({
+                        event: "loop_detected",
+                        fingerprint: event.fingerprint,
+                        occurrences: event.occurrences,
+                        warned: event.warned,
+                    });
+                else if (event.type === "compaction")
+                    writeEvent({
+                        event: "compaction",
+                        before_chars: event.beforeChars,
+                        after_chars: event.afterChars,
+                        before_tokens: event.beforeTokens,
+                        after_tokens: event.afterTokens,
+                        dropped_messages: event.droppedMessages,
+                        kept_messages: event.keptMessages,
+                        reason: event.reason,
+                        source: event.source,
+                        ...(event.summaryFile ? { summary_file: event.summaryFile } : {}),
+                    });
+                else if (event.type === "checkpoint") {
+                    lastTurn = event.turn;
+                    writeEvent({
+                        event: "checkpoint",
+                        turn: event.turn,
+                        cwd: event.cwd,
+                        provider_id: event.providerId,
+                        model: event.model,
+                        active_files: event.activeFiles,
+                    });
+                }
                 else if (event.type === "egress_denied")
                     writeEvent({
                         event: "egress_denied",
@@ -225,7 +261,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
                     writeEvent({ event: "error", kind: event.kind, code: event.kind, message: event.message });
                 }
                 else if (event.type === "done") {
-                    if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error")
+                    if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error" || event.stopReason === "loop_detected")
                         failed = true;
                     writeEvent({ event: "done", stopReason: event.stopReason, finalText: event.finalText });
                 }
@@ -243,11 +279,13 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
                 process.stderr.write(`[fastcode] error (${event.kind}): ${event.message}\n`);
             }
             else if (event.type === "done" && event.finalText) {
-                if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error")
+                if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error" || event.stopReason === "loop_detected")
                     failed = true;
                 process.stdout.write(event.finalText + "\n");
             }
         }
+        if (options.ui === "json")
+            writeEvent({ event: "summary", tool_call_count: toolCallCount, http_request_count: httpRequestCount, last_turn: lastTurn });
     }
     finally {
         process.removeListener("SIGINT", onSigint);

@@ -25,6 +25,8 @@ export interface RunStreamResult {
     reasoning?: string;
     usage?: ChatChunk["usage"];
     toolCalls?: ChatChunk["toolCalls"];
+    suppressPseudoParse?: boolean;
+    warnings?: string[];
     incomplete: boolean;
     retried: number;
 }

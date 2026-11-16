@@ -8,6 +8,8 @@ export interface ToolCallParseResult {
     consumedEnd: number;
     /** True parse failures. Salvaged calls do not add an error. */
     errors: string[];
+    /** Stable machine codes for the errors where one is known. */
+    errorCodes: string[];
     /**
      * Marker families recognized in the text, even when they produced no call.
      * A non-empty list with zero calls must block a "complete" stop reason.
@@ -23,6 +25,6 @@ export interface ToolCallParseResult {
  * - two adjacent normal calls plus a stray close tag stays at two calls.
  */
 export declare function parseToolCalls(text: any): ToolCallParseResult;
-export declare function stripToolCalls(text: any): any;
+export declare function stripToolCalls(text: any): string;
 export declare function formatToolResults(results: any): string;
 export declare const AGENT_SYSTEM_PROMPT: string;

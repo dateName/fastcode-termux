@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput } from "ink";
 import { AGENT_SYSTEM_PROMPT, stripToolCalls, } from "./agent/protocol.js";
 import { compactionConfigFromEnv, removeSummaryFile } from "./agent/compaction.js";
-import { resolveToolProtocol, withToolCapability } from "./agent/protocol-mode.js";
+import { rememberToolCapability, resolveToolProtocol } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
 import { decisionForOption, parseApprovalChoice } from "./agent/approval.js";
 import { nativeApproval } from "./agent/approval-native.js";
@@ -921,12 +921,12 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 protocol,
                 tools: protocol === "native" ? toolSchemas() : undefined,
                 onProtocolFallback: (message) => {
-                    setConfig((current) => withToolCapability(current, config.providerId, config.model, "pseudo"));
+                    rememberToolCapability(config.providerId, config.model, "pseudo");
                     pushSystem(message);
                 },
                 onNativeOk: () => {
                     if (protocol === "native")
-                        setConfig((current) => withToolCapability(current, config.providerId, config.model, "native"));
+                        rememberToolCapability(config.providerId, config.model, "native");
                 },
                 takeSteering: () => {
                     const queued = steerQueueRef.current;

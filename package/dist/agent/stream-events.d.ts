@@ -49,6 +49,8 @@ export interface AssembledStream {
     toolCalls: NativeToolCall[];
     usage?: ChatChunk["usage"];
     finish?: TurnEndReason;
+    /** Non-fatal provider anomalies (duplicate/divergent usage, …). */
+    warnings: string[];
 }
 /**
  * Incremental chunk-to-response assembler.
@@ -65,6 +67,7 @@ export declare class StreamAssembler {
     private _usage;
     private _finish;
     private _ended;
+    private _warnings;
     /** Drop all accumulated content (prefix-safe retry replaced the stream). */
     reset(): void;
     push(event: StreamEvent): void;
@@ -72,6 +75,7 @@ export declare class StreamAssembler {
     get thinking(): string;
     get ended(): boolean;
     get usage(): ChatChunk["usage"];
+    get warnings(): string[];
     /**
      * Complete tool calls in stream order. A partial call without a
      * `tool-call-end` is completed from its deltas only when it has a name;

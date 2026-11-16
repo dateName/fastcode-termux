@@ -105,16 +105,15 @@ export async function* streamChatCompletion(req: any, opts: StreamOptions) {
     let res = await send(false);
     if (!res.ok) {
         let detail = await res.text().catch(() => "");
-        // Some models reject the thinking parameter even though the provider
-        // as a whole accepts it. Drop it once, then keep the request alive.
-        if (res.status === 400 && hasReasoning && /reasoning|thinking|effort|unsupported|unrecognized|unknown parameter/i.test(detail)) {
-            res = await send(false, false);
-            detail = res.ok ? detail : await res.text().catch(() => "");
-        }
-        // Newer OpenAI-style models reject max_tokens and temperature. Retry once
-        // in the compatibility dialect before surfacing the real error.
-        if (!res.ok && res.status === 400 && /max_tokens|max_completion_tokens|temperature|unsupported|unrecognized|unknown parameter/i.test(detail)) {
-            res = await send(true, false);
+        // At most ONE 400 retry per clientRequestId. Either the model rejects
+        // the thinking parameter, or it rejects the legacy OpenAI parameters;
+        // never chain both (that used to turn one bad turn into 3 HTTP calls).
+        const retryReasoning = res.status === 400 && hasReasoning
+            && /reasoning|thinking|effort|unsupported|unrecognized|unknown parameter/i.test(detail);
+        const retryCompat = !retryReasoning && res.status === 400
+            && /max_tokens|max_completion_tokens|temperature|unsupported|unrecognized|unknown parameter/i.test(detail);
+        if (retryReasoning || retryCompat) {
+            res = await send(retryCompat, false);
             detail = res.ok ? detail : await res.text().catch(() => "");
         }
         if (!res.ok) {
@@ -140,8 +139,11 @@ export async function* streamChatCompletion(req: any, opts: StreamOptions) {
             : Array.isArray(message.content)
                 ? message.content.map((part: any) => part?.text ?? "").join("")
                 : "";
+        // A non-streaming JSON body is structured: `content` is plain text and
+        // must not be rescanned for `<fastcode_tool>` / dialect markup. Only
+        // `message.tool_calls` becomes a tool call.
         if (content)
-            yield { delta: content, done: false };
+            yield { delta: content, done: false, suppressPseudoParse: true };
         const completeCalls: NativeToolCall[] = Array.isArray(message.tool_calls)
             ? message.tool_calls
                 .map((call: any, index: number) => {
@@ -164,6 +166,7 @@ export async function* streamChatCompletion(req: any, opts: StreamOptions) {
         yield {
             delta: "",
             done: true,
+            suppressPseudoParse: true,
             ...(parsedUsage ? { usage: parsedUsage } : {}),
             ...(completeCalls.length > 0 ? { toolCalls: completeCalls } : {}),
         };

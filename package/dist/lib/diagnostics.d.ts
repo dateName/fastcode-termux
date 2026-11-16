@@ -35,6 +35,9 @@ export declare function collectDiagnostics(): {
     sessionsDir: any;
     sessionsCount: number;
     sessionsBytes: number;
+    recentRepeatSession: string;
+    recentRepeatTool: string;
+    recentRepeatCount: number;
     trustFile: any;
     trusted: boolean;
     shellDenyPatterns: number;

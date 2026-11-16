@@ -19,15 +19,52 @@ const MISTRAL_PREFIX = "[TOOL_CALLS]";
 const LLAMA_TAG = "<|python_tag|>";
 // Open markers used by dialects we do not parse yet. Seeing one with zero
 // parsed calls must fail loudly instead of ending the turn as "complete".
-const FOREIGN_DIALECT_RES = [
-    /<tool_calls?\b[^>]*>/i,
-    /<function_calls?\b[^>]*>/i,
-    /<function\s*=/i,
-    /<\|tool_call\|>/i,
-    /<\|python_tag\|>/i,
-    /\[TOOL_CALLS\]/i,
-    /<antml:invoke\b/i,
-];
+const FOREIGN_DIALECT_SCAN = /<tool_calls?\b[^>]*>|<function_calls?\b[^>]*>|<function\s*=|<\|tool_call\|>|<\|python_tag\|>|\[TOOL_CALLS\]|<antml:invoke\b/gi;
+/**
+ * Markdown fenced blocks are examples, not instructions. Replace their body
+ * with spaces (same length, newlines kept) before parsing so a documented
+ * `<fastcode_tool>` sample is never executed.
+ */
+function maskFencedBlocks(text) {
+    const lines = text.split("\n");
+    let fence;
+    for (let i = 0; i < lines.length; i += 1) {
+        const marker = /^(`{3,}|~{3,})/.exec(lines[i].trimStart())?.[1];
+        if (fence) {
+            lines[i] = lines[i].replace(/[^\r]/g, " ");
+            if (marker && marker[0] === fence[0] && marker.length >= fence.length)
+                fence = undefined;
+        }
+        else if (marker) {
+            fence = marker;
+            lines[i] = lines[i].replace(/[^\r]/g, " ");
+        }
+    }
+    return lines.join("\n");
+}
+/**
+ * True when a marker starts a call segment: first non-space on its line, or
+ * immediately after another closed tool-call block. Inline examples quoted in
+ * prose ("here is how: <tool_call>...") are not segments.
+ */
+function isCallBoundary(raw, index) {
+    const lineStart = raw.lastIndexOf("\n", index - 1) + 1;
+    if (/^[ \t]*$/.test(raw.slice(lineStart, index)))
+        return true;
+    return /<\/(?:fastcode_tool|tool_calls?|function_calls?|invoke)>[ \t]*$/i.test(raw.slice(0, index));
+}
+/**
+ * A foreign marker only fails the turn when the reply is basically the markup
+ * itself. A marker at a line start inside a long prose answer is usually an
+ * example, not an attempted call.
+ */
+function hasLargelyForeignDialect(raw) {
+    const markers = Array.from(raw.matchAll(FOREIGN_DIALECT_SCAN));
+    if (!markers.some((match) => isCallBoundary(raw, match.index ?? 0)))
+        return false;
+    const prose = raw.replace(/<[^>]*>/g, " ").match(/[\p{L}\p{N}]+/gu) ?? [];
+    return prose.length <= 6 && prose.join("").length <= 48;
+}
 /** Turn the DSML glyph markers into ordinary `<tag>` / `</tag>` tags. */
 function canonicalizeDsml(text) {
     return text.replace(DSML_CLOSE_RE, "</").replace(DSML_OPEN_RE, "<");
@@ -187,6 +224,8 @@ function parseHermes(raw, calls, errors, spans, detected) {
         const end = start + block[0].length;
         if (insideSpan(start, spans))
             continue;
+        if (!isCallBoundary(raw, start))
+            continue;
         // DSML canonicalization also produces `<tool_call>` wrappers around
         // `<invoke>`; those belong to the DSML pass.
         if (/<invoke\s+name=/i.test(block[1] ?? ""))
@@ -227,8 +266,12 @@ function parseMistral(raw, calls, errors, spans, detected) {
         const index = raw.indexOf(MISTRAL_PREFIX, cursor);
         if (index < 0)
             return;
-        detected.add("mistral");
         const after = index + MISTRAL_PREFIX.length;
+        if (!isCallBoundary(raw, index)) {
+            cursor = after;
+            continue;
+        }
+        detected.add("mistral");
         const next = raw.indexOf(MISTRAL_PREFIX, after);
         const chunk = raw.slice(after, next < 0 ? raw.length : next);
         const args = extractMistralArgs(chunk);
@@ -272,6 +315,8 @@ function parseKimi(raw, calls, errors, spans, detected) {
         const end = start + section[0].length;
         if (insideSpan(start, spans))
             continue;
+        if (!isCallBoundary(raw, start))
+            continue;
         detected.add("kimi");
         let parsed = 0;
         for (const call of (section[1] ?? "").matchAll(KIMI_CALL_RE)) {
@@ -298,8 +343,12 @@ function parseKimi(raw, calls, errors, spans, detected) {
 function parseLlama(raw, calls, errors, spans, detected) {
     let index = raw.indexOf(LLAMA_TAG);
     while (index >= 0) {
-        detected.add("llama");
         const after = index + LLAMA_TAG.length;
+        if (!isCallBoundary(raw, index)) {
+            index = raw.indexOf(LLAMA_TAG, after);
+            continue;
+        }
+        detected.add("llama");
         const json = extractJsonValue(raw.slice(after));
         if (!json) {
             errors.push("invalid Llama <|python_tag|> JSON");
@@ -344,9 +393,10 @@ function parseLlama(raw, calls, errors, spans, detected) {
  * - two adjacent normal calls plus a stray close tag stays at two calls.
  */
 export function parseToolCalls(text) {
-    const raw = canonicalizeDsml(String(text ?? ""));
+    const raw = maskFencedBlocks(canonicalizeDsml(String(text ?? "")));
     const calls = [];
     const errors = [];
+    const errorCodes = [];
     const spans = [];
     const detected = new Set();
     let cursor = 0;
@@ -354,6 +404,10 @@ export function parseToolCalls(text) {
         const open = raw.indexOf(FASTCODE_TOOL_OPEN, cursor);
         if (open < 0)
             break;
+        if (!isCallBoundary(raw, open)) {
+            cursor = open + FASTCODE_TOOL_OPEN.length;
+            continue;
+        }
         const innerStart = open + FASTCODE_TOOL_OPEN.length;
         const close = matchFrom(raw, innerStart, FASTCODE_TOOL_CLOSE_RE);
         if (!close) {
@@ -402,6 +456,8 @@ export function parseToolCalls(text) {
         const end = start + block[0].length;
         if (insideSpan(start, spans))
             continue;
+        if (!isCallBoundary(raw, start))
+            continue;
         // Only consume blocks that actually carry DSML invokes. A foreign
         // `<tool_call>{"name":...}</tool_call>` has JSON, not <invoke>, so it is
         // left intact for visible text and for the dialect check below.
@@ -416,6 +472,8 @@ export function parseToolCalls(text) {
         const start = invoke.index ?? 0;
         if (insideSpan(start, spans))
             continue;
+        if (!isCallBoundary(raw, start))
+            continue;
         calls.push(invokeToCall(invoke));
         spans.push({ start, end: start + invoke[0].length });
     }
@@ -429,18 +487,20 @@ export function parseToolCalls(text) {
             errors.push(`Tool-call dialect detected (${Array.from(detected).join(", ")}) but no valid call was parsed; ` +
                 "re-emit a complete tool call.");
         }
-        else if (FOREIGN_DIALECT_RES.some((re) => re.test(raw))) {
+        else if (hasLargelyForeignDialect(raw)) {
+            errorCodes.push("UNSUPPORTED_DIALECT");
             errors.push("Unsupported tool-call dialect: the reply contains a tool-call marker FastCode cannot parse. " +
                 "Re-emit a complete <fastcode_tool>{\"tool\":...}</fastcode_tool> block.");
         }
     }
-    return { calls, consumedEnd, errors, detectedDialects: Array.from(detected) };
+    return { calls, consumedEnd, errors, errorCodes, detectedDialects: Array.from(detected) };
 }
 function salvageResidual(tail, calls, errors) {
     if (!tail.trim())
         return;
     let salvaged = false;
-    const toolOpen = tail.indexOf(FASTCODE_TOOL_OPEN);
+    const rawToolOpen = tail.indexOf(FASTCODE_TOOL_OPEN);
+    const toolOpen = rawToolOpen >= 0 && isCallBoundary(tail, rawToolOpen) ? rawToolOpen : -1;
     if (toolOpen >= 0) {
         const recovered = salvageJsonPrefix(tail.slice(toolOpen + FASTCODE_TOOL_OPEN.length));
         if (recovered) {
@@ -451,7 +511,8 @@ function salvageResidual(tail, calls, errors) {
             errors.push("unclosed <fastcode_tool> block; re-emit a complete tool call");
         }
     }
-    const openers = Array.from(tail.matchAll(INVOKE_OPEN_RE));
+    const allOpeners = Array.from(tail.matchAll(INVOKE_OPEN_RE));
+    const openers = allOpeners.filter((opener) => isCallBoundary(tail, opener.index ?? 0));
     openers.forEach((opener, index) => {
         const start = opener.index ?? 0;
         const bodyStart = start + opener[0].length;
@@ -465,7 +526,7 @@ function salvageResidual(tail, calls, errors) {
             errors.push(`incomplete invoke for "${opener[1]}"; re-emit a complete tool call`);
         }
     });
-    if (!salvaged && openers.length === 0 && toolOpen < 0 && RESIDUAL_CLOSE_RE.test(tail))
+    if (!salvaged && openers.length === 0 && rawToolOpen < 0 && allOpeners.length === 0 && RESIDUAL_CLOSE_RE.test(tail))
         errors.push("stray closing tag without an opening tool call; re-emit a complete tool call");
 }
 function stripMistralText(text) {
@@ -508,8 +569,42 @@ function stripLlamaText(text) {
         cursor = after + json.consumed;
     }
 }
-export function stripToolCalls(text) {
-    let out = canonicalizeDsml(String(text ?? ""))
+/** Apply `transform` to unfenced chunks only; fenced examples stay verbatim. */
+function mapUnfenced(text, transform) {
+    const lines = text.split("\n");
+    const out = [];
+    let fence;
+    let chunk = "";
+    let chunkFenced = false;
+    const flush = () => {
+        if (!chunk)
+            return;
+        out.push(chunkFenced ? chunk : transform(chunk));
+        chunk = "";
+    };
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = i < lines.length - 1 ? lines[i] + "\n" : lines[i];
+        const marker = /^(`{3,}|~{3,})/.exec(line.trimStart())?.[1];
+        let fenced = Boolean(fence);
+        if (fence) {
+            if (marker && marker[0] === fence[0] && marker.length >= fence.length)
+                fence = undefined;
+        }
+        else if (marker) {
+            fence = marker;
+            fenced = true;
+        }
+        if (chunk && fenced !== chunkFenced)
+            flush();
+        if (!chunk)
+            chunkFenced = fenced;
+        chunk += line;
+    }
+    flush();
+    return out.join("");
+}
+function stripUnfencedText(text) {
+    let out = text
         .replace(/<fastcode_tool>[\s\S]*?<\/\s*fastcode_tool\s*>/gi, "")
         .replace(DSML_BLOCK_RE, (block) => /<invoke\s+name=/i.test(block) ? "" : block)
         .replace(/<fastcode_tool>[\s\S]*$/i, "");
@@ -521,7 +616,7 @@ export function stripToolCalls(text) {
     out = stripLlamaText(out);
     // Bare leading JSON tool call (Llama full-turn fallback).
     const trimmed = out.trim();
-    if (trimmed.startsWith("{")) {
+    if (trimmed.startsWith("{") && /^\s*$/.test(text.slice(0, text.indexOf("{")))) {
         try {
             const value = JSON.parse(trimmed);
             if (value && typeof value === "object" && ("arguments" in value || "parameters" in value) && dialectCall(value))
@@ -531,9 +626,10 @@ export function stripToolCalls(text) {
             // Not JSON; keep it as visible text.
         }
     }
-    return out
-        .replace(/<\/\s*(?:fastcode_tool|parameter|invoke|calls)\s*>/gi, "")
-        .trim();
+    return out.replace(/<\/\s*(?:fastcode_tool|parameter|invoke|calls)\s*>/gi, "");
+}
+export function stripToolCalls(text) {
+    return mapUnfenced(String(text ?? ""), (chunk) => stripUnfencedText(canonicalizeDsml(chunk))).trim();
 }
 export function formatToolResults(results) {
     const blocks = results.map((r, index) => {

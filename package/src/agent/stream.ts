@@ -29,6 +29,8 @@ export interface RunStreamResult {
     reasoning?: string;
     usage?: ChatChunk["usage"];
     toolCalls?: ChatChunk["toolCalls"];
+    suppressPseudoParse?: boolean;
+    warnings?: string[];
     incomplete: boolean;
     retried: number;
 }
@@ -43,6 +45,7 @@ export async function runStream(provider: Provider, req: ChatRequest, apiKey: st
     let retried = 0;
     const assembler = new StreamAssembler();
     let sawDone = false;
+    let suppressPseudoParse = false;
     const send = async function* ({ clientRequestId }: { clientRequestId: string }) {
         yield* attemptChunks(provider, { ...req, clientRequestId }, apiKey, {
             signal: options.signal,
@@ -64,10 +67,16 @@ export async function runStream(provider: Provider, req: ChatRequest, apiKey: st
             // state before applying the replacement chunk.
             if (chunk.reset)
                 assembler.reset();
-            for (const event of chunkToStreamEvents(chunk))
-                assembler.push(event);
-            if (chunk.delta)
-                options.onDelta?.(chunk.delta, assembler.text);
+            if (chunk.suppressPseudoParse)
+                suppressPseudoParse = true;
+            // After turn-end nothing may reach onDelta; a malformed provider
+            // that appends records after done must not extend the answer.
+            if (!assembler.ended) {
+                for (const event of chunkToStreamEvents(chunk))
+                    assembler.push(event);
+                if (chunk.delta)
+                    options.onDelta?.(chunk.delta, assembler.text);
+            }
             if (chunk.done)
                 sawDone = true;
         }
@@ -81,6 +90,8 @@ export async function runStream(provider: Provider, req: ChatRequest, apiKey: st
                 reasoning: assembler.thinking || undefined,
                 usage: assembler.usage,
                 toolCalls: calls.length > 0 ? calls : undefined,
+                suppressPseudoParse: suppressPseudoParse || undefined,
+                warnings: assembler.warnings.length > 0 ? assembler.warnings : undefined,
                 incomplete: true,
                 retried,
             };
@@ -95,6 +106,8 @@ export async function runStream(provider: Provider, req: ChatRequest, apiKey: st
         reasoning: assembled.thinking || undefined,
         usage: assembled.usage,
         toolCalls: assembled.toolCalls.length > 0 ? assembled.toolCalls : undefined,
+        suppressPseudoParse: suppressPseudoParse || undefined,
+        warnings: assembled.warnings.length > 0 ? assembled.warnings : undefined,
         incomplete: !sawDone,
         retried,
     };

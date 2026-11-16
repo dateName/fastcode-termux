@@ -5,7 +5,7 @@
  * diagnosed without opening the TUI: Node version, Termux detection, whether
  * stdout is a real terminal, the config root, and which provider keys exist.
  */
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { totalmem, freemem, tmpdir as osTmpdir } from "node:os";
 import { detectPlatform, platformLabel } from "./platform.js";
 import { readPackageMeta } from "./pkg.js";
@@ -35,6 +35,39 @@ function nodeIsSupported() {
     const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
     const [reqMajor = 0, reqMinor = 0] = NODE_REQUIRED.split(".").map(Number);
     return major > reqMajor || (major === reqMajor && minor >= reqMinor);
+}
+/** Largest run of identical consecutive tool_call facts in the latest session. */
+function latestRepeatStats() {
+    const latest = listSessions()[0];
+    if (!latest)
+        return null;
+    try {
+        let previous = "";
+        let run = 0;
+        let best = { session: latest.id, tool: "", count: 0 };
+        for (const line of readFileSync(latest.file, "utf8").split(/\r?\n/)) {
+            if (!line.trim())
+                continue;
+            let fact;
+            try {
+                fact = JSON.parse(line);
+            }
+            catch {
+                continue;
+            }
+            if (fact?.type !== "tool_call")
+                continue;
+            const key = String(fact.tool ?? "") + "\u0000" + JSON.stringify(fact.args ?? {});
+            run = key === previous ? run + 1 : 1;
+            previous = key;
+            if (run > best.count)
+                best = { session: latest.id, tool: String(fact.tool ?? "?"), count: run };
+        }
+        return best;
+    }
+    catch {
+        return null;
+    }
 }
 export function collectDiagnostics() {
     const config = loadConfig();
@@ -68,6 +101,7 @@ export function collectDiagnostics() {
     const platform = detectPlatform();
     const compaction = compactionConfigFromEnv();
     const shells = shellPoolStats();
+    const recentRepeats = latestRepeatStats();
     let authMode = "missing";
     try {
         if (paths?.auth && existsSync(paths.auth))
@@ -113,6 +147,9 @@ export function collectDiagnostics() {
         sessionsDir: paths?.sessions,
         sessionsCount: listSessions().length,
         sessionsBytes: listSessions().reduce((sum, entry) => sum + entry.bytes, 0),
+        recentRepeatSession: recentRepeats?.session ?? null,
+        recentRepeatTool: recentRepeats?.tool || null,
+        recentRepeatCount: recentRepeats?.count ?? 0,
         trustFile: paths?.trust,
         trusted: isTrusted(process.cwd()),
         shellDenyPatterns: DEFAULT_DENY_PATTERNS.length,
@@ -188,6 +225,11 @@ export function formatDiagnostics(info) {
     lines.push("  trusted cwd   " + (info.trusted ? "yes" : "NO - agent tools ask first or stay off") + "   (" + (info.trustFile ?? "?") + ")");
     lines.push("  session log   " + (info.sessionLogEnabled ? "on" : "off") + "   cache cap " + info.sessionCacheMb + "MB, " + info.sessionsCount + " file(s), " + (info.sessionsBytes / 1024 / 1024).toFixed(2) + "MB used");
     lines.push("  session fsync " + info.sessionFsync + "   unclosed " + info.unclosedSessions + "   " + (info.sessionsDir ?? "(unavailable)"));
+    lines.push("  repeats       " + (info.recentRepeatSession
+        ? (info.recentRepeatCount > 1
+            ? `latest session ran ${info.recentRepeatTool} ×${info.recentRepeatCount} consecutively (${info.recentRepeatSession})`
+            : `none in the latest session (${info.recentRepeatSession})`)
+        : "no session log yet"));
     lines.push("  shell guard   " + info.shellDenyPatterns + " legacy soft patterns" + (info.allowDangerous ? "   [FASTCODE_ALLOW_DANGEROUS is ON]" : ""));
     lines.push("  tool output   " + info.toolOutputLimit + " chars max (streaming cap) · " + info.toolMessageLimit + " chars per tool message");
     lines.push(`  read limits   read ${info.readMaxBytes}B · scan ${info.readScanMaxBytes}B · read_many ${info.readManyMaxBytes}B · grep ${info.grepMaxBytes}B`);

@@ -192,6 +192,52 @@ try {
 finally {
     await new Promise((resolve) => specServer.close(resolve));
 }
+let nonStreamJsonRequests = 0;
+const nonStreamJsonServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        nonStreamJsonRequests += 1;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ choices: [{ message: { content: 'Example:\n<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' } }] }));
+    });
+});
+await new Promise((resolve) => nonStreamJsonServer.listen(0, "127.0.0.1", resolve));
+const nonStreamJsonPort = nonStreamJsonServer.address().port;
+const nonStreamJsonChunks = [];
+for await (const chunk of compatible.streamChatCompletion({ model: "m", messages: [] }, { baseUrl: `http://127.0.0.1:${nonStreamJsonPort}/v1`, apiKey: "k" }))
+    nonStreamJsonChunks.push(chunk);
+nonStreamJsonServer.close();
+ok("#129 non-stream JSON content stays plain text instead of a tool-call channel",
+    nonStreamJsonRequests === 1 &&
+        nonStreamJsonChunks.every((chunk) => chunk.suppressPseudoParse === true) &&
+        nonStreamJsonChunks.every((chunk) => !chunk.toolCalls || chunk.toolCalls.length === 0) &&
+        nonStreamJsonChunks.map((chunk) => chunk.delta).join("").includes("<fastcode_tool>"),
+    JSON.stringify(nonStreamJsonChunks));
+
+let retry400Requests = 0;
+const retry400Server = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        retry400Requests += 1;
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "unsupported parameter: max_tokens" } }));
+    });
+});
+await new Promise((resolve) => retry400Server.listen(0, "127.0.0.1", resolve));
+const retry400Port = retry400Server.address().port;
+let retry400Error = "";
+try {
+    for await (const _ of compatible.streamChatCompletion({ model: "m", messages: [] }, { baseUrl: `http://127.0.0.1:${retry400Port}/v1`, apiKey: "k" }))
+        void _;
+}
+catch (err) {
+    retry400Error = String(err?.message ?? err);
+}
+retry400Server.close();
+ok("#139 a compatibility 400 is retried at most once",
+    retry400Requests === 2 && /\b400\b/.test(retry400Error),
+    JSON.stringify({ retry400Requests, retry400Error: retry400Error.slice(0, 200) }));
+
 let modelFetchCalled = false;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => {
@@ -420,8 +466,10 @@ ok("#38 probeConnectivity returns false within 3s", probeOk === false && probeEl
 
 const protocol = await load("agent/protocol.js");
 const dsmlBlock = "<｜DSML｜｜calls>\n<｜DSML｜invoke name=\"shell\">\n<｜DSML｜parameter name=\"command\" string=\"true\">echo hi</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜｜calls>";
-const dsmlParsed = protocol.parseToolCalls("noise " + dsmlBlock);
+const dsmlParsed = protocol.parseToolCalls("noise\n" + dsmlBlock);
 ok("parses the DeepSeek DSML tool-call dialect", dsmlParsed.calls.length === 1 && dsmlParsed.calls[0].tool === "shell" && dsmlParsed.calls[0].command === "echo hi", JSON.stringify(dsmlParsed));
+const hermesInline = protocol.parseToolCalls('use <tool_call>{"name":"pwd","arguments":{}}</tool_call> inline');
+ok("#128 inline dialect examples are not parsed as calls", hermesInline.calls.length === 0 && hermesInline.errors.length === 0, JSON.stringify(hermesInline));
 const dsmlStripped = protocol.stripToolCalls("hello " + dsmlBlock + " world");
 ok("strips DSML markup from visible text", !/DSML/.test(dsmlStripped) && dsmlStripped.includes("hello") && dsmlStripped.includes("world"), JSON.stringify(dsmlStripped));
 const jsonParsed = protocol.parseToolCalls('<fastcode_tool>{"tool":"pwd"}</fastcode_tool>');
@@ -475,7 +523,12 @@ const llamaBare = protocol.parseToolCalls('{"name":"pwd","parameters":{}}');
 ok("Llama bare leading JSON is accepted", llamaBare.calls.length === 1 && llamaBare.calls[0].tool === "pwd", JSON.stringify(llamaBare));
 const unsupportedDialect = protocol.parseToolCalls('<function_call>{"name":"pwd"}</function_call>');
 ok("an unsupported dialect with zero parsed calls is an explicit protocol error",
-    unsupportedDialect.calls.length === 0 && unsupportedDialect.errors.length > 0, JSON.stringify(unsupportedDialect));
+    unsupportedDialect.calls.length === 0 && unsupportedDialect.errors.length > 0 &&
+        unsupportedDialect.errorCodes.includes("UNSUPPORTED_DIALECT"), JSON.stringify(unsupportedDialect));
+const proseForeignDialect = protocol.parseToolCalls('Here is how some providers format calls and why this example should not run.\n<function_call>{"name":"pwd"}</function_call>');
+ok("#142 a foreign marker inside long prose is not a protocol error",
+    proseForeignDialect.calls.length === 0 && proseForeignDialect.errors.length === 0 &&
+        !proseForeignDialect.errorCodes.includes("UNSUPPORTED_DIALECT"), JSON.stringify(proseForeignDialect));
 const unsupportedVisible = protocol.stripToolCalls('<function_call>{"name":"pwd"}</function_call>');
 ok("unsupported dialect markup is not silently stripped as DSML", unsupportedVisible.includes("<function_call>"), JSON.stringify(unsupportedVisible));
 const kimiLegacyMarker = protocol.parseToolCalls("<|tool_call|>{\"name\":\"pwd\"}<|/tool_call|>");
@@ -1183,8 +1236,72 @@ ok("headless JSON exposes tool_call/tool_result, side_effects, output and v/seq/
         ((structuredEffects.touched ?? []).length + (structuredEffects.created ?? []).length === 1) &&
         structuredWritten && structuredSeqOk,
     JSON.stringify({ structuredExit, structuredToolCall, structuredToolResult, structuredSeqOk, stderr: structuredErr.slice(0, 300) }));
+const structuredSummary = structuredEvents.find((event) => event.event === "summary");
+ok("#138 headless JSON emits an aggregate summary frame",
+    structuredSummary?.tool_call_count === 1 && structuredSummary?.last_turn >= 1,
+    JSON.stringify(structuredSummary));
+ok("#141 summary reports the successful request count",
+    structuredSummary?.http_request_count === 2,
+    JSON.stringify(structuredSummary));
 rmSync(structuredCliDir, { recursive: true, force: true });
 rmSync(structuredHome, { recursive: true, force: true });
+
+const fallbackCliDir = mkdtempSync(join(tmpdir(), "fastcode-fallback-cli-"));
+const fallbackHome = mkdtempSync(join(tmpdir(), "fastcode-fallback-home-"));
+const fallbackConfigText = JSON.stringify({ providerId: "custom", model: "test-model", agentMode: true });
+writeFileSync(join(fallbackHome, "config.json"), fallbackConfigText, "utf8");
+let fallbackHttp = 0;
+const fallbackServer = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+        fallbackHttp += 1;
+        let parsed = {};
+        try {
+            parsed = JSON.parse(body);
+        }
+        catch {
+            parsed = {};
+        }
+        if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
+            res.writeHead(400, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: { message: "tools are not supported by this model" } }));
+            return;
+        }
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "Fell back." } }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+    });
+});
+await new Promise((resolve) => fallbackServer.listen(0, "127.0.0.1", resolve));
+const fallbackPort = fallbackServer.address().port;
+const fallbackChild = spawn(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "--ui", "json", "say hi"], {
+    cwd: fallbackCliDir,
+    env: {
+        ...process.env,
+        FASTCODE_HOME: fallbackHome,
+        FASTCODE_BASE_URL: `http://127.0.0.1:${fallbackPort}/v1`,
+        FASTCODE_API_KEY: "dummy",
+        FASTCODE_TOOL_PROTOCOL: "native",
+    },
+});
+let fallbackOut = "";
+let fallbackErr = "";
+fallbackChild.stdout.on("data", (chunk) => { fallbackOut += chunk; });
+fallbackChild.stderr.on("data", (chunk) => { fallbackErr += chunk; });
+const fallbackKillTimer = setTimeout(() => fallbackChild.kill(), 20_000);
+const fallbackExit = await new Promise((resolve) => fallbackChild.on("close", resolve));
+clearTimeout(fallbackKillTimer);
+fallbackServer.close();
+const fallbackFileAfter = readFileSync(join(fallbackHome, "config.json"), "utf8");
+ok("#134 native fallback does not rewrite config.json",
+    fallbackExit === 0 && fallbackHttp === 2 &&
+        fallbackFileAfter === fallbackConfigText &&
+        /Native tools were rejected/.test(fallbackErr + fallbackOut),
+    JSON.stringify({ fallbackExit, fallbackHttp, configChanged: fallbackFileAfter !== fallbackConfigText, stderr: fallbackErr.slice(0, 200) }));
+rmSync(fallbackCliDir, { recursive: true, force: true });
+rmSync(fallbackHome, { recursive: true, force: true });
 
 const egressCliDir = mkdtempSync(join(tmpdir(), "fastcode-egress-cli-"));
 const egressHome = mkdtempSync(join(tmpdir(), "fastcode-egress-home-"));
@@ -1381,7 +1498,7 @@ ok("runner has no React dependency", !/["']react(-|\/|["'])/.test(runnerSource))
 
 const twoTurn = await collect(runner.runAgent({
     provider: scriptedProvider([
-        { text: 'Before.<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' },
+        { text: 'Before.\n<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' },
         { text: "Done." },
     ]),
     model: "mock",
@@ -1439,6 +1556,97 @@ const protocolErrorEvent = persistentProtocolError.find((event) => event.type ==
 ok("persistent protocol failures end as protocol_error, not a normal turn cap",
     Boolean(protocolErrorEvent) && persistentProtocolError.at(-1).stopReason === "protocol_error",
     JSON.stringify({ stopReason: persistentProtocolError.at(-1).stopReason, kinds: persistentProtocolError.filter((event) => event.type === "error").map((event) => event.kind) }));
+
+const boundedReemit = await collect(runner.runAgent({
+    provider: scriptedProvider(Array.from({ length: 8 }, () => ({ text: "still </parameter></invoke>" }))),
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 8,
+    cwd: stage0,
+}));
+const reemitInjections = boundedReemit.filter((event) => event.type === "tool_result" && event.call?.tool === "protocol_error").length;
+ok("#123 repeated broken markup stops after one re-emit instead of burning every turn",
+    reemitInjections === 1 &&
+        boundedReemit.filter((event) => event.type === "assistant_raw").length === 2 &&
+        boundedReemit.at(-1).stopReason === "protocol_error",
+    JSON.stringify({ injections: reemitInjections, raw: boundedReemit.filter((event) => event.type === "assistant_raw").length, stopReason: boundedReemit.at(-1).stopReason }));
+
+const foreignDialectRun = await collect(runner.runAgent({
+    provider: scriptedProvider(Array.from({ length: 5 }, () => ({ text: '<function_call>{"name":"pwd"}</function_call>' }))),
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 5,
+    cwd: stage0,
+}));
+ok("#124 unsupported dialect stops with one visible error and no protocol_error injection",
+    foreignDialectRun.filter((event) => event.type === "tool_result").length === 0 &&
+        foreignDialectRun.filter((event) => event.type === "assistant_raw").length === 1 &&
+        foreignDialectRun.filter((event) => event.type === "error" && event.kind === "protocol_error").length === 1 &&
+        foreignDialectRun.at(-1).stopReason === "protocol_error",
+    JSON.stringify({ types: foreignDialectRun.map((event) => event.type), stopReason: foreignDialectRun.at(-1).stopReason }));
+
+const readSixScript = Array.from({ length: 6 }, () => ({ text: '<fastcode_tool>{"tool":"read_file","path":"a.txt"}</fastcode_tool>' }));
+readSixScript.push({ text: "ok" });
+const readSixRun = await collect(runner.runAgent({ provider: scriptedProvider(readSixScript), model: "mock", prompt: "read", maxTurns: 8, cwd: stage0 }));
+ok("#125 read-only repeats reach the loop warning threshold",
+    readSixRun.filter((event) => event.type === "loop_detected").length === 1 &&
+        readSixRun.at(-1).stopReason === "complete",
+    readSixRun.map((event) => event.type).join(","));
+
+const readElevenScript = Array.from({ length: 11 }, () => ({ text: '<fastcode_tool>{"tool":"read_file","path":"a.txt"}</fastcode_tool>' }));
+const readElevenRun = await collect(runner.runAgent({ provider: scriptedProvider(readElevenScript), model: "mock", prompt: "read", maxTurns: 12, cwd: stage0 }));
+ok("#126 read-only loop stops on the second accumulation",
+    readElevenRun.filter((event) => event.type === "loop_detected").length === 1 &&
+        readElevenRun.filter((event) => event.type === "tool_call").length === 9 &&
+        readElevenRun.at(-1).stopReason === "loop_detected",
+    JSON.stringify({ loopEvents: readElevenRun.filter((event) => event.type === "loop_detected").length, toolCalls: readElevenRun.filter((event) => event.type === "tool_call").length, stopReason: readElevenRun.at(-1).stopReason }));
+
+const fencedExampleRun = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { text: 'Example:\n```json\n<fastcode_tool>{"tool":"pwd"}</fastcode_tool>\n```\nThat is all.' },
+        { text: "done" },
+    ]),
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 3,
+    cwd: stage0,
+}));
+const fencedFinalText = fencedExampleRun.at(-1).finalText ?? "";
+ok("#127 fenced tool-call examples are neither executed nor stripped",
+    fencedExampleRun.filter((event) => event.type === "tool_call").length === 0 &&
+        fencedExampleRun.at(-1).stopReason === "complete" &&
+        fencedFinalText.includes("<fastcode_tool>"),
+    JSON.stringify({ types: fencedExampleRun.map((event) => event.type), finalText: fencedFinalText }));
+
+const inlineExampleRun = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { text: 'Here is how to call a tool: <tool_call>{"name":"pwd","arguments":{}}</tool_call> — that is the format.' },
+        { text: "done" },
+    ]),
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 3,
+    cwd: stage0,
+}));
+ok("#128 inline tool-call examples in prose are not executed",
+    inlineExampleRun.filter((event) => event.type === "tool_call").length === 0 &&
+        inlineExampleRun.at(-1).stopReason === "complete",
+    JSON.stringify({ types: inlineExampleRun.map((event) => event.type), stopReason: inlineExampleRun.at(-1).stopReason }));
+
+const boundaryRun = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { text: 'Sure.\n<fastcode_tool>{"tool":"pwd"}</fastcode_tool><fastcode_tool>{"tool":"stat_path","path":"a.txt"}</fastcode_tool>' },
+        { text: "done" },
+    ]),
+    model: "mock",
+    prompt: "hi",
+    maxTurns: 3,
+    cwd: stage0,
+}));
+ok("#130 real calls at a line boundary still execute, including adjacent blocks",
+    boundaryRun.filter((event) => event.type === "tool_call").length === 2 &&
+        boundaryRun.at(-1).stopReason === "complete",
+    boundaryRun.map((event) => event.type).join(","));
 
 let nonRetryableAttempts = 0;
 const nonRetryableProvider = {
@@ -1529,7 +1737,7 @@ ok("#34 side-effecting repeats trip loop detection once", shellLoop.filter((even
 
 const budgetRun = await collect(runner.runAgent({
     provider: scriptedProvider([
-        { text: 'partial answer<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' },
+        { text: 'partial answer\n<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' },
         { text: "unreachable" },
     ]),
     model: "mock",
@@ -2735,6 +2943,18 @@ nativeTools.mergeToolCallDelta(objectArgsAccumulator, { index: 0, id: "call_obj"
 const objectArgsCalls = nativeTools.finalizeToolCalls(objectArgsAccumulator);
 ok("B2 object-shaped arguments are normalized instead of dropped",
     objectArgsCalls.length === 1 && objectArgsCalls[0].arguments === '{"command":"ls"}', JSON.stringify(objectArgsCalls));
+const cumulativeAccumulator = new Map();
+nativeTools.mergeToolCallDelta(cumulativeAccumulator, { index: 0, id: "call_cum", function: { name: "shell", arguments: '{"command":"ls"}' } });
+nativeTools.mergeToolCallDelta(cumulativeAccumulator, { index: 0, function: { arguments: '{"command":"pwd","timeoutMs":5}' } });
+const cumulativeCalls = nativeTools.finalizeToolCalls(cumulativeAccumulator);
+const noIndexCumulative = new Map();
+nativeTools.mergeToolCallDelta(noIndexCumulative, { function: { name: "shell", arguments: '{"command":"ls"}' } });
+nativeTools.mergeToolCallDelta(noIndexCumulative, { function: { name: "shell", arguments: '{"command":"pwd"}' } });
+const noIndexCumulativeCalls = nativeTools.finalizeToolCalls(noIndexCumulative);
+ok("#135 cumulative arguments replace instead of concatenating",
+    cumulativeCalls.length === 1 && cumulativeCalls[0].arguments === '{"command":"pwd","timeoutMs":5}' &&
+        noIndexCumulativeCalls.length === 2 && noIndexCumulativeCalls[1].arguments === '{"command":"pwd"}',
+    JSON.stringify({ cumulativeCalls, noIndexCumulativeCalls }));
 
 const streamEvents = await load("agent/stream-events.js");
 const assembler = new streamEvents.StreamAssembler();
@@ -2750,6 +2970,27 @@ ok("stream assembler folds canonical events and ignores post-finish records",
         assembledStream.usage?.inputTokens === 1 && assembledStream.toolCalls.length === 1 &&
         assembledStream.finish === "tool-calls" && !assembledStream.text.includes("ignored"),
     JSON.stringify(assembledStream));
+
+const nonDoneAssembler = new streamEvents.StreamAssembler();
+for (const event of streamEvents.chunkToStreamEvents({ delta: "", done: false, toolCalls: [{ id: "call_early", name: "pwd", arguments: "{}" }] }))
+    nonDoneAssembler.push(event);
+nonDoneAssembler.push({ type: "turn-end", reason: "tool-calls" });
+const earlyCalls = nonDoneAssembler.toolCalls();
+ok("#136 non-final toolCalls are frozen at turn-end instead of dropped",
+    earlyCalls.length === 1 && earlyCalls[0].id === "call_early" && earlyCalls[0].name === "pwd",
+    JSON.stringify(earlyCalls));
+
+const usageAssembler = new streamEvents.StreamAssembler();
+usageAssembler.push({ type: "usage", usage: { inputTokens: 1, outputTokens: 2 } });
+usageAssembler.push({ type: "usage", usage: { inputTokens: 3, outputTokens: 4 } });
+const usageSnapshot = usageAssembler.snapshot();
+const sameUsageAssembler = new streamEvents.StreamAssembler();
+sameUsageAssembler.push({ type: "usage", usage: { inputTokens: 1, outputTokens: 2 } });
+sameUsageAssembler.push({ type: "usage", usage: { inputTokens: 1, outputTokens: 2 } });
+ok("#137 duplicate usage warns once and keeps the latest",
+    usageSnapshot.warnings.length === 1 && usageSnapshot.usage?.inputTokens === 3 &&
+        sameUsageAssembler.snapshot().warnings.length === 1,
+    JSON.stringify({ usageSnapshot, sameWarnings: sameUsageAssembler.snapshot().warnings }));
 
 const childEnvModule = await load("lib/child-env.js");
 const previousSecret = process.env.FASTCODE_TEST_SECRET;
@@ -2864,6 +3105,21 @@ ok("auto protocol picks native for compatible providers", protocolMode.resolveTo
 ok("unknown providers fail closed to pseudo", protocolMode.resolveToolProtocol({}, "custom", "my-model", autoEnv) === "legacy");
 const cachedPseudo = protocolMode.withToolCapability({}, "deepseek", "deepseek-v4-pro", "pseudo");
 ok("cached pseudo capability overrides auto", protocolMode.resolveToolProtocol(cachedPseudo, "deepseek", "deepseek-v4-pro", autoEnv) === "legacy");
+ok("#132 pairing 400 is not an unsupported-tools signal",
+    protocolMode.isToolPairingError("400 Bad Request: tool_calls must be followed by tool messages") &&
+        !protocolMode.isNativeUnsupportedError("400 Bad Request: tool_calls must be followed by tool messages") &&
+        protocolMode.isNativeUnsupportedError("400 Bad Request: tools are not supported by this model") &&
+        !protocolMode.isNativeUnsupportedError("500 Internal Server Error: tool backend crashed"),
+    JSON.stringify({
+        pairing: protocolMode.isToolPairingError("400 Bad Request: tool_calls must be followed by tool messages"),
+        fallback: protocolMode.isNativeUnsupportedError("400 Bad Request: tool_calls must be followed by tool messages"),
+    }));
+const runtimeConfig = { capabilities: { toolCalling: { "deepseek::deepseek-v4-pro": "native" } } };
+protocolMode.rememberToolCapability("deepseek", "deepseek-v4-pro", "pseudo");
+ok("#133 runtime capability memory wins without writing config",
+    protocolMode.resolveToolProtocol(runtimeConfig, "deepseek", "deepseek-v4-pro", autoEnv) === "legacy" &&
+        runtimeConfig.capabilities.toolCalling["deepseek::deepseek-v4-pro"] === "native",
+    JSON.stringify(runtimeConfig));
 
 const schemasModule = await load("agent/tool-schemas.js");
 const schemas = schemasModule.toolSchemas();
@@ -2930,6 +3186,44 @@ ok("#57 a 400 on native tools downgrades to pseudo without throwing", fallbackCo
     fallbackRun.some((event) => event.type === "tool_call" && !event.native) &&
     fallbackRun.at(-1).stopReason === "complete", fallbackRun.map((event) => event.type).join(","));
 
+let pairingRequests = 0;
+let pairingFallbacks = 0;
+const pairingProvider = {
+    id: "mock",
+    label: "Mock",
+    authEnv: [],
+    baseUrl: "",
+    defaultModel: "mock",
+    listModels: async () => [],
+    async *stream() {
+        pairingRequests += 1;
+        if (pairingRequests === 1)
+            throw new Error("400 Bad Request: tool_calls must be followed by tool messages");
+        if (pairingRequests === 2) {
+            yield { delta: "", done: true, toolCalls: [{ id: "call_pair", name: "pwd", arguments: "{}" }] };
+            return;
+        }
+        yield { delta: "done", done: false };
+        yield { delta: "", done: true };
+    },
+};
+const pairingRun = await collect(runner.runAgent({
+    provider: pairingProvider,
+    model: "mock",
+    prompt: "pairing",
+    maxTurns: 4,
+    cwd: stage0,
+    protocol: "native",
+    tools: schemas,
+    onProtocolFallback: () => { pairingFallbacks += 1; },
+}));
+ok("#131 a pairing 400 repairs history and retries the same protocol",
+    pairingFallbacks === 0 &&
+        pairingRun.at(-1).stopReason === "complete" &&
+        pairingRun.some((event) => event.type === "tool_call" && event.native === true) &&
+        pairingRequests === 3,
+    JSON.stringify({ pairingRequests, pairingFallbacks, types: pairingRun.map((event) => event.type) }));
+
 const nativeFacts = [
     { seq: 1, type: "session_start", cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" },
     { seq: 2, type: "user", content: "native" },
@@ -2977,6 +3271,21 @@ ok("doctor exposes the egress policy",
         doctor.egress.maxScanBytes > 0 && doctor.egress.denyContentMarkers >= 1 &&
         /egress/.test(diagnostics.formatDiagnostics(doctor)),
     JSON.stringify(doctor.egress));
+const repeatSessionFile = join(paths.getPaths().sessions, "repeat-check.jsonl");
+mkdirSync(paths.getPaths().sessions, { recursive: true });
+writeFileSync(repeatSessionFile, [
+    { seq: 1, type: "session_start", cwd: process.cwd(), providerId: "deepseek", model: "deepseek-v4-pro" },
+    { seq: 2, type: "tool_call", id: "r1", tool: "read_file", args: { tool: "read_file", path: "a.txt" } },
+    { seq: 3, type: "tool_call", id: "r2", tool: "read_file", args: { tool: "read_file", path: "a.txt" } },
+    { seq: 4, type: "tool_call", id: "r3", tool: "read_file", args: { tool: "read_file", path: "a.txt" } },
+    { seq: 5, type: "session_end", reason: "exit" },
+].map((fact) => JSON.stringify(fact)).join("\n") + "\n", "utf8");
+const doctorRepeats = diagnostics.collectDiagnostics();
+ok("#140 doctor reports the largest consecutive repeat in the latest session",
+    doctorRepeats.recentRepeatTool === "read_file" && doctorRepeats.recentRepeatCount === 3 &&
+        /read_file ×3/.test(diagnostics.formatDiagnostics(doctorRepeats)),
+    JSON.stringify({ tool: doctorRepeats.recentRepeatTool, count: doctorRepeats.recentRepeatCount, session: doctorRepeats.recentRepeatSession }));
+rmSync(repeatSessionFile, { force: true });
 
 const lifecycle = await load("lib/lifecycle.js");
 const sigBefore = process.listenerCount("SIGTERM");

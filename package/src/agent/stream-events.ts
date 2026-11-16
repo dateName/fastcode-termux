@@ -32,6 +32,8 @@ export interface AssembledStream {
     toolCalls: NativeToolCall[];
     usage?: ChatChunk["usage"];
     finish?: TurnEndReason;
+    /** Non-fatal provider anomalies (duplicate/divergent usage, …). */
+    warnings: string[];
 }
 
 interface PartialToolCall {
@@ -55,6 +57,7 @@ export class StreamAssembler {
     private _usage: ChatChunk["usage"];
     private _finish: TurnEndReason | undefined;
     private _ended = false;
+    private _warnings: string[] = [];
 
     /** Drop all accumulated content (prefix-safe retry replaced the stream). */
     reset(): void {
@@ -65,6 +68,7 @@ export class StreamAssembler {
         this._usage = undefined;
         this._finish = undefined;
         this._ended = false;
+        this._warnings = [];
     }
 
     push(event: StreamEvent): void {
@@ -97,9 +101,15 @@ export class StreamAssembler {
                 this.completed.set(event.index, event.call);
                 this.partials.delete(event.index);
                 return;
-            case "usage":
+            case "usage": {
+                // Some gateways send usage twice (stream frame + final frame).
+                // Keep the latest values but surface the duplicate instead of
+                // silently overwriting the first report.
+                if (this._usage)
+                    this._warnings.push("Stream reported usage more than once; the latest values were kept.");
                 this._usage = event.usage;
                 return;
+            }
             case "turn-end":
                 this._finish = event.reason;
                 this._ended = true;
@@ -123,6 +133,10 @@ export class StreamAssembler {
 
     get usage(): ChatChunk["usage"] {
         return this._usage;
+    }
+
+    get warnings(): string[] {
+        return [...this._warnings];
     }
 
     /**
@@ -155,6 +169,7 @@ export class StreamAssembler {
             toolCalls: this.toolCalls(),
             usage: this._usage,
             finish: this._finish,
+            warnings: [...this._warnings],
         };
     }
 }
@@ -170,6 +185,17 @@ export function chunkToStreamEvents(chunk: ChatChunk): StreamEvent[] {
         events.push({ type: "usage", usage: chunk.usage });
     if (chunk.done && chunk.toolCalls) {
         chunk.toolCalls.forEach((call, index) => events.push({ type: "tool-call-end", index, call }));
+    }
+    else if (chunk.toolCalls) {
+        // A complete call on a non-final chunk must not be lost: fold it into
+        // the accumulator and let the turn-end freeze it, like deltas.
+        chunk.toolCalls.forEach((call, index) => events.push({
+            type: "tool-call-delta",
+            index,
+            id: call.id,
+            name: call.name,
+            argumentsDelta: call.arguments,
+        }));
     }
     if (chunk.done) {
         events.push({

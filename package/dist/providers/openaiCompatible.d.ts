@@ -24,6 +24,7 @@ export declare function toRequestSpec(opts: StreamOptions): RequestSpec;
 export declare function streamChatCompletion(req: any, opts: StreamOptions): AsyncGenerator<{
     delta: any;
     done: boolean;
+    suppressPseudoParse: boolean;
     reasoning?: undefined;
     usage?: undefined;
     toolCalls?: undefined;
@@ -36,11 +37,20 @@ export declare function streamChatCompletion(req: any, opts: StreamOptions): Asy
     };
     delta: string;
     done: boolean;
+    suppressPseudoParse: boolean;
     reasoning?: undefined;
 } | {
     delta: string;
     done: boolean;
+    suppressPseudoParse?: undefined;
+    reasoning?: undefined;
+    usage?: undefined;
+    toolCalls?: undefined;
+} | {
+    delta: string;
+    done: boolean;
     reasoning: string;
+    suppressPseudoParse?: undefined;
     usage?: undefined;
     toolCalls?: undefined;
 } | {
@@ -48,11 +58,13 @@ export declare function streamChatCompletion(req: any, opts: StreamOptions): Asy
     done: boolean;
     usage: any;
     toolCalls: NativeToolCall[];
+    suppressPseudoParse?: undefined;
     reasoning?: undefined;
 } | {
     delta: string;
     done: boolean;
     usage: any;
+    suppressPseudoParse?: undefined;
     reasoning?: undefined;
     toolCalls?: undefined;
 }, void, unknown>;

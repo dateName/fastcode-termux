@@ -8,7 +8,7 @@ import { compactMessages, DEFAULT_COMPACTION_CONFIG, type CompactionConfig } fro
 import { isLoopExempt, isReadOnlyToolCall, toolCallFingerprint } from "./guards.js";
 import { boundToolMessage } from "./limits.js";
 import { pairToolMessages } from "../session/projection.js";
-import { isNativeUnsupportedError, type ToolProtocol } from "./protocol-mode.js";
+import { isNativeUnsupportedError, isToolPairingError, type ToolProtocol } from "./protocol-mode.js";
 import type { ApprovalResolver } from "./approval.js";
 import { formatToolResults, parseToolCalls, stripToolCalls } from "./protocol.js";
 import { runStream } from "./stream.js";
@@ -119,9 +119,11 @@ class LoopState {
     private readonly window: number;
     private readonly exemptReadOnly: boolean;
     constructor(options: LoopDetectionOptions = {}) {
-        this.readOnlyThreshold = positive(options.readOnlyThreshold, 6);
-        this.sideEffectThreshold = positive(options.sideEffectThreshold, 3);
         this.window = positive(options.window, 5);
+        // A threshold above the window can never be reached: the sliding
+        // window keeps at most `window` hits, so clamp both thresholds.
+        this.readOnlyThreshold = Math.min(positive(options.readOnlyThreshold, 5), this.window);
+        this.sideEffectThreshold = Math.min(positive(options.sideEffectThreshold, 3), this.window);
         this.exemptReadOnly = options.exemptReadOnly === true;
     }
     check(fingerprint: string, readOnly: boolean): LoopVerdict {
@@ -166,10 +168,14 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
     let stopReason: AgentStopReason = "complete";
     let errorMessage = "";
     let protocolErrors = 0;
+    // Fingerprints of broken markup already re-emitted once; a repeat means the
+    // model is not going to recover, so stop instead of burning every turn.
+    const protocolReemit = new Set<string>();
     let naturalFinish = false;
     let toolCallSeq = 0;
     let protocol: ToolProtocol = options.protocol ?? "legacy";
     let fellBack = false;
+    let pairRetried = false;
     const activeFiles = new Map<string, ActiveFile>();
     for (let turn = 0; turn < maxTurns; turn += 1) {
         if (signal?.aborted) {
@@ -250,6 +256,12 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                 break;
             }
             errorMessage = String(err?.message ?? err);
+            if (protocol === "native" && !pairRetried && isToolPairingError(errorMessage)) {
+                pairRetried = true;
+                history = pairToolMessages(history).messages;
+                yield { type: "notice", text: "Tool history was repaired after a pairing 400; retrying on the same protocol." };
+                continue;
+            }
             if (protocol === "native" && !fellBack && isNativeUnsupportedError(errorMessage)) {
                 fellBack = true;
                 protocol = "legacy";
@@ -273,6 +285,8 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             yield { type: "notice", text: resetNotice };
         if (streamed.retried > 0)
             yield { type: "notice", text: `Network stream was interrupted; retried ${streamed.retried} time(s).` };
+        for (const warning of streamed.warnings ?? [])
+            yield { type: "notice", text: warning };
         if (streamed.usage) {
             consumedInput += streamed.usage.inputTokens ?? promptTokens;
             spentCost += streamed.usage.costUsd ?? 0;
@@ -296,7 +310,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
             break;
         }
-        const visibleText = stripToolCalls(streamed.text);
+        const visibleText = streamed.suppressPseudoParse ? streamed.text.trim() : stripToolCalls(streamed.text);
         if (visibleText)
             lastVisible = visibleText;
         const nativeCalls: NativeToolCall[] = protocol === "native" && options.allowTools !== false ? (streamed.toolCalls ?? []) : [];
@@ -372,26 +386,45 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                 break;
             continue;
         }
-        const parsed = options.allowTools === false
-            ? { calls: [] as ToolCall[], consumedEnd: 0, errors: [] as string[], detectedDialects: [] as string[] }
+        const parsed = options.allowTools === false || streamed.suppressPseudoParse
+            ? { calls: [] as ToolCall[], consumedEnd: 0, errors: [] as string[], errorCodes: [] as string[], detectedDialects: [] as string[] }
             : parseToolCalls(streamed.text);
         const calls: ToolCall[] = parsed.calls;
         yield { type: "assistant_raw", text: streamed.text, ...(streamed.reasoning ? { reasoning: streamed.reasoning } : {}) };
         if (calls.length === 0) {
-            const dialectFailure = parsed.detectedDialects.length > 0;
-            if (parsed.errors.length > 0 || dialectFailure) {
-                // Never let a broken tool-call block end the turn silently: the
-                // model would wait forever for a tool result. Inject a visible
-                // tool error and continue so it can re-emit valid markup.
+            const foreignDialect = parsed.detectedDialects.length > 0 ||
+                parsed.errorCodes.includes("UNSUPPORTED_DIALECT") ||
+                parsed.errors.some((error) => /unsupported tool-call dialect/i.test(error));
+            if (foreignDialect) {
+                // Recognized but unexecutable markup: report once and stop.
+                // Re-prompting here is what let one bad example burn every turn.
+                protocolErrors += 1;
+                const detail = parsed.detectedDialects.length > 0
+                    ? `Detected tool-call dialects: ${parsed.detectedDialects.join(", ")}.`
+                    : "Detected an unsupported tool-call dialect.";
+                stopReason = "protocol_error";
+                errorMessage = `${detail} No valid call could be parsed; stopping instead of re-emitting.`;
+                yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
+                break;
+            }
+            if (parsed.errors.length > 0) {
+                // Never let a broken <fastcode_tool> block end the turn silently:
+                // inject one visible tool error so the model can re-emit. The
+                // same fingerprint twice means it did not recover — stop.
+                const reemitKey = parsed.errors.join("\n");
+                if (protocolReemit.has(reemitKey)) {
+                    protocolErrors += 1;
+                    stopReason = "protocol_error";
+                    errorMessage = "Tool-call markup was invalid again after one re-emit request; stopped instead of looping.";
+                    yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
+                    break;
+                }
+                protocolReemit.add(reemitKey);
                 protocolErrors += 1;
                 const id = `tc_${++toolCallSeq}`;
                 const call: ToolCall = { tool: "protocol_error" };
-                const dialectNote = dialectFailure
-                    ? `Detected tool-call dialects: ${parsed.detectedDialects.join(", ")}.\n`
-                    : "";
                 const output = "Previous output contained invalid tool-call markup. " +
                     "Re-emit a complete <fastcode_tool>{\"tool\":...}</fastcode_tool> block.\n" +
-                    dialectNote +
                     parsed.errors.join("\n");
                 yield { type: "tool_call", id, call };
                 yield { type: "tool_result", id, call, ok: false, output, code: "INVALID_ARGS", hint: "Re-emit a complete tool call." };
