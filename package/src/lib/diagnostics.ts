@@ -25,7 +25,7 @@ import { grepMaxBytes, readManyMaxBytes, readMaxBytes, readScanMaxBytes } from "
 import { normalizeEgressConfig } from "../agent/policy/egress.js";
 import { compactionConfigFromEnv, heapExceeded } from "../agent/compaction.js";
 import { shellPoolStats } from "../agent/shell-session.js";
-import { resolveToolProtocol, toolCapabilityKey } from "../agent/protocol-mode.js";
+import { resolveToolProtocol, runtimeToolCapability } from "../agent/protocol-mode.js";
 import { getModelMeta, modelMetaOverridePath } from "./model-meta.js";
 const NODE_REQUIRED = "18.17";
 function readVersion() {
@@ -190,8 +190,9 @@ export function collectDiagnostics() {
         customAuthPrefix: process.env["FASTCODE_AUTH_PREFIX"] !== undefined,
         customAuthExtraHeaders: Boolean((process.env["FASTCODE_EXTRA_HEADERS"] ?? "").trim()),
         toolProtocol: resolveToolProtocol(config, config.providerId, config.model),
+        stdioBackend: process.env["FASTCODE_STDIO_COMMAND"] ? "configured" : "off",
         toolProtocolMode: (process.env["FASTCODE_TOOL_PROTOCOL"] ?? "auto").trim().toLowerCase(),
-        toolCapability: config.capabilities?.toolCalling?.[toolCapabilityKey(config.providerId, config.model)] ?? "unknown",
+        toolCapability: runtimeToolCapability(config.providerId, config.model) ?? "unknown",
         loopExempt: Array.from(loopExemptTools()),
         modelMetaFile: modelMetaOverridePath(),
         modelMeta: getModelMeta(config.providerId, config.model),
@@ -240,8 +241,9 @@ export function formatDiagnostics(info) {
     lines.push(`  loop exempt   ${info.loopExempt.length > 0 ? info.loopExempt.join(", ") : "(none)"}`);
     lines.push(`  model meta    ctx ${info.modelMeta.contextWindow} · ~${info.modelMeta.charsPerToken} chars/token · ${info.modelMeta.supportsTools ? "tools" : "no tools"} · ${info.modelMetaFile}`);
     lines.push(`  sse timeout   ${info.requestIdleMs}ms request idle (config) · ${info.sseIdleMs}ms env fallback`);
-    lines.push(`  tool protocol ${info.toolProtocol} (${info.toolProtocolMode}) · cached ${info.toolCapability}`);
+    lines.push(`  tool protocol ${info.toolProtocol} (${info.toolProtocolMode}) · runtime ${info.toolCapability}`);
     lines.push(`  provider      ${info.providerId} · model ${info.model}`);
+    lines.push(`  stdio backend ${info.stdioBackend}${info.stdioBackend === "configured" ? " (FASTCODE_STDIO_COMMAND)" : ""}`);
     if (info.customAuthHeader || info.customAuthPrefix || info.customAuthExtraHeaders) {
         lines.push(`  custom auth   header ${info.customAuthHeader ?? "authorization"}` +
             `${info.customAuthPrefix ? " · prefix set" : ""}${info.customAuthExtraHeaders ? " · extra headers set" : ""}`);

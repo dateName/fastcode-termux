@@ -78,8 +78,9 @@ export declare function collectDiagnostics(): {
     customAuthPrefix: boolean;
     customAuthExtraHeaders: boolean;
     toolProtocol: import("../agent/protocol-mode.js").ToolProtocol;
+    stdioBackend: string;
     toolProtocolMode: string;
-    toolCapability: any;
+    toolCapability: string;
     loopExempt: string[];
     modelMetaFile: string;
     modelMeta: import("./model-meta.js").ModelMeta;

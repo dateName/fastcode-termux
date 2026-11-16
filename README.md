@@ -193,6 +193,7 @@ Pick **one** provider and export its key:
 | Groq / Mistral | `GROQ_API_KEY` / `MISTRAL_API_KEY` |
 | Ollama | none (local, free) |
 | Custom | `FASTCODE_BASE_URL` + `FASTCODE_API_KEY` |
+| Stdio CLI (opt-in) | `FASTCODE_STDIO_COMMAND` (+ optional `FASTCODE_STDIO_ARGS`, `FASTCODE_STDIO_MODEL`, `FASTCODE_STDIO_ENV_ALLOWLIST`) |
 
 **Persist it in `~/.bashrc`:**
 

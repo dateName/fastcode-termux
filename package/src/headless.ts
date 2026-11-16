@@ -4,7 +4,7 @@
  * stdout is reserved for the protocol/answer; diagnostics go to stderr.
  */
 import readline from "node:readline";
-import { AGENT_SYSTEM_PROMPT } from "./agent/protocol.js";
+import { agentSystemPrompt } from "./agent/protocol.js";
 import { compactionConfigFromEnv } from "./agent/compaction.js";
 import { rememberToolCapability, resolveToolProtocol } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
@@ -17,6 +17,7 @@ import { buildSkillsPrompt } from "./skills/manager.js";
 import { loadConfig, resolveApiKey } from "./config/store.js";
 import { getProviderOrThrow } from "./providers/index.js";
 import { resumeSession } from "./session/projection.js";
+import { cleanupProcesses } from "./lib/lifecycle.js";
 
 interface HeadlessOptions {
     prompt: string;
@@ -48,13 +49,13 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         apiKey = lookup.key;
     }
     const history = options.resume ? resumeSession(options.resume, process.cwd()).messages : [];
+    const protocol = config.agentMode ? resolveToolProtocol(config, config.providerId, config.model) : "legacy";
     const system = [
         config.systemPrompt,
         buildSkillsPrompt(config.enabledSkills),
         buildPluginsPrompt(config.enabledPlugins),
-        config.agentMode ? AGENT_SYSTEM_PROMPT : "",
+        config.agentMode ? agentSystemPrompt(protocol) : "",
     ].filter((part) => part.trim()).join("\n\n");
-    const protocol = config.agentMode ? resolveToolProtocol(config, config.providerId, config.model) : "legacy";
     const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
     const queued: string[] = [];
     const waiters: Array<(line: string | undefined) => void> = [];
@@ -292,6 +293,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         process.removeListener("SIGTERM", onTerminate);
         process.removeListener("SIGHUP", onTerminate);
         rl.close();
+        // Resident shells keep the event loop alive; a normal headless finish
+        // must release them just like the TUI and signal paths do.
+        cleanupProcesses();
     }
     if (failed)
         process.exitCode = 1;

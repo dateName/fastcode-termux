@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput } from "ink";
-import { AGENT_SYSTEM_PROMPT, stripToolCalls, } from "./agent/protocol.js";
+import { agentSystemPrompt, stripToolCalls, } from "./agent/protocol.js";
 import { compactionConfigFromEnv, removeSummaryFile } from "./agent/compaction.js";
 import { rememberToolCapability, resolveToolProtocol } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
@@ -905,14 +905,14 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             const maxTurns = config.agentMode ? positiveInt(config.maxAgentTurns, 24) : 1;
             const skillsBlock = buildSkillsPrompt(config.enabledSkills);
             const pluginsBlock = buildPluginsPrompt(config.enabledPlugins);
-            const agentBlock = config.agentMode ? AGENT_SYSTEM_PROMPT : "";
+            const protocol = config.agentMode ? resolveToolProtocol(config, config.providerId, config.model) : "legacy";
+            const agentBlock = config.agentMode ? agentSystemPrompt(protocol) : "";
             const fullSystem = [config.systemPrompt, skillsBlock, pluginsBlock, agentBlock]
                 .filter((part) => part.trim())
                 .join("\n\n");
             let compactionNotified = false;
             let lastRawFact = "";
             sawDeltaRef.current = false;
-            const protocol = config.agentMode ? resolveToolProtocol(config, config.providerId, config.model) : "legacy";
             for await (const ev of runAgent({
                 provider,
                 apiKey,

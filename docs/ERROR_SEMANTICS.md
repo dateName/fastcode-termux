@@ -56,11 +56,14 @@
 - 触发面：Markdown 围栏（``` / ~~~）内的标记不解析、不 strip；方言标记只在行首或相邻工具段边界生效，行内示例保持文本（方案 §4 #127–#128）。
 - 非流式 JSON：只有 `message.tool_calls` 映射为调用；`message.content` 经 `ChatChunk.suppressPseudoParse` 保持纯文本，不进入伪协议解析（方案 §4 #129）。
 - native 降级判定：只有 4xx + tools/functions + unsupported/unknown/invalid 才降为 pseudo；`tool_calls must be followed by tool messages` 属 history 形状错误，修复配对后原协议重试一次（方案 §4 #131–#132）。
-- 能力缓存：fallback/native 确认只写进程内 `rememberToolCapability`，不落 `config.json`（方案 §4 #133）。
+- 能力缓存：fallback/native 确认只写进程内 `rememberToolCapability`，不落 `config.json`，旧 `config.capabilities.toolCalling` 不再参与判定（方案 §4 #133、#146）。
+- 双协议互斥：native 轮次不注入 `<fastcode_tool>` 语法段，也不解析文本标记；同一回复里的文本标记只作为可见内容（方案 §4 #143）。
+- 可见文本：行内示例与围栏一样保留原文；只有行首/相邻调用段被剥离（方案 §4 #144）。跨方言调用按文本 offset 排序执行（方案 §4 #145）。
+- headless 正常结束后调用 `cleanupProcesses()` 回收 resident shell；有残留 shell 也不会挂住进程（方案 §4 #147）。
 - 非流式 400 重发：兼容参数（含 reasoning）每次请求最多再发一次，不链式叠加，总量 ≤2 次 HTTP（方案 §4 #139）。
 
 ## 7. 验收
 
-- Windows smoke **346/346**；新增用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）与 400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（方案 §4 #139–#142）。
+- Windows smoke **352/352**；用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）、400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（#139–#142）、双协议互斥/行内可见/跨方言保序/旧 capabilities 忽略（#143–#146）、headless 回收/shell 退出码与 cwd/stdio 注册（#147–#149）。
 - `typecheck` / `lint` / `build` / `verify:artifacts` 通过。
 - Termux 真机与真实 provider 端到端仍待复跑。

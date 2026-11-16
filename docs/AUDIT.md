@@ -4,6 +4,8 @@
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
 
 > 历史快照：本审计对象为 0.1.6-beta。0.1.7 的 Guardrails/AST/审批/egress 与 0.1.8-beta.0 的 shell/退出/压缩/版权补充见 CHANGELOG 与 ARCHITECTURE §5–6（本文件第六节为 0.1.8-beta.0 补记）。
+>
+> 2026-11-16 补记：0.1.8-beta.1 后续批次（`9bd1ecc` 及 G-B/G-C）收窄方言触发面、native/伪协议互斥、ignore 旧 capabilities、headless 回收 shell、shell exitCode/`cwd` 显式化、stdio provider 环境注册；回归见方案 §4 #123–#149 与 `scripts/smoke-test.mjs`（352 checks）。
 
 ## 级别定义
 

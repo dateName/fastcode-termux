@@ -521,6 +521,16 @@ const llamaTagged = protocol.parseToolCalls('<|python_tag|>{"name":"pwd","parame
 ok("Llama parameters normalize to arguments", llamaTagged.calls.length === 1 && llamaTagged.calls[0].tool === "pwd", JSON.stringify(llamaTagged));
 const llamaBare = protocol.parseToolCalls('{"name":"pwd","parameters":{}}');
 ok("Llama bare leading JSON is accepted", llamaBare.calls.length === 1 && llamaBare.calls[0].tool === "pwd", JSON.stringify(llamaBare));
+const orderD4 = '[TOOL_CALLS]mistral_call[x]{"v":1}';
+const orderD5 = '<|tool_calls_section_begin|><|tool_call_begin|>functions.kimi_call:0<|tool_call_argument_begin|>{"v":2}<|tool_call_end|><|tool_calls_section_end|>';
+const orderAnchor = '<fastcode_tool>{"tool":"anchor_call"}</fastcode_tool>';
+const orderMixed = ['mistral_call', 'kimi_call', 'anchor_call'];
+const orderForward = protocol.parseToolCalls(`${orderD4}\n${orderD5}\n${orderAnchor}`).calls.map((call) => call.tool);
+const orderReverse = protocol.parseToolCalls(`${orderAnchor}\n${orderD4}\n${orderD5}`).calls.map((call) => call.tool);
+ok("#145 mixed dialects execute in text order",
+    JSON.stringify(orderForward) === JSON.stringify(orderMixed) &&
+        JSON.stringify(orderReverse) === JSON.stringify(['anchor_call', ...orderMixed.slice(0, 2)]),
+    JSON.stringify({ orderForward, orderReverse }));
 const unsupportedDialect = protocol.parseToolCalls('<function_call>{"name":"pwd"}</function_call>');
 ok("an unsupported dialect with zero parsed calls is an explicit protocol error",
     unsupportedDialect.calls.length === 0 && unsupportedDialect.errors.length > 0 &&
@@ -1303,6 +1313,46 @@ ok("#134 native fallback does not rewrite config.json",
 rmSync(fallbackCliDir, { recursive: true, force: true });
 rmSync(fallbackHome, { recursive: true, force: true });
 
+const cleanupCliDir = mkdtempSync(join(tmpdir(), "fastcode-cleanup-cli-"));
+const cleanupHome = mkdtempSync(join(tmpdir(), "fastcode-cleanup-home-"));
+writeFileSync(join(cleanupHome, "config.json"), JSON.stringify({ providerId: "custom", model: "test-model", agentMode: true, systemPrompt: "test" }), "utf8");
+let cleanupHttp = 0;
+const cleanupServer = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+        cleanupHttp += 1;
+        const text = cleanupHttp === 1 ? '<fastcode_tool>{"tool":"shell","command":"echo cleanup-probe"}</fastcode_tool>' : "Done.";
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+    });
+});
+await new Promise((resolve) => cleanupServer.listen(0, "127.0.0.1", resolve));
+const cleanupPort = cleanupServer.address().port;
+const cleanupChild = spawn(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "--ui", "json", "run cleanup"], {
+    cwd: cleanupCliDir,
+    env: {
+        ...process.env,
+        FASTCODE_HOME: cleanupHome,
+        FASTCODE_BASE_URL: `http://127.0.0.1:${cleanupPort}/v1`,
+        FASTCODE_API_KEY: "dummy",
+        FASTCODE_TRUST_ALL: "1",
+        FASTCODE_TOOL_PROTOCOL: "legacy",
+    },
+});
+let cleanupOut = "";
+cleanupChild.stdout.on("data", (chunk) => { cleanupOut += chunk; });
+const cleanupKillTimer = setTimeout(() => cleanupChild.kill(), 15_000);
+const cleanupExit = await new Promise((resolve) => cleanupChild.on("close", resolve));
+clearTimeout(cleanupKillTimer);
+cleanupServer.close();
+ok("#147 headless releases resident shells and exits after done",
+    cleanupExit === 0 && cleanupHttp >= 2 && /"event":"summary"/.test(cleanupOut),
+    JSON.stringify({ exit: cleanupExit, http: cleanupHttp, out: cleanupOut.slice(-200) }));
+rmSync(cleanupCliDir, { recursive: true, force: true });
+rmSync(cleanupHome, { recursive: true, force: true });
+
 const egressCliDir = mkdtempSync(join(tmpdir(), "fastcode-egress-cli-"));
 const egressHome = mkdtempSync(join(tmpdir(), "fastcode-egress-home-"));
 writeFileSync(join(egressHome, "config.json"), JSON.stringify({ providerId: "custom", model: "test-model", agentMode: true, egress: { enabled: true, mode: "block" } }), "utf8");
@@ -1632,6 +1682,9 @@ ok("#128 inline tool-call examples in prose are not executed",
     inlineExampleRun.filter((event) => event.type === "tool_call").length === 0 &&
         inlineExampleRun.at(-1).stopReason === "complete",
     JSON.stringify({ types: inlineExampleRun.map((event) => event.type), stopReason: inlineExampleRun.at(-1).stopReason }));
+ok("#144 inline examples keep their markup in visible text",
+    String(inlineExampleRun.at(-1).finalText ?? "").includes('<tool_call>{"name":"pwd","arguments":{}}</tool_call>'),
+    String(inlineExampleRun.at(-1).finalText ?? ""));
 
 const boundaryRun = await collect(runner.runAgent({
     provider: scriptedProvider([
@@ -1919,6 +1972,12 @@ ok("untrusted side-effect tools are denied", untrustedWrite.ok === false && untr
 process.env.FASTCODE_TRUST_ALL = "1";
 const allowedShell = await agentTools.runAgentTool({ tool: "shell", command: "echo ok" }, stage0);
 ok("trusted shell executes", allowedShell.ok === true && allowedShell.output.includes("ok"), allowedShell.output);
+const failedShell = await agentTools.runAgentTool({ tool: "shell", command: 'node -e "process.exit(3)"' }, stage0);
+const cwdShell = await agentTools.runAgentTool({ tool: "shell", command: "pwd", cwd: "/system" }, stage0);
+ok("#148 shell exposes the exit code and rejects an ignored cwd",
+    failedShell.ok === false && /exit 3/.test(failedShell.output) &&
+        cwdShell.ok === false && /cwd is not supported/.test(cwdShell.output),
+    JSON.stringify({ failed: failedShell.output, cwd: cwdShell.output }));
 const trustedWrite = await agentTools.runAgentTool({ tool: "write_file", path: "b.txt", content: "x" }, stage0);
 const trustedWriteEffects = trustedWrite.sideEffects ?? {};
 ok("trusted writes report sideEffects", trustedWrite.ok === true && ((trustedWriteEffects.touched ?? []).length + (trustedWriteEffects.created ?? []).length) === 1, JSON.stringify(trustedWrite));
@@ -3030,6 +3089,20 @@ ok("stdio backend maps canonical NDJSON, keeps thinking and proposes tools witho
         stdioResult.toolCalls?.length === 1 && stdioResult.toolCalls[0].name === "write_file" &&
         stdioResult.usage?.inputTokens === 3 && !existsSync(join(stdioTmp, "pwned.txt")),
     JSON.stringify({ text: stdioResult.text, reasoning: stdioResult.reasoning, calls: stdioResult.toolCalls, usage: stdioResult.usage }));
+const envStdio = providers.stdioProviderFromEnv({
+    FASTCODE_STDIO_COMMAND: process.execPath,
+    FASTCODE_STDIO_ARGS: JSON.stringify(["-e", stdioScript]),
+    FASTCODE_STDIO_MODEL: "mock",
+});
+const envStdioResult = envStdio
+    ? await streamModule.runStream(envStdio, { model: "mock", messages: [{ role: "user", content: "hi" }] }, undefined, {})
+    : undefined;
+ok("#149 stdio provider registers from explicit environment",
+    envStdio?.id === "stdio" && envStdio.defaultModel === "mock" &&
+        providers.stdioProviderFromEnv({}) === undefined &&
+        providers.PROVIDERS.every((provider) => provider.id !== "stdio") &&
+        envStdioResult?.text === "hello" && !existsSync(join(stdioTmp, "pwned.txt")),
+    JSON.stringify({ registered: Boolean(envStdio), text: envStdioResult?.text, providers: providers.PROVIDERS.map((provider) => provider.id).filter((id) => id === "stdio") }));
 
 const latchScript = [
     'process.stdin.once("data", () => {',
@@ -3103,8 +3176,11 @@ const protocolMode = await load("agent/protocol-mode.js");
 const autoEnv = { FASTCODE_TOOL_PROTOCOL: "auto" };
 ok("auto protocol picks native for compatible providers", protocolMode.resolveToolProtocol({}, "deepseek", "deepseek-v4-pro", autoEnv) === "native");
 ok("unknown providers fail closed to pseudo", protocolMode.resolveToolProtocol({}, "custom", "my-model", autoEnv) === "legacy");
-const cachedPseudo = protocolMode.withToolCapability({}, "deepseek", "deepseek-v4-pro", "pseudo");
-ok("cached pseudo capability overrides auto", protocolMode.resolveToolProtocol(cachedPseudo, "deepseek", "deepseek-v4-pro", autoEnv) === "legacy");
+const stalePseudo = protocolMode.withToolCapability({}, "groq", "llama-3.3-70b-versatile", "pseudo");
+ok("#146 legacy config capability is ignored by auto resolution",
+    protocolMode.resolveToolProtocol(stalePseudo, "groq", "llama-3.3-70b-versatile", autoEnv) === "native" &&
+        protocolMode.runtimeToolCapability("groq", "llama-3.3-70b-versatile") === undefined,
+    JSON.stringify(stalePseudo));
 ok("#132 pairing 400 is not an unsupported-tools signal",
     protocolMode.isToolPairingError("400 Bad Request: tool_calls must be followed by tool messages") &&
         !protocolMode.isNativeUnsupportedError("400 Bad Request: tool_calls must be followed by tool messages") &&
@@ -3151,6 +3227,23 @@ ok("native tools execute and produce tool-role history", nativeDone.stopReason =
     nativeRun.some((event) => event.type === "tool_call" && event.native === true) &&
     nativeDone.history.some((message) => message.role === "tool" && message.toolCallId === "call_1"),
     JSON.stringify(nativeDone.history));
+
+const nativeTextRun = await collect(runner.runAgent({
+    provider: scriptedProvider([{ text: '<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' }]),
+    model: "mock",
+    prompt: "native text",
+    maxTurns: 2,
+    cwd: stage0,
+    protocol: "native",
+    tools: schemas,
+}));
+ok("#143 native turns ignore text tool markup and keep it visible",
+    nativeTextRun.filter((event) => event.type === "tool_call").length === 0 &&
+        nativeTextRun.at(-1).stopReason === "complete" &&
+        String(nativeTextRun.at(-1).finalText ?? "").includes("<fastcode_tool>") &&
+        !protocol.agentSystemPrompt("native").includes("<fastcode_tool>") &&
+        protocol.agentSystemPrompt("legacy").includes("<fastcode_tool>"),
+    JSON.stringify({ types: nativeTextRun.map((event) => event.type), finalText: nativeTextRun.at(-1).finalText }));
 
 let fallbackCount = 0;
 let fallbackCalls = 0;

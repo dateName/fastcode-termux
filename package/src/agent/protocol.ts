@@ -20,6 +20,18 @@ const LLAMA_TAG = "<|python_tag|>";
 // Open markers used by dialects we do not parse yet. Seeing one with zero
 // parsed calls must fail loudly instead of ending the turn as "complete".
 const FOREIGN_DIALECT_SCAN = /<tool_calls?\b[^>]*>|<function_calls?\b[^>]*>|<function\s*=|<\|tool_call\|>|<\|python_tag\|>|\[TOOL_CALLS\]|<antml:invoke\b/gi;
+// Text order is authoritative across dialects; parser passes run grouped, so
+// each record carries its source offset (non-enumerable, never sent to tools).
+const CALL_START = Symbol("callStart");
+
+function markCall<T extends ToolCallRecord>(call: T, start: number): T {
+    Object.defineProperty(call, CALL_START, { value: start, enumerable: false, configurable: true });
+    return call;
+}
+
+function callStart(call: ToolCallRecord): number {
+    return Number((call as any)[CALL_START] ?? 0);
+}
 
 /**
  * Markdown fenced blocks are examples, not instructions. Replace their body
@@ -260,7 +272,8 @@ function parseHermes(raw: string, calls: ToolCallRecord[], errors: string[], spa
         detected.add("hermes");
         const parsed = parseHermesBlock(block[1] ?? "");
         if (parsed) {
-            calls.push(...parsed);
+            for (const call of parsed)
+                calls.push(markCall(call, start));
             spans.push({ start, end });
         }
         else {
@@ -314,7 +327,7 @@ function parseMistral(raw: string, calls: ToolCallRecord[], errors: string[], sp
             for (const item of args.json.value) {
                 const call = dialectCall(item);
                 if (call) {
-                    calls.push(call);
+                    calls.push(markCall(call, index));
                     parsed += 1;
                 }
             }
@@ -326,7 +339,7 @@ function parseMistral(raw: string, calls: ToolCallRecord[], errors: string[], sp
             const name = header.replace(/\[[^\]]+\]\s*$/, "").replace(/^functions\./, "").trim();
             if (name && args.json.value && typeof args.json.value === "object" && !Array.isArray(args.json.value)) {
                 // v11+: the `{...}` after the header *is* the arguments object.
-                calls.push({ ...args.json.value, tool: name, ...(id ? { id } : {}) });
+                calls.push(markCall({ ...args.json.value, tool: name, ...(id ? { id } : {}) }, index));
                 parsed += 1;
             }
         }
@@ -357,7 +370,7 @@ function parseKimi(raw: string, calls: ToolCallRecord[], errors: string[], spans
                 ? { ...json.value, tool: name, id: idHeader }
                 : undefined;
             if (normalized) {
-                calls.push(normalized);
+                calls.push(markCall(normalized, start));
                 parsed += 1;
             }
         }
@@ -388,7 +401,7 @@ function parseLlama(raw: string, calls: ToolCallRecord[], errors: string[], span
         }
         const call = dialectCall(json.value);
         if (call) {
-            calls.push(call);
+            calls.push(markCall(call, index));
             spans.push({ start: index, end: after + json.consumed });
         }
         else {
@@ -405,7 +418,7 @@ function parseLlama(raw: string, calls: ToolCallRecord[], errors: string[], span
                 const call = dialectCall(value);
                 if (call) {
                     detected.add("llama");
-                    calls.push(call);
+                    calls.push(markCall(call, raw.indexOf("{")));
                     spans.push({ start: raw.indexOf("{"), end: raw.length });
                 }
             }
@@ -445,7 +458,7 @@ export function parseToolCalls(text): ToolCallParseResult {
         if (!close) {
             const salvaged = salvageJsonPrefix(raw.slice(innerStart));
             if (salvaged) {
-                calls.push(salvaged.call);
+                calls.push(markCall(salvaged.call, open));
                 cursor = innerStart + salvaged.consumed;
                 spans.push({ start: open, end: cursor });
                 continue;
@@ -456,7 +469,7 @@ export function parseToolCalls(text): ToolCallParseResult {
         const body = raw.slice(innerStart, close.start);
         const full = parseJsonCall(body);
         if (full) {
-            calls.push(full);
+            calls.push(markCall(full, open));
             spans.push({ start: open, end: close.end });
             cursor = close.end;
             continue;
@@ -465,7 +478,7 @@ export function parseToolCalls(text): ToolCallParseResult {
         // second opener) sits before the matched close tag.
         const prefix = salvageJsonPrefix(body);
         if (prefix) {
-            calls.push(prefix.call);
+            calls.push(markCall(prefix.call, open));
             cursor = innerStart + prefix.consumed;
             spans.push({ start: open, end: cursor });
             continue;
@@ -499,7 +512,7 @@ export function parseToolCalls(text): ToolCallParseResult {
         if (invokes.length === 0)
             continue;
         for (const invoke of invokes)
-            calls.push(invokeToCall(invoke));
+            calls.push(markCall(invokeToCall(invoke), start));
         spans.push({ start, end });
     }
     for (const invoke of raw.matchAll(DSML_INVOKE_RE)) {
@@ -508,12 +521,12 @@ export function parseToolCalls(text): ToolCallParseResult {
             continue;
         if (!isCallBoundary(raw, start))
             continue;
-        calls.push(invokeToCall(invoke));
+        calls.push(markCall(invokeToCall(invoke), start));
         spans.push({ start, end: start + invoke[0].length });
     }
 
     const consumedEnd = spans.reduce((max, span) => Math.max(max, span.end), 0);
-    salvageResidual(raw.slice(consumedEnd), calls, errors);
+    salvageResidual(raw.slice(consumedEnd), calls, errors, consumedEnd);
     // A known dialect marker with no parsed calls is an explicit protocol
     // failure, not a normal answer. Otherwise the caller records "complete"
     // and the user sees an empty reply with no way to diagnose it.
@@ -528,10 +541,12 @@ export function parseToolCalls(text): ToolCallParseResult {
                 "Re-emit a complete <fastcode_tool>{\"tool\":...}</fastcode_tool> block.");
         }
     }
+    // Detectors run in a fixed order; restore the order the model wrote.
+    calls.sort((left, right) => callStart(left) - callStart(right));
     return { calls, consumedEnd, errors, errorCodes, detectedDialects: Array.from(detected) };
 }
 
-function salvageResidual(tail: string, calls: ToolCallRecord[], errors: string[]): void {
+function salvageResidual(tail: string, calls: ToolCallRecord[], errors: string[], base = 0): void {
     if (!tail.trim())
         return;
     let salvaged = false;
@@ -541,7 +556,7 @@ function salvageResidual(tail: string, calls: ToolCallRecord[], errors: string[]
     if (toolOpen >= 0) {
         const recovered = salvageJsonPrefix(tail.slice(toolOpen + FASTCODE_TOOL_OPEN.length));
         if (recovered) {
-            calls.push(recovered.call);
+            calls.push(markCall(recovered.call, base + toolOpen));
             salvaged = true;
         }
         else {
@@ -557,7 +572,7 @@ function salvageResidual(tail: string, calls: ToolCallRecord[], errors: string[]
         const nextStart = openers[index + 1]?.index ?? tail.length;
         const call = invokeToCall({ 1: opener[1], 2: tail.slice(bodyStart, nextStart) });
         if (Object.keys(call).length > 1) {
-            calls.push(call);
+            calls.push(markCall(call, base + start));
             salvaged = true;
         }
         else {
@@ -580,6 +595,11 @@ function stripMistralText(text: string): string {
         }
         out += text.slice(cursor, index);
         const after = index + MISTRAL_PREFIX.length;
+        if (!isCallBoundary(text, index)) {
+            out += MISTRAL_PREFIX;
+            cursor = after;
+            continue;
+        }
         const args = extractMistralArgs(text.slice(after));
         if (!args) {
             out += MISTRAL_PREFIX;
@@ -601,7 +621,7 @@ function stripLlamaText(text: string): string {
         }
         const after = index + LLAMA_TAG.length;
         const json = extractJsonValue(text.slice(after));
-        if (!json || !dialectCall(json.value)) {
+        if (!isCallBoundary(text, index) || !json || !dialectCall(json.value)) {
             out += text.slice(cursor, after);
             cursor = after;
             continue;
@@ -647,15 +667,19 @@ function mapUnfenced(text: string, transform: (chunk: string) => string): string
 }
 
 function stripUnfencedText(text: string): string {
+    // Strip only call segments (line start / adjacent block), mirroring the
+    // parser boundary. Inline examples quoted in prose stay visible.
     let out = text
-        .replace(/<fastcode_tool>[\s\S]*?<\/\s*fastcode_tool\s*>/gi, "")
-        .replace(DSML_BLOCK_RE, (block) => /<invoke\s+name=/i.test(block) ? "" : block)
-        .replace(/<fastcode_tool>[\s\S]*$/i, "");
+        .replace(/<fastcode_tool>[\s\S]*?<\/\s*fastcode_tool\s*>/gi, (whole, offset) => isCallBoundary(text, offset) ? "" : whole)
+        .replace(DSML_BLOCK_RE, (block, _name, _body, offset) =>
+            /<invoke\s+name=/i.test(block) && isCallBoundary(text, offset) ? "" : block)
+        .replace(/<fastcode_tool>[\s\S]*$/i, (whole, offset) => isCallBoundary(text, offset) ? "" : whole);
     // Remove only well-formed supported dialects; malformed markup stays visible
     // for diagnosis (and the parser will report a protocol error).
-    out = out.replace(HERMES_BLOCK_RE, (whole, body) => parseHermesBlock(body) ? "" : whole);
-    out = out.replace(KIMI_SECTION_RE, (whole, body) =>
-        Array.from((body ?? "").matchAll(KIMI_CALL_RE)).length > 0 ? "" : whole);
+    out = out.replace(HERMES_BLOCK_RE, (whole, body, offset) =>
+        isCallBoundary(text, offset) && parseHermesBlock(body) ? "" : whole);
+    out = out.replace(KIMI_SECTION_RE, (whole, body, offset) =>
+        isCallBoundary(text, offset) && Array.from((body ?? "").matchAll(KIMI_CALL_RE)).length > 0 ? "" : whole);
     out = stripMistralText(out);
     out = stripLlamaText(out);
     // Bare leading JSON tool call (Llama full-turn fallback).
@@ -670,7 +694,8 @@ function stripUnfencedText(text: string): string {
             // Not JSON; keep it as visible text.
         }
     }
-    return out.replace(/<\/\s*(?:fastcode_tool|parameter|invoke|calls)\s*>/gi, "");
+    return out.replace(/<\/\s*(?:fastcode_tool|parameter|invoke|calls)\s*>/gi, (whole, offset) =>
+        isCallBoundary(out, offset) ? "" : whole);
 }
 
 export function stripToolCalls(text) {
@@ -691,12 +716,11 @@ export function formatToolResults(results) {
         ...blocks,
     ].join("\n\n");
 }
-export const AGENT_SYSTEM_PROMPT = `
-You are FastCode Agent, a local coding agent running inside the user's terminal.
+const AGENT_IDENTITY = `You are FastCode Agent, a local coding agent running inside the user's terminal.
 Tools run inside a filesystem sandbox rooted at the current working directory.
-File tools cannot access paths outside that root. Shell commands run with FASTCODE_SANDBOX=1 and FASTCODE_SANDBOX_ROOT set.
+File tools cannot access paths outside that root. Shell commands run with FASTCODE_SANDBOX=1 and FASTCODE_SANDBOX_ROOT set.`;
 
-You can inspect and change the user's machine by emitting exactly one or more tool calls in this format:
+const AGENT_TOOL_GUIDE = `You can inspect and change the user's machine by emitting exactly one or more tool calls in this format:
 <fastcode_tool>{"tool":"shell","command":"npm test"}</fastcode_tool>
 
 Available tools:
@@ -720,17 +744,23 @@ Available tools:
 - make_dir: {"tool":"make_dir","path":"path/to/dir"}
 - copy_file: {"tool":"copy_file","from":"src","to":"dest","overwrite":false}
 - move_path: {"tool":"move_path","from":"src","to":"dest"}
-- delete_file: {"tool":"delete_file","path":"path/to/file","recursive":false}
+- delete_file: {"tool":"delete_file","path":"path/to/file","recursive":false}`;
 
-Rules:
+const AGENT_RULES = `Rules:
 - Prefer inspecting files before editing.
 - Use shell for tests, builds, package scripts, git inspection, and OS commands.
 - Use apply_patch or replace_in_file for focused edits.
 - Use write_file only when replacing the whole file is appropriate.
 - Run verification commands after code changes.
 - After tool results come back, continue working until the user's request is done.
-- When done, answer normally without tool calls.
-`.trim();
+- When done, answer normally without tool calls.`;
+
+/** Text-protocol prompt for legacy turns; native turns use the tool schemas. */
+export const AGENT_SYSTEM_PROMPT = `${AGENT_IDENTITY}\n\n${AGENT_TOOL_GUIDE}\n\n${AGENT_RULES}`;
+
+export function agentSystemPrompt(protocol: string): string {
+    return protocol === "native" ? `${AGENT_IDENTITY}\n\n${AGENT_RULES}` : AGENT_SYSTEM_PROMPT;
+}
 function fence(text) {
     return `\`\`\`\n${text}\n\`\`\``;
 }

@@ -13,7 +13,43 @@ import { qwenProvider } from "./qwen.js";
 import { customProvider } from "./custom.js";
 import { CATALOG_PROVIDERS } from "./catalog.js";
 import { resolveBaseUrl } from "./spec.js";
+import { createStdioProvider } from "./stdioBackend.js";
 import type { Provider } from "../types.js";
+
+function listEnv(value: string | undefined): string[] {
+    return String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+/**
+ * Register the canonical CLI backend only when explicitly configured. The
+ * default install keeps `stdio` absent from the provider picker.
+ */
+export function stdioProviderFromEnv(env: NodeJS.ProcessEnv = process.env): Provider | undefined {
+    const command = String(env["FASTCODE_STDIO_COMMAND"] ?? "").trim();
+    if (!command)
+        return undefined;
+    let args: string[] = [];
+    const rawArgs = String(env["FASTCODE_STDIO_ARGS"] ?? "").trim();
+    if (rawArgs) {
+        try {
+            const parsed = JSON.parse(rawArgs);
+            if (Array.isArray(parsed))
+                args = parsed.map((item) => String(item));
+        }
+        catch {
+            args = [];
+        }
+    }
+    const model = String(env["FASTCODE_STDIO_MODEL"] ?? "stdio").trim() || "stdio";
+    return createStdioProvider({
+        id: "stdio",
+        label: "Stdio CLI",
+        command,
+        args,
+        envAllowlist: listEnv(env["FASTCODE_STDIO_ENV_ALLOWLIST"]),
+        staticModels: [{ id: model, label: model }],
+    });
+}
 export const PROVIDERS: Provider[] = [
     anthropicProvider,
     openaiProvider,
@@ -28,6 +64,10 @@ export const PROVIDERS: Provider[] = [
     qwenProvider,
     ollamaProvider,
     ...CATALOG_PROVIDERS,
+    ...(() => {
+        const stdio = stdioProviderFromEnv();
+        return stdio ? [stdio] : [];
+    })(),
     customProvider,
 ];
 export function getProvider(id) {

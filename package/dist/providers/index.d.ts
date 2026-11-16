@@ -1,4 +1,9 @@
 import type { Provider } from "../types.js";
+/**
+ * Register the canonical CLI backend only when explicitly configured. The
+ * default install keeps `stdio` absent from the provider picker.
+ */
+export declare function stdioProviderFromEnv(env?: NodeJS.ProcessEnv): Provider | undefined;
 export declare const PROVIDERS: Provider[];
 export declare function getProvider(id: any): Provider;
 export declare function getProviderOrThrow(id: any): Provider;

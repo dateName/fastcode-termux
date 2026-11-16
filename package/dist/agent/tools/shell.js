@@ -11,6 +11,10 @@ export const shellTool = {
             return { ok: true };
         if (typeof call.command !== "string" || call.command.trim() === "")
             return invalid("command must be a non-empty string");
+        // Never silently ignore a requested cwd: the shell is rooted at the
+        // session directory and moving it would bypass the trust boundary.
+        if (call.cwd !== undefined && call.cwd !== null && String(call.cwd).trim() !== "")
+            return invalid("cwd is not supported; shell runs in the session working directory");
         return { ok: true };
     },
     async execute(call, ctx) {
@@ -29,8 +33,11 @@ export const shellTool = {
     },
 };
 function formatExec(result) {
-    if (result.status !== "running")
-        return { ok: result.ok, output: result.output || `[command ${result.status}]` };
+    if (result.status !== "running") {
+        const status = `${result.status}${result.exitCode !== undefined && result.exitCode !== null ? ` (exit ${result.exitCode})` : ""}`;
+        const body = result.output && result.output.trim() ? result.output.trimEnd() : "";
+        return { ok: result.ok, output: body ? `${body}\n[${status}]` : `[${status}]` };
+    }
     const header = `[session ${result.sessionId}] running`;
     const body = result.output ? "\n" + result.output : "";
     return {

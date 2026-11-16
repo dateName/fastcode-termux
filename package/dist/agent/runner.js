@@ -220,7 +220,11 @@ export async function* runAgent(options) {
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
             break;
         }
-        const visibleText = streamed.suppressPseudoParse ? streamed.text.trim() : stripToolCalls(streamed.text);
+        // Native turns are schema-driven; text markup is ordinary content and
+        // must not be parsed or silently stripped.
+        const visibleText = streamed.suppressPseudoParse || protocol === "native"
+            ? streamed.text.trim()
+            : stripToolCalls(streamed.text);
         if (visibleText)
             lastVisible = visibleText;
         const nativeCalls = protocol === "native" && options.allowTools !== false ? (streamed.toolCalls ?? []) : [];
@@ -296,7 +300,9 @@ export async function* runAgent(options) {
                 break;
             continue;
         }
-        const parsed = options.allowTools === false || streamed.suppressPseudoParse
+        // Two protocol parsers are mutually exclusive: a native turn never
+        // rescans text for pseudo calls (the model was given schemas instead).
+        const parsed = options.allowTools === false || streamed.suppressPseudoParse || protocol === "native"
             ? { calls: [], consumedEnd: 0, errors: [], errorCodes: [], detectedDialects: [] }
             : parseToolCalls(streamed.text);
         const calls = parsed.calls;

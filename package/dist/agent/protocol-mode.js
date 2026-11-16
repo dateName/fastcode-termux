@@ -22,6 +22,10 @@ const runtimeCapabilities = new Map();
 export function rememberToolCapability(providerId, model, capability) {
     runtimeCapabilities.set(toolCapabilityKey(providerId, model), capability);
 }
+/** Current process view only; legacy config values are deliberately ignored. */
+export function runtimeToolCapability(providerId, model) {
+    return runtimeCapabilities.get(toolCapabilityKey(providerId, model));
+}
 export function resolveToolProtocol(config, providerId, model, env = process.env) {
     const mode = String(env["FASTCODE_TOOL_PROTOCOL"] ?? "auto").trim().toLowerCase();
     if (mode === "legacy")
@@ -35,11 +39,9 @@ export function resolveToolProtocol(config, providerId, model, env = process.env
         return "legacy";
     if (runtime === "native")
         return "native";
-    const cached = config?.capabilities?.toolCalling?.[toolCapabilityKey(providerId, model)];
-    if (cached === "pseudo")
-        return "legacy";
-    if (cached === "native")
-        return "native";
+    // Legacy config.capabilities.toolCalling is intentionally ignored: it used
+    // to pin a provider/model to pseudo forever, even after the endpoint began
+    // accepting native tools. Runtime memory above is the only per-process hint.
     if (!NATIVE_PROVIDERS.has(providerId))
         return "legacy";
     return getModelMeta(providerId, model).supportsTools ? "native" : "legacy";

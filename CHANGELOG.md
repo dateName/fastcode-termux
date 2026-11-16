@@ -7,6 +7,14 @@
 > 状态：工作树版本见 `package/package.json`；基于 0.1.8-beta.0 工作树；仅本地 build 与 PC 回归，未提交、未发布。来源：`yq.txt` 审计整合 + 本项目文档要求。
 > `release/` 已生成当前版本资产；npm `beta` 已发布当前版本（`latest` 仍为 0.1.6）；GitHub Release 资产已上传（Release workflow 最后的 npm 步骤可能因版本已手动发布而失败，不影响资产）。
 
+### 0.1.8-beta.1 后续修复（2026-11-16）
+- 重复调用：`protocol_error` 同指纹只重发一次；纯外来方言直接 `protocol_error`；只读 loop 阈值 5 且受窗口钳制；`loop_detected` 非 0 退出。
+- 解析触发面：围栏/行内示例不执行，行内示例保留原文；非流式 JSON 的 `content` 不再扫工具标记；外来方言需占主导才报 `UNSUPPORTED_DIALECT`。
+- native：不再注入 `<fastcode_tool>` 语法段，也不解析文本标记；配对 400 修复 history 后原协议重试；能力缓存只在进程内，旧 `config.capabilities.toolCalling` 忽略。
+- 归一化：非终块 `toolCalls` 折算 delta、cumulative 参数覆盖、usage 重复告警、跨方言按 offset 保序。
+- 可观测/运行时：`--ui json` 新增 `loop_detected`/`compaction`/`checkpoint`/`summary`（含 `http_request_count`）帧；doctor 输出最近连续重复；headless 正常结束回收 resident shell；shell 输出退出码并显式拒绝 `cwd`。
+- 新增 `FASTCODE_STDIO_COMMAND/ARGS/MODEL/ENV_ALLOWLIST`，配置后注册 `stdio` provider（默认不注册）。
+
 ### 稳定性 / 限界
 - `read_file` 的 `offset/limit` 分支先按字节预算裁剪再入结果：单行超长文件不再绕过 `FASTCODE_READ_MAX_BYTES`。
 - runner 写入 `role:"tool"` 前统一按 `FASTCODE_TOOL_MESSAGE_LIMIT`（默认 1MB）兜底；`grep` 超长命中行裁剪到 500 字符；shell 每个 job 保留窗口从 1MB 收紧到 256KB。

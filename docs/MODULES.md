@@ -98,7 +98,7 @@
 | src/providers/anthropic.ts | Claude Messages API（伪协议工具） | lib/http |
 | src/providers/{openai,google,deepseek,openrouter,groq,mistral,xai,moonshot,zhipu,qwen,ollama,custom}.ts | 13 内置 provider 配置；`custom` 支持 `FASTCODE_AUTH_HEADER`/`FASTCODE_AUTH_PREFIX`/`FASTCODE_EXTRA_HEADERS` | openaiCompatible |
 | src/providers/catalog.ts | 42 个 OpenAI 兼容 catalog provider（聚合网关/国内外厂商/云平台占位符） | openaiCompatible, spec |
-| src/providers/stdioBackend.ts | 默认不注册的 CLI 后端基础层：spawn + 规范 NDJSON、环境 allowlist、abort 进程树终止、只提议工具不执行 | lib/child-env, lib/process-tree, lib/values, types |
+| src/providers/stdioBackend.ts | CLI 后端基础层：spawn + 规范 NDJSON、环境 allowlist、abort 进程树终止、只提议工具不执行；`index.ts` 在设置 `FASTCODE_STDIO_COMMAND` 时注册为 `stdio` provider，默认不注册 | lib/child-env, lib/process-tree, lib/values, types |
 
 ## 领域层：命令（31 个）
 

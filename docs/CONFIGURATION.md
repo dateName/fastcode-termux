@@ -45,7 +45,7 @@
 | requestIdleTimeoutMs | 流式空闲超时（毫秒） | 60000 |
 | reasoningEffort | 思考强度 auto/low/medium/high/max | auto |
 | shellPoolSize | **resident** shell 池并发数；安全默认 2，最大 6；`/threads <1-6>` 修改；不限制 one-shot 路径 | 2 |
-| capabilities | 缓存的 provider/model 能力；`toolCalling` 记 `native` / `pseudo` | `{ "toolCalling": {} }` |
+| capabilities | 旧版缓存字段，仅为兼容保留；自 0.1.8-beta.1 起**不再参与** native/pseudo 判定（能力只记在进程内） | `{ "toolCalling": {} }` |
 | egress | 应用层 egress 策略；见 §2.1 | `{ "enabled": true, "mode": "block", ... }` |
 
 ### 2.1 egress 策略
@@ -221,7 +221,11 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_HEAP_LIMIT_MB | heap 强制压缩阈值（MB），默认 220 |
 | FASTCODE_SERVER_COMPACTION | 实验性 server-aware 预留；当前调用方未传 opaque state，实际不改变本地压缩 |
 | FASTCODE_MAX_SPAWN_PER_TURN | 每轮最多新建 shell 进程数（resident + one-shot 共用），默认 8；这是每轮新建速率，不是全局并发上限。达上限时 one-shot 立即失败，resident 路径可能排队等已有 shell |
-| FASTCODE_TOOL_PROTOCOL | `auto`（默认）/ `native` / `legacy`；`auto` 对兼容 provider 用原生 tools，遇到不支持或 400 时自动降级并缓存 `pseudo`；`legacy` 强制伪协议 |
+| FASTCODE_TOOL_PROTOCOL | `auto`（默认）/ `native` / `legacy`；`auto` 对兼容 provider 用原生 tools，遇到不支持或 400 时自动降级，能力只缓存在当前进程（不写 `config.json`，也不再读旧的 `config.capabilities.toolCalling`）；`legacy` 强制伪协议，`native` 只走 schema tools 且不再解析文本标记 |
+| FASTCODE_STDIO_COMMAND | 配置后注册 `stdio` provider（默认不注册）；值为可执行文件路径 |
+| FASTCODE_STDIO_ARGS | 可选，传给 CLI 的 JSON 数组，如 `["--json"]` |
+| FASTCODE_STDIO_MODEL | 可选，stdio provider 的默认模型 id，默认 `stdio` |
+| FASTCODE_STDIO_ENV_ALLOWLIST | 可选，逗号分隔的宿主环境变量名白名单；不会透传 API key |
 | FASTCODE_SSE_IDLE_MS | 直接调用 SSE 解析器时的无数据超时（毫秒），默认 25000；聊天路径由 `requestIdleTimeoutMs` 决定 |
 | FASTCODE_TRUST_ALL | 设为 1 跳过项目信任确认 |
 | FASTCODE_ALLOW_DANGEROUS | 设为 1 临时放行非 Hard Block 的普通/Soft Gate 命令；Hard Block 永不受影响 |
@@ -335,6 +339,8 @@ catalogHash 变化后失效。`fastcode trusted` 列出，`fastcode trust --forg
     fastcode --ui native "prompt"    Termux:API termux-dialog sheet；缺失/超时回落 tty
     fastcode --ui plain "prompt"     纯文本编号选择（非 TTY 时走 headless）
     fastcode --ui json "prompt"      NDJSON gate:ask/decision，stdout 只输出协议
+
+`--ui json` 还输出 `loop_detected` / `compaction` / `checkpoint` / `summary`（含 `tool_call_count`、`http_request_count`、`last_turn`）帧，均带 `v/seq/ts`。`stream_error` / `incomplete` / `protocol_error` / `loop_detected` 以非 0 退出；`max_turns` 仍为 0。正常结束后 headless 会回收 resident shell，不会因残留会话挂住进程。
 
 Tier 3 不给默认 yes；本批未接备份，因此 Tier 3 破坏性动作 fail-closed。Hard Block 不生成审批请求。
 
