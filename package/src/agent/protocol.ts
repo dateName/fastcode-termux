@@ -669,17 +669,19 @@ function mapUnfenced(text: string, transform: (chunk: string) => string): string
 function stripUnfencedText(text: string): string {
     // Strip only call segments (line start / adjacent block), mirroring the
     // parser boundary. Inline examples quoted in prose stay visible.
-    let out = text
-        .replace(/<fastcode_tool>[\s\S]*?<\/\s*fastcode_tool\s*>/gi, (whole, offset) => isCallBoundary(text, offset) ? "" : whole)
-        .replace(DSML_BLOCK_RE, (block, _name, _body, offset) =>
-            /<invoke\s+name=/i.test(block) && isCallBoundary(text, offset) ? "" : block)
-        .replace(/<fastcode_tool>[\s\S]*$/i, (whole, offset) => isCallBoundary(text, offset) ? "" : whole);
+    // Each replace runs on the previous result, so boundary offsets must be
+    // measured against that same string; using `text` after a block was removed
+    // would shift them and leave real calls visible.
+    let out = text.replace(/<fastcode_tool>[\s\S]*?<\/\s*fastcode_tool\s*>/gi, (whole, offset) => isCallBoundary(text, offset) ? "" : whole);
+    out = out.replace(DSML_BLOCK_RE, (block, _name, _body, offset) =>
+        /<invoke\s+name=/i.test(block) && isCallBoundary(out, offset) ? "" : block);
+    out = out.replace(/<fastcode_tool>[\s\S]*$/i, (whole, offset) => isCallBoundary(out, offset) ? "" : whole);
     // Remove only well-formed supported dialects; malformed markup stays visible
     // for diagnosis (and the parser will report a protocol error).
     out = out.replace(HERMES_BLOCK_RE, (whole, body, offset) =>
-        isCallBoundary(text, offset) && parseHermesBlock(body) ? "" : whole);
+        isCallBoundary(out, offset) && parseHermesBlock(body) ? "" : whole);
     out = out.replace(KIMI_SECTION_RE, (whole, body, offset) =>
-        isCallBoundary(text, offset) && Array.from((body ?? "").matchAll(KIMI_CALL_RE)).length > 0 ? "" : whole);
+        isCallBoundary(out, offset) && Array.from((body ?? "").matchAll(KIMI_CALL_RE)).length > 0 ? "" : whole);
     out = stripMistralText(out);
     out = stripLlamaText(out);
     // Bare leading JSON tool call (Llama full-turn fallback).
@@ -760,6 +762,20 @@ export const AGENT_SYSTEM_PROMPT = `${AGENT_IDENTITY}\n\n${AGENT_TOOL_GUIDE}\n\n
 
 export function agentSystemPrompt(protocol: string): string {
     return protocol === "native" ? `${AGENT_IDENTITY}\n\n${AGENT_RULES}` : AGENT_SYSTEM_PROMPT;
+}
+
+/**
+ * A native turn that falls back to text parsing must also get the text tool
+ * syntax back; otherwise the model is never told which format to emit. Only the
+ * trailing agent block is swapped, so caller-supplied system text is preserved.
+ */
+export function systemPromptForFallback(system: string | undefined): string | undefined {
+    if (!system)
+        return system;
+    const nativeBlock = agentSystemPrompt("native");
+    if (!system.endsWith(nativeBlock))
+        return system;
+    return system.slice(0, system.length - nativeBlock.length) + AGENT_SYSTEM_PROMPT;
 }
 function fence(text) {
     return `\`\`\`\n${text}\n\`\`\``;

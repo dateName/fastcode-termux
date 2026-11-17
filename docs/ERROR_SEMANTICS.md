@@ -61,9 +61,12 @@
 - 可见文本：行内示例与围栏一样保留原文；只有行首/相邻调用段被剥离（方案 §4 #144）。跨方言调用按文本 offset 排序执行（方案 §4 #145）。
 - headless 正常结束后调用 `cleanupProcesses()` 回收 resident shell；有残留 shell 也不会挂住进程（方案 §4 #147）。
 - 非流式 400 重发：兼容参数（含 reasoning）每次请求最多再发一次，不链式叠加，总量 ≤2 次 HTTP（方案 §4 #139）。
+- native 运行时降级后，后续请求的 system 同步切回 legacy 文本语法段，调用方自带的 system 前缀保留（方案 §4 #152）。
+- 混排方言剥离时 boundary offset 以当前正在替换的字符串为准，跨方言调用不再留下可见标记（方案 §4 #151）。
+- 400 响应体若自带 `400 Bad Request:` 前缀，provider 不再重复拼接（方案 §4 #150）。
 
 ## 7. 验收
 
-- Windows smoke **352/352**；用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）、400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（#139–#142）、双协议互斥/行内可见/跨方言保序/旧 capabilities 忽略（#143–#146）、headless 回收/shell 退出码与 cwd/stdio 注册（#147–#149）。
+- Windows smoke **355/355**（2026-11-17，Node 24）；用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）、400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（#139–#142）、双协议互斥/行内可见/跨方言保序/旧 capabilities 忽略（#143–#146）、headless 回收/shell 退出码与 cwd/stdio 注册（#147–#149）、400 前缀去重/混排剥离无残留/降级 system 同步（#150–#152）。
 - `typecheck` / `lint` / `build` / `verify:artifacts` 通过。
 - Termux 真机与真实 provider 端到端仍待复跑。

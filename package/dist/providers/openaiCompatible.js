@@ -93,7 +93,9 @@ export async function* streamChatCompletion(req, opts) {
             detail = res.ok ? detail : await res.text().catch(() => "");
         }
         if (!res.ok) {
-            throw new Error(res.status + " " + res.statusText + ": " + detail.slice(0, 500));
+            const prefix = `${res.status} ${res.statusText}`;
+            const body = detail.startsWith(`${prefix}:`) ? detail.slice(prefix.length + 1).trimStart() : detail;
+            throw new Error(`${prefix}: ${body.slice(0, 500)}`);
         }
     }
     // Some gateways ignore `stream: true` and return one complete JSON body.

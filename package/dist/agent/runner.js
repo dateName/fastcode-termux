@@ -6,7 +6,7 @@ import { isLoopExempt, isReadOnlyToolCall, toolCallFingerprint } from "./guards.
 import { boundToolMessage } from "./limits.js";
 import { pairToolMessages } from "../session/projection.js";
 import { isNativeUnsupportedError, isToolPairingError } from "./protocol-mode.js";
-import { formatToolResults, parseToolCalls, stripToolCalls } from "./protocol.js";
+import { formatToolResults, parseToolCalls, stripToolCalls, systemPromptForFallback } from "./protocol.js";
 import { runStream } from "./stream.js";
 import { runAgentTool } from "./tools.js";
 export const LOOP_WARNING = "[loop detection] You appear to be repeating the same tool call. " +
@@ -86,6 +86,7 @@ export async function* runAgent(options) {
     let protocol = options.protocol ?? "legacy";
     let fellBack = false;
     let pairRetried = false;
+    let activeSystem = options.system;
     const activeFiles = new Map();
     for (let turn = 0; turn < maxTurns; turn += 1) {
         if (signal?.aborted) {
@@ -125,7 +126,7 @@ export async function* runAgent(options) {
             };
         }
         const promptTokens = estMessagesTokens(history, { providerId: provider.id, model }) +
-            estTokens(options.system ?? "", { providerId: provider.id, model });
+            estTokens(activeSystem ?? "", { providerId: provider.id, model });
         if (tokenBudget !== undefined && consumedInput + promptTokens > tokenBudget) {
             stopReason = "token_budget";
             errorMessage = `Token budget exhausted (${consumedInput + promptTokens} > ${tokenBudget} estimated input tokens). Partial output is kept.`;
@@ -145,7 +146,7 @@ export async function* runAgent(options) {
             streamed = await runStream(provider, {
                 model,
                 messages: history,
-                system: options.system,
+                system: activeSystem,
                 reasoningEffort: options.reasoningEffort,
                 ...(protocol === "native" && options.tools && options.tools.length > 0 ? { tools: options.tools } : {}),
             }, options.apiKey, {
@@ -175,6 +176,7 @@ export async function* runAgent(options) {
             if (protocol === "native" && !fellBack && isNativeUnsupportedError(errorMessage)) {
                 fellBack = true;
                 protocol = "legacy";
+                activeSystem = systemPromptForFallback(activeSystem);
                 options.onProtocolFallback?.(`Native tools were rejected (${errorMessage.slice(0, 160)}); retrying with the pseudo protocol.`);
                 turn -= 1;
                 continue;

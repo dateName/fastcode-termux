@@ -238,6 +238,29 @@ ok("#139 a compatibility 400 is retried at most once",
     retry400Requests === 2 && /\b400\b/.test(retry400Error),
     JSON.stringify({ retry400Requests, retry400Error: retry400Error.slice(0, 200) }));
 
+const duplicate400Server = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "400 Bad Request: unsupported parameter: tools" } }));
+    });
+});
+await new Promise((resolve) => duplicate400Server.listen(0, "127.0.0.1", resolve));
+const duplicate400Port = duplicate400Server.address().port;
+let duplicate400Error = "";
+try {
+    for await (const _ of compatible.streamChatCompletion({ model: "m", messages: [] }, { baseUrl: `http://127.0.0.1:${duplicate400Port}/v1`, apiKey: "k" }))
+        void _;
+}
+catch (err) {
+    duplicate400Error = String(err?.message ?? err);
+}
+duplicate400Server.close();
+ok("#150 a provider 400 body prefix is not duplicated in the error",
+    duplicate400Error.includes("400 Bad Request: unsupported parameter: tools") &&
+        !duplicate400Error.includes("400 Bad Request: 400 Bad Request"),
+    duplicate400Error.slice(0, 200));
+
 let modelFetchCalled = false;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => {
@@ -531,6 +554,11 @@ ok("#145 mixed dialects execute in text order",
     JSON.stringify(orderForward) === JSON.stringify(orderMixed) &&
         JSON.stringify(orderReverse) === JSON.stringify(['anchor_call', ...orderMixed.slice(0, 2)]),
     JSON.stringify({ orderForward, orderReverse }));
+const orderForwardVisible = protocol.stripToolCalls(`${orderD4}\n${orderD5}\n${orderAnchor}`);
+const orderReverseVisible = protocol.stripToolCalls(`${orderAnchor}\n${orderD4}\n${orderD5}`);
+ok("#151 mixed dialect calls leave no visible markup in either order",
+    orderForwardVisible === "" && orderReverseVisible === "",
+    JSON.stringify({ orderForwardVisible, orderReverseVisible }));
 const unsupportedDialect = protocol.parseToolCalls('<function_call>{"name":"pwd"}</function_call>');
 ok("an unsupported dialect with zero parsed calls is an explicit protocol error",
     unsupportedDialect.calls.length === 0 && unsupportedDialect.errors.length > 0 &&
@@ -3278,6 +3306,43 @@ const fallbackRun = await collect(runner.runAgent({
 ok("#57 a 400 on native tools downgrades to pseudo without throwing", fallbackCount === 1 &&
     fallbackRun.some((event) => event.type === "tool_call" && !event.native) &&
     fallbackRun.at(-1).stopReason === "complete", fallbackRun.map((event) => event.type).join(","));
+
+const fallbackPrefix = "Custom project instructions.";
+const fallbackSystems = [];
+let fallbackSystemCalls = 0;
+const fallbackSystemProvider = {
+    id: "mock",
+    label: "Mock",
+    authEnv: [],
+    baseUrl: "",
+    defaultModel: "mock",
+    listModels: async () => [],
+    async *stream(req) {
+        fallbackSystems.push(String(req.system ?? ""));
+        if (req.tools && req.tools.length > 0)
+            throw new Error("400 Bad Request: tools are not supported by this model");
+        fallbackSystemCalls += 1;
+        yield { delta: fallbackSystemCalls === 1 ? '<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' : "done", done: false };
+        yield { delta: "", done: true };
+    },
+};
+const fallbackSystemRun = await collect(runner.runAgent({
+    provider: fallbackSystemProvider,
+    model: "mock",
+    prompt: "fallback system",
+    maxTurns: 3,
+    cwd: stage0,
+    protocol: "native",
+    tools: schemas,
+    system: `${fallbackPrefix}\n\n${protocol.agentSystemPrompt("native")}`,
+}));
+ok("#152 native fallback teaches the pseudo protocol without dropping caller instructions",
+    fallbackSystemRun.at(-1).stopReason === "complete" &&
+        fallbackSystems.length >= 2 &&
+        fallbackSystems.every((system) => system.startsWith(fallbackPrefix)) &&
+        !fallbackSystems[0].includes("<fastcode_tool>") &&
+        fallbackSystems.slice(1).every((system) => system.includes("<fastcode_tool>")),
+    JSON.stringify({ count: fallbackSystems.length, systems: fallbackSystems.map((system) => system.slice(-80)) }));
 
 let pairingRequests = 0;
 let pairingFallbacks = 0;
