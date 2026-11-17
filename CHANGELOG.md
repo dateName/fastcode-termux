@@ -2,6 +2,15 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
+## 0.1.8-beta.2（2026-11-17，工作树）
+
+> 状态：基于已发布的 0.1.8-beta.1；仅本地 build 与 PC 回归（Node 24，smoke 355/355），未提交、未发布。
+
+### 修复（相对 0.1.8-beta.1）
+- native 降级：`system` 在 fallback 时把尾部 native agent 段换成 legacy 文本协议段，调用方自带的 system 前缀保留；降级后的请求重新包含 `<fastcode_tool>` 语法（#152）。
+- 可见文本：`stripUnfencedText` 每步 boundary 按“当前正在 replace 的字符串”计算 offset，混排 `ANCHOR→D4→D5` 也不再残留标记（#151）。
+- 错误文案：OpenAI 兼容 provider 的 400 message 不再重复 `400 Bad Request:` 前缀（#150）。
+
 ## 0.1.8-beta.1（2026-11-15，工作树）
 
 > 状态：工作树版本见 `package/package.json`；基于 0.1.8-beta.0 工作树；仅本地 build 与 PC 回归，未提交、未发布。来源：`yq.txt` 审计整合 + 本项目文档要求。

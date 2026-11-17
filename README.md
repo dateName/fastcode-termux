@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Version | **0.1.8-beta.1** (working tree; npm `beta` = this version; `latest` still 0.1.6) |
+| Version | **0.1.8-beta.2** (working tree; not yet published; npm `beta` still 0.1.8-beta.1; `latest` still 0.1.6) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> This working tree (see **Version** above) is based on 0.1.8-beta.0 plus the 2026-11-15 audit/backend/failure/structure batch. It is built and packaged locally and **published to npm under the `beta` tag**; the GitHub Release assets are published too. The Release workflow's final npm step may fail because this beta was already published manually; the uploaded assets are unaffected.
+> This working tree (see **Version** above) is based on 0.1.8-beta.1 plus the 2026-11-17 fallback/strip/notice fixes. It is built locally but **not yet published**; npm `beta` still points at 0.1.8-beta.1.
 
 **中文文档 → [README.zh.md](README.zh.md)**
 

@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前工作树：**0.1.8-beta.1**（基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理；已本地 build/打包；npm `beta` 已发布此版本）；`release/` 已含当前版本资产；历史条目中的 0.1.6-beta / 0.1.8-beta.0 保持不变
+> 当前工作树：**0.1.8-beta.2**（基于 0.1.8-beta.1 + 2026-11-17 降级 system/混排剥离/400 文案修复；已本地 build，尚未发布）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows

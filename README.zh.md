@@ -4,12 +4,12 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.8-beta.1**（工作树；npm `beta` 已是此版本，`latest` 仍为 0.1.6） |
+| 版本 | **0.1.8-beta.2**（工作树；尚未发布；npm `beta` 仍为 0.1.8-beta.1，`latest` 仍为 0.1.6） |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> 当前工作树（见上方版本）基于 0.1.8-beta.0 + 2026-11-15 审计/执行后端/失败语义/结构治理；已本地 build/打包，并**发布到 npm 的 `beta` tag**；GitHub Release 资产也已上传。Release workflow 最后的 npm 步骤可能因该 beta 已手动发布而失败，不影响已上传资产。
+> 当前工作树（见上方版本）基于 0.1.8-beta.1 + 2026-11-17 降级/剥离/文案修复；已本地 build，但**尚未发布**，npm `beta` 仍指向 0.1.8-beta.1。
 
 **English → [README.md](README.md)**
 
