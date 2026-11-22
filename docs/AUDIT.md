@@ -1,4 +1,4 @@
-# 安全与健壮性审计报告 — 0.1.8-beta.4（历史基线 0.1.6-beta 起）
+# 安全与健壮性审计报告 — 当前正式版（基于 beta.4；历史基线 0.1.6-beta 起）
 
 审计对象：src/（114 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
@@ -231,8 +231,8 @@ provider 级 Key 复用、v1/v2 迁移。
 
 - 基线：`package/package.json` 当前版本；对应发布 tag；npm `beta` 与 GitHub Release 已发布；复核提交 `52436d7`。
 - 方法：逐模块复核安全边界（沙箱、Guardrails、egress、审批、trust、shell、patch、stdio）与健壮性路径（限界、SSE、协议、压缩、会话、headless、i18n）；对照 `scripts/smoke-test.mjs` 覆盖；复核发布资产与依赖审计。
-- **结论**：beta.1→beta.2 的变更本身未发现新的高危回归。复核发现 2 个高危历史遗留问题（B2-01 悬空符号链接写入逃逸、B2-02 `resume` 任意文件覆盖）；**本轮已在工作树修复并通过 PC 回归（未发布）**。继续验证发现 B2-01b 硬链接写入逃逸；**本轮同样已在工作树修复（未发布）**，仍需 Termux/POSIX 真机复验。中危边界见下文。旧文档中“H-1 已修复”“auth.json 恒拦截”“每个副作用工具都重新校验 trust”“incomplete 覆盖所有提前结束”等表述过强，已在下文与相关文档中收紧。
-- 影响：已发布版本仍含 B2-01/B2-01b/B2-02；三项均已在工作树修复、尚未发布；建议作为下一补丁的发布阻断项并完成 Termux 复验。
+- **结论**：beta.1→beta.2 的变更本身未发现新的高危回归。复核发现 2 个高危历史遗留问题（B2-01 悬空符号链接写入逃逸、B2-02 `resume` 任意文件覆盖）；**本轮已修复并通过 PC 回归（已随正式版发布）**。继续验证发现 B2-01b 硬链接写入逃逸；**本轮同样已修复（已随正式版发布）**，仍需 Termux/POSIX 真机复验。中危边界见下文。旧文档中“H-1 已修复”“auth.json 恒拦截”“每个副作用工具都重新校验 trust”“incomplete 覆盖所有提前结束”等表述过强，已在下文与相关文档中收紧。
+- 影响：已发布版本仍含 B2-01/B2-01b/B2-02；三项均已在正式版修复并发布；Termux 复验仍待完成。
 
 ### 8.2 高危（建议下个补丁优先处理）
 
@@ -241,7 +241,7 @@ provider 级 Key 复用、v1/v2 迁移。
 - 证据：`src/agent/tools/paths.ts:59-72` 的 `sandboxPath` 在 `realTarget` 存在时比较 realpath，但最终返回**词法路径**；`realpathOf`（`:74-92`）对不存在的路径向上找已存在祖先，因此**悬空链接**被当成普通缺失路径，判定为“在沙箱内”。`write_file`/`append_file`/`copy_file` 随后直接对词法路径调用 `writeFile`/`appendFile`/`copyFile`，会跟随链接（`write_file.ts:24-27`、`append_file.ts:24-27`、`copy_file.ts:36-49`）。
 - 利用链：在已信任项目内 `shell` 创建 `ln -s ~/.ssh/authorized_keys link`（`guards.ts:786-797` 只检查链接目标是否为敏感写入，不阻止普通链接创建），再 `write_file({path:"link"})`。egress 只评估字符串 `link`（`policy/egress.ts:205-224`），看不到解析后的敏感目标。
 - 影响：可在沙箱外创建/覆盖文件（`~/.ssh/authorized_keys`、`.git/hooks/*`、shell rc、`~/.fastcode/config.json` 等），绕过 `.env`/`sessions` 的 egress 路径保护。
-- 状态：**已修复（工作树，未发布）**。新增 `src/lib/realpath.ts` 逐组件解析符号链接（含悬空链接）；`sandboxWritePath` 返回解析后的写目标；`write_file`/`append_file`/`copy_file` 使用 `O_NOFOLLOW` + `assertNotSymlink`；egress 的 `normalizeTarget` 走 `realpathOf`。Windows 最终文件 symlink 用例仍因 `EPERM` 跳过；悬空目录 junction 祖先用例已通过；Termux/POSIX 待复跑。
+- 状态：**已修复（已随正式版发布）**。新增 `src/lib/realpath.ts` 逐组件解析符号链接（含悬空链接）；`sandboxWritePath` 返回解析后的写目标；`write_file`/`append_file`/`copy_file` 使用 `O_NOFOLLOW` + `assertNotSymlink`；egress 的 `normalizeTarget` 走 `realpathOf`。Windows 最终文件 symlink 用例仍因 `EPERM` 跳过；悬空目录 junction 祖先用例已通过；Termux/POSIX 待复跑。
 - 回归：`scripts/smoke-test.mjs` 新增悬空链接 write/append/copy、悬空祖先目录、沙箱内悬空链接用例；Windows 无 symlink 权限时最终文件用例跳过，目录 junction 用例可运行。
 
 #### B2-01b 硬链接写入可绕过沙箱（本轮继续验证新发现，已修复，待 Termux 复验）
@@ -251,7 +251,7 @@ provider 级 Key 复用、v1/v2 迁移。
 - 影响：模型在已信任项目内通过 `shell` 创建硬链接，再用写工具修改沙箱外文件；egress 也看到沙箱内路径，不会命中 denyPaths。
 - 建议：写/追加/覆盖前检查目标 `nlink`（拒绝多链接目标），或对 `write_file`/`copy_file` 使用同目录 tmp + rename 以断开硬链接；`append_file` 对 `nlink>1` 直接拒绝；同时收紧 `ln`/`cp -l` 等入口。
 - 回归：Windows `fs.linkSync` 4 项 + 普通追加已转绿（write/copy/replace 断开链接，append 拒绝硬链接、正常文件仍可追加）。
-- 状态：**已修复（工作树，未发布）**。`write_file`/`copy_file`（overwrite）/`replace_in_file` 改为同目录 tmp+rename（断开硬链接）；`append_file` 在 open 后检查 `nlink>1` 并拒绝。
+- 状态：**已修复（已随正式版发布）**。`write_file`/`copy_file`（overwrite）/`replace_in_file` 改为同目录 tmp+rename（断开硬链接）；`append_file` 在 open 后检查 `nlink>1` 并拒绝。
 - 残留：`append_file` 的 fstat 检查仍有检查-写入窗口；当前工具调用串行，风险低；若要完全消除，需改为 read+tmp+rename 或 inode 级隔离。
 
 #### B2-02 `resume <任意文件>` 会用投影覆盖原文件（数据丢失，已修复）
@@ -259,13 +259,14 @@ provider 级 Key 复用、v1/v2 迁移。
 - 证据：`resolveSessionFile` 只按“是否含分隔符/`.jsonl`”决定路径（`src/session/log.ts:280-283`）；`projectionPath` 只替换小写 `.jsonl` 后缀（`:59-61`）。`resume ./notes.txt` 会 `openSessionLog` 追加 `session_start`（`:247-251`），关闭时 `ensureProjection → writeProjection` 的 `target` 仍是 `./notes.txt`（`session/projection.ts:531-537`），最终 `renameSync(tmp, notes.txt)` 覆盖原文件（`:589-599`）。大小写变体 `S.JSONL` 同样不匹配。
 - 只读验证（修复前）：`projectionPath("./notes.txt") === "./notes.txt"`，`projectionPath("S.JSONL") === "S.JSONL"`；修复后 `projectionPath("S.JSONL") === "S.projection.json"`，且 `writeProjection` 拒绝 `target === source`。
 - 影响：用户一旦把非会话文件传给 `resume`（误操作或脚本），原文件被 JSON 投影替换，且原内容不再存在。
-- 状态：**已修复（工作树，未发布）**。新增 `resolveResumeFile`（仅接受 `sessions/` 下的会话 id 或 `.jsonl` 文件）；`projectionPath` 改为大小写不敏感；`writeProjection` 拒绝 `target === source`。
+- 状态：**已修复（已随正式版发布）**。新增 `resolveResumeFile`（仅接受 `sessions/` 下的会话 id 或 `.jsonl` 文件）；`projectionPath` 改为大小写不敏感；`writeProjection` 拒绝 `target === source`。
 - 回归：`scripts/smoke-test.mjs` 新增 6 项（拒绝 `./notes.txt`、拒绝 sessions 外 `.JSONL`、保留裸 id、接受 sessions 内 `.jsonl`、大小写映射、projection 不得覆盖源）；PC 全量 **369/369** 通过。
 
 ### 8.3 中危
 
-#### B2-03 `soft_gate` shell 在未信任目录可绕过 trust 门禁（0.1.7 起，未修复）
+#### B2-03 `soft_gate` shell 在未信任目录可绕过 trust 门禁（2026-11-22 已修复）
 
+- 状态：`registry.approve` 在 shell Hard Block 之后、soft-gate 之前检查 trust；未信任目录即使批准一次 soft-gate 也会返回 `not trusted`。回归覆盖 `rm -f marker.txt` + resolver allow。
 - 证据：`src/agent/registry.ts:118-122` 在 soft-gate 分支直接返回 `pending`/`allow`，trust 检查在 `:127-132` 之后才执行；`shell` 声明 `requiresTrust: true`（`src/agent/tools/shell.ts:8-10`）。headless 的审批解析器存在（`src/headless.ts:96-120`），用户确认后即可在未信任目录执行 soft-gate 命令；TUI 的 `TrustGate` 会掩盖该路径。
 - 影响：`git reset --hard`、`rm -f`、`git clean -fd` 等命令在未信任目录经一次确认后执行；不含路径参数的命令在 `always` 批准后可按相同指纹复用。
 - 建议：把 trust 检查提前到 soft-gate 分支之前，或对 `shell` 无条件要求 trust。
@@ -279,14 +280,14 @@ provider 级 Key 复用、v1/v2 迁移。
 
 #### B2-05 `grep.glob` / `.fastcodeignore` 的 glob→RegExp 可被放大（2026-11-22 已修复）
 
-- 状态：glob 长度上限 256、`**` 上限 8；`.fastcodeignore` 上限 256KB / 2000 条 / 单条 glob 同上，超限规则跳过。
+- 状态：glob 长度上限 256、`**` 上限 4；`.fastcodeignore` 上限 256KB / 2000 条 / 单条 glob 同上。permissions regex 与 grep pattern 增加 512 字符上限并拒绝嵌套量词；`grepFiles` 编译前也检查。
 - 证据：`src/agent/tools/readers.ts:248-274` 把每个 `**` 直接展开为 `.*` 且不限制 glob 长度/`**` 数量；`src/agent/ignore.ts:119-143` 同样处理。模型可传 `grep.glob`，克隆仓库可提供 `.fastcodeignore`（`ignore.ts:80-88` 用 `readFileSync` 无上限读取）。
 - 影响：大量 `**` 与长路径可造成多项式回溯和 CPU 占用；超大 ignore 文件会被每次 `createIgnore()` 重读。
 - 建议：限制 glob 长度与 `**` 数量、限制 ignore 文件大小/规则数；必要时给匹配加时间预算或改用非正则匹配器。
 
 #### B2-06 `read_many` 单次 `maxBytes` 可覆盖总预算且无上限钳制（2026-11-22 已修复）
 
-- 状态：`maxBytes` 钳制到 `FASTCODE_READ_MANY_MAX_BYTES`，schema 增加 `maximum:400000`；单文件异常改为 `[skipped]` 并继续，`filesSkipped` 正常计数。
+- 状态：`maxBytes` 钳制到 `FASTCODE_READ_MANY_MAX_BYTES`，schema 增加 `maximum:400000`；单文件异常改为 `[skipped]` 并继续，`filesSkipped` 正常计数。UTF-8 截断统一走码点边界，截断提示计入预算，`returnedBytes` 等于实际输出字节；grep 行上限改为 500 字节。
 - 证据：`src/agent/tools/read_many.ts:15-17` 只校验 `>=1`，`:31-33` 直接使用调用方值；`src/agent/tools/readers.ts:18,30,290-294` 以该值分配/读取；schema 只有 `minimum`，没有 `maximum`（`src/agent/tool-schemas.ts:19-22`）。另外 `readManyResult` 对单个文件异常会整体失败（`readers.ts:24-31`），与 `filesSkipped` 的设计不一致。
 - 影响：单次调用可要求极大读取量，造成内存/延迟尖峰；一个缺失路径会让其余已读结果全部丢弃。
 - 建议：把 `maxBytes` 钳制到 `FASTCODE_READ_MANY_MAX_BYTES` 或合理上限；schema 加 `maximum`；逐文件 try/catch 并计入 `filesSkipped`。
@@ -294,7 +295,7 @@ provider 级 Key 复用、v1/v2 迁移。
 #### B2-07 shell 内嵌文件路径不走 egress denyPaths（已知边界，文档已收紧）
 
 - 证据：`src/agent/policy/egress.ts:293-296` 对 `shell` 只把命令字符串作为 payload，不解析其中的路径；`guards.ts` 的凭据读取只覆盖 `id_*`/`/etc/shadow`/`/etc/sudoers`（`guards.ts:557-573`、`:729-744`），`cat ~/.fastcode/auth.json` 在“安全命令”矩阵中被放行。输出侧仅靠内容标记兜底（`DEFAULT_CONTENT_MARKERS`），`sk-ant-…`/`sk-proj-…` 等带连字符的 key 可能不匹配。
-- 状态：`ARCHITECTURE.md` §5.1 已写明 shell 路径是启发式；`CONFIGURATION.md` 原先“auth.json + sessions 恒拦截”的表述已改为“工具路径恒拦截，shell 路径仍为启发式”。
+- 状态：`ARCHITECTURE.md` §5.1 已写明 shell 路径是启发式；`CONFIGURATION.md` 原先“auth.json + sessions 恒拦截”的表述已改为“工具路径恒拦截，shell 路径仍为启发式”。2026-11-22 复核：`sh -c "cat /etc/shadow"`、`bash -c "cat ~/.ssh/id_rsa"` 已由 Hard Block 覆盖；精确边界是“敏感文件本地读取不拦，外传才拦”。
 - 建议：若要求默认阻断 shell 路径，需解析 shell AST 并对路径参数套用 egress；否则在用户文档中明确该边界。
 
 #### B2-08 压缩在短历史/中等消息下可能不收敛，summary 文件会累积（2026-11-22 已修复）
@@ -335,23 +336,23 @@ provider 级 Key 复用、v1/v2 迁移。
 - `node scripts/smoke-test.mjs`：**ALL PASS (369/369)**（Node v24.20.0，2026-11-21；Windows 最终文件 symlink 用例跳过，悬空目录 junction 与硬链接 4 项 + 普通追加通过）。
 - CLI 复验：`fastcode resume <非 .jsonl 文件>` 退出码 1，原文件内容逐字节不变。
 - 硬链接复验：Windows `fs.linkSync` 4 项 + 普通追加通过；write/copy/replace 不再修改沙箱外文件，append 拒绝硬链接目标且正常文件可追加。
-- `npm run verify:artifacts`：通过（`dist/cli.js` 5 个 guard markers，bundle 2,221,555 bytes）。
+- `npm run verify:artifacts`：通过（`dist/cli.js` 5 个 guard markers，bundle 2,223,320 bytes）。
 - `npm audit --omit=dev`：0 漏洞；全量 dev 依赖 6 个 moderate（见 B2-15）。
 - 发布资产 SHA256 复核通过；未发现会话/密钥文件。
 - 未做：Termux/POSIX 真机复跑、真实 provider 端到端、Windows 最终文件 symlink 复现（本机 `EPERM`；目录 junction 祖先已覆盖）。
-- 后续协议/参数、统一事件流、能力目录/结构化 diff、回滚/指令/权限/诊断、外置扩展/plan/worktree 批次后：Windows smoke **441/441**，bundle 2,221,555 bytes；安全回归仍通过。
+- 后续协议/参数、统一事件流、能力目录/结构化 diff、回滚/指令/权限/诊断、外置扩展/plan/worktree 批次后：Windows smoke **447/447**，bundle 2,223,320 bytes；安全回归仍通过。
 
 ### 8.7 风险排序与建议
 
 | 优先级 | 项目 | 建议动作 |
 |---|---|---|
-| P0 | B2-01 悬空链接写入逃逸 | **已修复（工作树）**：逐组件 realpath + `sandboxWritePath` + `O_NOFOLLOW`；待 Termux 复验 |
-| P0 | B2-01b 硬链接写入逃逸 | **已修复（工作树）**：write/copy/replace 用 tmp+rename 断开链接；append 拒绝 `nlink>1`；Windows 回归通过 |
-| P0 | B2-02 `resume` 任意文件覆盖 | **已修复（工作树）**：`resolveResumeFile` + projection 断言；PC 回归通过 |
-| P1 | B2-03 soft-gate shell 绕过 trust | trust 检查提前到 soft-gate 分支之前 |
+| P0 | B2-01 悬空链接写入逃逸 | **已修复（已随正式版发布）**：逐组件 realpath + `sandboxWritePath` + `O_NOFOLLOW`；待 Termux 复验 |
+| P0 | B2-01b 硬链接写入逃逸 | **已修复（已随正式版发布）**：write/copy/replace 用 tmp+rename 断开链接；append 拒绝 `nlink>1`；Windows 回归通过 |
+| P0 | B2-02 `resume` 任意文件覆盖 | **已修复（已随正式版发布）**：`resolveResumeFile` + projection 断言；PC 回归通过 |
+| P1 | B2-03 soft-gate shell 绕过 trust | **已修复（2026-11-22）**：Hard Block 后、soft-gate 前检查 trust |
 | P1 | B2-04 HTTP EOF 当 complete | **已修复（2026-11-22）**：真实 SSE 缺终止标记抛 `IncompleteStreamError` |
-| P1 | B2-05 glob ReDoS / ignore 无上限 | **已修复（2026-11-22）**：glob/`**`/ignore 大小与规则数均设上限 |
-| P1 | B2-06 `read_many.maxBytes` 无上限 | **已修复（2026-11-22）**：钳制到总预算；单文件错误隔离 |
+| P1 | B2-05 glob/ReDoS / ignore 无上限 | **已修复（2026-11-22）**：glob/`**`≤4/ignore 大小与规则数；permissions 与 grep regex 设 512 字符与嵌套量词限制 |
+| P1 | B2-06 `read_many.maxBytes` 无上限 | **已修复（2026-11-22）**：钳制到总预算；单文件错误隔离；UTF-8 码点/提示预算一致；grep 行按字节 |
 | P2 | B2-07 / B2-08 | B2-07 保留边界；B2-08 **已修复**：短历史压缩、summary 清理、投影参数截断/硬上限 |
 | P3 | B2-09–B2-16 | B2-09/10/11/12/13/14 已修；B2-15/16 依赖/信息项 |
 
@@ -371,8 +372,8 @@ provider 级 Key 复用、v1/v2 迁移。
 
 #### 8.9.1 执行条件
 
-- `shell` 声明 `requiresTrust: true`、`revalidate:["trust","sandboxRoots"]`（`tools/shell.ts:8-10`）；但 `soft_gate` 分支在 trust 检查前返回（`registry.ts:114-132`，见 B2-03）。
-- 未信任目录：普通 `allow` 命令会被 trust 拒绝；`soft_gate` 命令在审批器存在时可经审批执行（B2-03）。
+- `shell` 声明 `requiresTrust: true`、`revalidate:["trust","sandboxRoots"]`（`tools/shell.ts:8-10`）；Hard Block 之后、`soft_gate` 之前检查 trust（`registry.ts`，见 B2-03）。
+- 未信任目录：普通 `allow` 与 `soft_gate` 命令都会被 trust 拒绝；只有 Hard Block 文案优先（B2-03 已修复）。
 - `FASTCODE_TRUST_ALL=1` 跳过 trust；`FASTCODE_ALLOW_DANGEROUS=1` 只绕过 soft gate，不能绕过 hard block。
 - `cwd` 参数被拒绝（`tools/shell.ts:19-20`），但命令可自行 `cd` 到任意目录。
 
@@ -406,7 +407,7 @@ provider 级 Key 复用、v1/v2 迁移。
 - 敏感读取：`auth.json`/sessions 可读；输出标记不覆盖所有 key 形态。
 - 文件路径：egress 不解析 shell 路径；项目外非敏感写入允许。
 - 进程：`setsid`/后台后代可能逃逸 cleanup；SIGKILL 升级窗口（B2-11）。
-- 信任：B2-03 的 soft-gate 绕过 trust。
+- 信任：B2-03 已修复；soft-gate 在审批前检查 trust。
 
 #### 8.9.6 建议
 

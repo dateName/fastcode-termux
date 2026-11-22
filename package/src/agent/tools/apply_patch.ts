@@ -36,7 +36,11 @@ export const applyPatchTool: Tool = {
         const patch = requiredString(call, "patch");
         const planned = planPatch(patch, ctx.cwd);
         if (planned.ok === false)
-            return { ok: false, output: planned.output };
+            return {
+                ok: false,
+                output: planned.output,
+                ...(/(?:path outside sandbox|symbolic link|hard-linked)/i.test(planned.output) ? { code: "SANDBOX_DENY" as const } : {}),
+            };
         const review = reviewPatchPlan(planned.plan);
         if (review.kind === "deny")
             return { ok: false, output: `patch denied: ${review.reason}` };

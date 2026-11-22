@@ -2,9 +2,20 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
+## 0.1.8（2026-11-22，正式版，已发布）
+
+> 状态：基于 0.1.8-beta.4 的 yq 第二轮修复；Windows smoke **447/447**（POSIX 448）；已构建并发布到 GitHub Release 与 npm `latest`。`beta` tag 仍保留 0.1.8-beta.4。
+
+- 未信任项目的 shell soft-gate 现在先过 trust，批准一次也不能绕过；Hard Block 仍在 trust 之前。
+- 权限 regex 与 grep pattern 增加长度/嵌套量词上限；`**` glob 上限降为 4。
+- `read_many` 统一 UTF-8 码点边界截断，提示文本计入预算，`returnedBytes` 等于实际输出字节；grep 行上限改为 500 字节。
+- `apply_patch` 沙箱拒绝返回 `SANDBOX_DENY`。
+- worktree diff 使用记录的 base（含 commit + binary）；`apply --commit` 支持增量重复应用，状态文案区分 tracked/untracked。
+- 验证：Windows smoke **447/447**（POSIX 448）。
+
 ## 0.1.8-beta.4（2026-11-22，已发布）
 
-> 状态：基于 0.1.8-beta.3 的发布修正；修复 Linux Verify 的 smoke trust 顺序与 `dist/cli.js` exec bit；重新打包并同步 README/文档发布状态。Windows smoke **441/441**（POSIX 442）。GitHub Release 与 npm `beta` 均为当前版本；`latest` 仍为 0.1.6。
+> 状态：基于 0.1.8-beta.3 的发布修正；修复 Linux Verify 的 smoke trust 顺序与 `dist/cli.js` exec bit；重新打包并同步 README/文档发布状态。Windows smoke **441/441**（POSIX 442）。GitHub Release 与 npm `beta` 均为 0.1.8-beta.4；`latest` 仍为 0.1.6。
 
 ### 修复
 
@@ -18,7 +29,7 @@
 
 ## 0.1.8-beta.3（2026-11-22，已发布）
 
-> 状态：基于已发布的 0.1.8-beta.2 + 2026-11-21/22 批次；Windows smoke **441/441**；已构建并发布到 GitHub Release `v0.1.8-beta.3` 与 npm `beta`。该 tag 的首次 Verify 因 Linux smoke trust 顺序失败，随后由当前版本修正。
+> 状态：基于已发布的 0.1.8-beta.2 + 2026-11-21/22 批次；Windows smoke **441/441**；已构建并发布到 GitHub Release `v0.1.8-beta.3` 与 npm `beta`。该 tag 的首次 Verify 因 Linux smoke trust 顺序失败，随后由 0.1.8-beta.4 修正。
 
 ### 安全与健壮性
 
@@ -102,7 +113,7 @@
 - 2.7 外置插件：支持可选 `plugin.json` manifest（name/version/scope/capabilities）；导入默认关闭；只支持 prompt/skills，其他能力拒绝。
 - 2.6 plan/todo/goal：`plan` fact + `/plan`（`/todo` 别名）+ `/goal`；投影以受保护 `[plan]` system message 呈现；自动续跑未实现。
 - 3.3 工作树：`/worktree list/create/diff/apply/remove`；worktree 根在 `$FASTCODE_HOME/worktrees`；apply 只应用 tracked diff；dirty remove 需 `--force`。
-- 验证：Windows smoke **441/441**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+- 验证：Windows smoke **447/447**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
 
 ### 后续 code-review 修复（工作树，未发布）
 
@@ -118,8 +129,8 @@
 - B2-04 真实 SSE 缺终止标记抛 `IncompleteStreamError`；B2-05 glob/ignore 加长度、`**`、文件大小与规则数上限；B2-06 `read_many.maxBytes` 钳制并逐文件隔离错误。
 - B2-09 i18n 非法语言类型回退；B2-10 summaryRef 限 sessions 内且 ≤256KB；B2-11 进程组升级不再被直接子进程退出取消；B2-12 auth tmp/备份 0600；B2-13 provider 错误正文脱敏。
 - B2-08 短历史动态压缩、headless/剪枝 summary 清理、投影 `toolCalls[].arguments` 截断与 200KB 硬上限；B2-14 usage 告警去重、`isCallBoundary` 去 O(n²)、fallback 保留 caller 后缀、400 不再因 “tools are unsupported” 误重试。
-- 仍未完成：B2-03/B2-07（shell，按用户要求暂缓）、B2-15/B2-16 依赖项；`permissions.read/edit`、指令“本次输入”层、provider 能力表、StructuredDiff 到 event/TUI 的字段映射复用；`append_file` 保持 append 语义，不改写为 temp+rename。
-- 验证：Windows smoke **441/441**；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。
+- 仍未完成：B2-07 精确边界文档化、B2-15/B2-16 依赖项；`permissions.read/edit`、指令“本次输入”层、provider 能力表、StructuredDiff 到 event/TUI 的字段映射复用；`append_file` 保持 append 语义，不改写为 temp+rename。
+- 验证：Windows smoke **447/447**；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。
 
 ## 0.1.8-beta.1（2026-11-15，已发布）
 

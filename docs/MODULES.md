@@ -38,7 +38,7 @@
 | 文件 | 职责 | 依赖 |
 |---|---|---|
 | src/agent/runner.ts | 纯 async generator：压缩、预算、协议选择、工具执行、loop detection、checkpoint、abort；请求前 `pairToolMessages`，写入 tool 消息前按 `toolMessageLimit` 兜底，提前 break 时为未执行调用补 tool 占位；native 参数修复失败不执行工具，连续协议错误在合法轮清零，`protocol_error` 带 `detail` | stream, registry, guards, compaction, model-meta, net, tools, session/projection, lib/values |
-| src/agent/registry.ts | 工具注册表；startup 契约断言；prepare → egress → approve → execute → post-write check（仅 write/append/replace/apply_patch/copy）；toolCatalogHash | config/trust, guards, tools/index, policy/egress, check-loop |
+| src/agent/registry.ts | 工具注册表；startup 契约断言；prepare → egress → approve → execute → post-write check（仅 write/append/replace/apply_patch/copy）；shell Hard Block 后、soft-gate 前检查 trust；toolCatalogHash | config/trust, guards, tools/index, policy/egress, check-loop |
 | src/agent/policy/egress.ts | 纯 egress 策略：敏感路径/内容标记/预算；audit/block/off；denyPaths/denyGlobs；registry 出口判定；路径目标经 `realpathOf` 解析 | guards, tools/types, lib/realpath |
 | src/agent/policy/defaults.ts | egress 默认值/类型；供 config/store 使用，避免加载 guards | 无 |
 
@@ -50,7 +50,7 @@
 | src/agent/tools/index.ts | 15 个工具注册 | 各工具 |
 | src/agent/tools/types.ts | Tool/ToolCtx/ToolResult/StateScope/Revalidate/SideEffects/ToolErrorCode；结构化 code/hint/truncated/行字节统计；`diffs` 多文件结构化 diff | lib/values |
 | src/agent/tools/paths.ts | sandboxPath、sandboxWritePath、assertNotSymlink、allowedRoots、realpathOf（re-export）、sharedDirs；原子写入已移至 `lib/atomic-file.ts` | config/store, lib/platform, lib/realpath |
-| src/agent/tools/readers.ts | read/list/grep/walk；行区间读取先按字节预算裁剪（单行超长不再绕过上限）、read_many 总预算/逐文件错误隔离、grep glob（长度/`**` 上限）/context/maxResults、超长命中行裁剪 500 字符、读取上限 | ignore, limits |
+| src/agent/tools/readers.ts | read/list/grep/walk；行区间读取先按字节预算裁剪、read_many 总预算/逐文件错误隔离/UTF-8 码点边界/提示计入预算、grep glob 与 regex 安全上限/context/maxResults、超长命中行裁剪 500 字节、读取上限 | ignore, limits, lib/glob |
 | src/agent/tools/validate.ts | 参数校验、preparePath、prepareWritePath | paths |
 | src/agent/tools/shell.ts | shell 工具 + 后台 session 轮询 | shell-session |
 | src/agent/tools/apply_patch.ts | 调用 patch 三阶段（async）；review pending 时 fail closed；成功时返回逐文件 `diffs`，fallback 写标记 `atomic:false` | patch/*, lib/values, lib/atomic-file |
@@ -59,7 +59,7 @@
 | src/agent/protocol-mode.ts | legacy/native/auto 选择；能力缓存；400/422/501 + tool/function 结构降级判定 | model-meta |
 | src/agent/tool-schemas.ts | 原生 function-calling JSON schema（15 工具） | types |
 | src/agent/guards.ts | 三态危险命令判定；Hard Block/Soft Gate；声明式 shell 权限只作用于 Soft Gate；只读/副作用判定；指纹归一化；FASTCODE_LOOP_EXEMPT | shell-ast, policy/permissions |
-| src/agent/policy/permissions.ts | 声明式 shell 权限：全局 config + trusted 项目 `.fastcode/permissions{,.local}.json`；allow/deny glob（`/.../` 可选 regex，绝对 glob 不误判），只作用于 Soft Gate；read/edit 尚未实现 | config/store, config/trust |
+| src/agent/policy/permissions.ts | 声明式 shell 权限：全局 config + trusted 项目 `.fastcode/permissions{,.local}.json`；allow/deny glob（`/.../` 可选 regex，绝对 glob 不误判，regex 512 字符/嵌套量词上限），只作用于 Soft Gate；read/edit 尚未实现 | config/store, config/trust, lib/glob |
 | src/agent/check-loop.ts | post-write check：静态命令、`FASTCODE_CHECK_FILES`、超时进程树终止、redact、8KB 输出 | process-tree, child-env, tools/types |
 | src/agent/shell-ast.ts | 纯 JS `bash-parser` 第二意见；只做 hard 升级；`-c`/`find -exec`/`eval/source/.`/同段赋值 | bash-parser |
 | src/agent/approval.ts | ApprovalRequest/Decision、稳定 option id、默认选项、plain 编号解析；feedback 必须有用户文本，否则 fail-closed | 无 |
@@ -74,7 +74,7 @@
 | src/agent/compaction.ts | token 阈值 / heap 强制压缩；短历史动态减少保留尾部以压缩中间消息；摘要落盘与旧文件清理；Notes/Outcomes 优先与 limit marker；server-aware 互斥；摘要采样 64KB、collectFiles 有界、无进展熔断瘦身超限 tool/user 消息 | model-meta, config/paths |
 | src/agent/process-tree.ts | 兼容 re-export；实现已移至 `lib/process-tree.ts` | lib/process-tree |
 | src/agent/shell-session.ts | 两条路径：resident `sh -s` 池（默认 2，`/threads` ≤6，子 shell 隔离、池满排队）与 one-shot（`FASTCODE_MAX_SPAWN_PER_TURN` 预算、满额立即失败）；每个 job 保留最近 256KB 输出；后台输出隔离、`shutdownShellsAsync`、增量轮询、/jobs /kill 数据源 | process-tree |
-| src/agent/ignore.ts | .fastcodeignore、默认忽略、二进制识别；文件 ≤256KB、规则 ≤2000、单条 glob ≤256 字符且 `**` ≤8 | 无 |
+| src/agent/ignore.ts | .fastcodeignore、默认忽略、二进制识别；文件 ≤256KB、规则 ≤2000、单条 glob ≤256 字符且 `**` ≤4 | 无 |
 
 ## 领域层：patch
 
@@ -93,7 +93,7 @@
 | src/session/actions.ts | `applyRevert` / `applyPlan`：追加 fact 后统一重建 projection，供 TUI 只发意图；避免 app 内重复 `resumeSession` | session/log, session/projection, session/plan |
 | src/session/instructions.ts | 发现 AGENTS.md/FASTCODE.md（global/项目根/cwd 链），同名近层覆盖远层，32KB/文件（UTF-8 字节）、96KB 总量，生成 system 注入文本与 hash | config/paths |
 | src/session/plan.ts | `plan` fact 归一化、最新计划、`[plan]` 格式化；投影保护 | 无 |
-| src/session/worktree.ts | git worktree create/list/diff/apply/remove；dirty 拒绝、diff/apply 用 `git diff HEAD`（含 staged）、未跟踪只提示、非 git 报错 | config/paths |
+| src/session/worktree.ts | git worktree create/list/diff/apply/remove；记录 `fastcode.base`/`fastcode.lastApplied`，diff/apply 含 committed+staged+binary，`--commit` 支持增量重复 apply，未跟踪只提示 | config/paths |
 
 ## 领域层：服务商
 
@@ -148,7 +148,7 @@
 | src/lib/process-tree.ts | 进程组 SIGTERM → grace → SIGKILL；组长退出但组仍存活时继续升级；Windows taskkill /T；供 shell 与后端层共用 | 无 |
 | src/lib/values.ts | `assertNever` 穷尽检查辅助；`parseJsonObjectWithRepair`（尾逗号/未闭合字符串/缺括号/单元素数组/已知数值布尔字符串）；`buildStructuredDiff`（old/new 文本、起始行、行数、16KB 截断）、`structuredDiffFields` 统一 ToolResult 字段 | 无 |
 | src/lib/atomic-file.ts | 原子写入 seam：`atomicFile.write` / `atomicFile.temp`（Temp.write/fill/commit/discard）/ `atomicFile.backups`；temp 所有权、O_NOFOLLOW、结构错误分类、rename fallback、字节回读、backup 保留、`createAtomicFile(io)` 测试注入 | 无 |
-| src/lib/glob.ts | 共享 glob 安全上限（长度 256、`**` ≤8）；readers/ignore/permissions 共用 | 无 |
+| src/lib/glob.ts | 共享 glob/regex 安全上限（glob 256、`**` ≤4；regex 512、拒绝嵌套量词）；readers/ignore/permissions/grep 共用 | 无 |
 | src/lib/net.ts | retryRequest、retryStream（前缀去重）、QuotaError | types |
 | src/lib/lifecycle.ts | SIGTERM/SIGHUP + fatal 兜底；shutdownShells 幂等清理 | agent/shell-session |
 | src/lib/native-tools.ts | tool_calls 归并与 finalize：有 index 按 index，无 index 按 id/单条目；对象型 arguments 归一为 JSON 字符串 | types |
@@ -190,7 +190,7 @@
 | scripts/install.sh / install-termux.sh | 软链 dist/cli.js 到 $PREFIX/bin |
 | scripts/build-portable.sh | release/ tar.gz/zip + npm pack + SHA256SUMS |
 | scripts/update-termux.sh | 目录/git/npm 更新 |
-| scripts/smoke-test.mjs | 回归（当前 PC 441 项 / POSIX 442；Termux 281 项为历史，待复跑） |
+| scripts/smoke-test.mjs | 回归（当前 PC 447 项 / POSIX 448；Termux 281 项为历史，待复跑） |
 | scripts/version-anchors.mjs | 只读扫描当前 package 版本的所有文本锚点；升级版本后用它核对 |
 | .github/workflows/release.yml | v* tag：构建资产、GitHub Release、npm publish |
 | .github/workflows/verify.yml | push/PR：Node 24、npm ci、npm run check、verify:artifacts、verify-gate、dist 无 modified/untracked |
@@ -199,7 +199,7 @@
 ## 测试与验证
 
 - `npm run typecheck` / `npm run lint` / `npm run build`
-- `node scripts/smoke-test.mjs`：当前 **441** 项（Windows；POSIX 442）行为断言（runner、预算、循环、工具契约、
+- `node scripts/smoke-test.mjs`：当前 **447** 项（Windows；POSIX 448）行为断言（runner、预算、循环、工具契约、
   retry/SSE、checkpoint/projection、compaction、patch、shell、native tools、命令、doctor、错误语义、方言）。
 - `node scripts/version-anchors.mjs`：列出当前版本的文本锚点；版本升级后核对是否只改允许位置。
 - Termux 真机额外验证：进程组 kill、/sdcard fsync、#50/#51/#54、TUI `/context`、`/edit`。

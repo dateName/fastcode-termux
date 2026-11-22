@@ -79,6 +79,6 @@
 
 ## 7. 验收
 
-- Windows smoke **441/441**（2026-11-22，Node 24；POSIX 442）；用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）、400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（#139–#142）、双协议互斥/行内可见/跨方言保序/旧 capabilities 忽略（#143–#146）、headless 回收/shell 退出码与 cwd/stdio 注册（#147–#149）、400 前缀去重/混排剥离无残留/降级 system 同步（#150–#152）、参数修复/native 无参不执行/连续失败计数/错误 detail/未执行标记提示、统一事件信封/session_id/turn/reasoning/gate v:1、pricing/source/costUsd、结构化 diff、指令发现/声明式权限/回滚边界/后置检查、外置插件 manifest/plan-todo/worktree。
+- Windows smoke **447/447**（2026-11-22，Node 24；POSIX 448）；用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）、400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（#139–#142）、双协议互斥/行内可见/跨方言保序/旧 capabilities 忽略（#143–#146）、headless 回收/shell 退出码与 cwd/stdio 注册（#147–#149）、400 前缀去重/混排剥离无残留/降级 system 同步（#150–#152）、参数修复/native 无参不执行/连续失败计数/错误 detail/未执行标记提示、统一事件信封/session_id/turn/reasoning/gate v:1、pricing/source/costUsd、结构化 diff、指令发现/声明式权限/回滚边界/后置检查、外置插件 manifest/plan-todo/worktree。
 - `typecheck` / `lint` / `build` / `verify:artifacts` 通过。
 - Termux 真机与真实 provider 端到端仍待复跑。

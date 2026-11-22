@@ -116,8 +116,8 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
 2. 已信任项目的 `.fastcode/permissions.json`
 3. 已信任项目的 `.fastcode/permissions.local.json`
 
-未信任项目的项目/本地层会被忽略。`deny` 命中优先于 `allow`；`allow` 命中直接执行，不再弹审批。
-当前只实现 `permissions.shell`；`permissions.read` / `permissions.edit` 尚未实现，文件工具仍走信任 + 沙箱检查。
+未信任项目的项目/本地层会被忽略。`deny` 命中优先于 `allow`；`allow` 命中直接执行，不再弹审批。未信任项目的 shell soft-gate 在 Hard Block 之后、审批之前仍会被 trust 拒绝，批准一次也不能绕过。
+`/regex/` 受 512 字符上限约束并拒绝明显嵌套量词；grep pattern 同样检查。当前只实现 `permissions.shell`；`permissions.read` / `permissions.edit` 尚未实现，文件工具仍走信任 + 沙箱检查。
 
 ```json
 {
@@ -156,9 +156,9 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
 
 ### 2.6 Git worktree 隔离
 
-- `/worktree list|create <slug>|diff <path>|apply <path>|remove <path> [--force]`。
-- worktree 默认创建在 `$FASTCODE_HOME/worktrees/<repo>/<slug>`，可用 `FASTCODE_WORKTREES_ROOT` 覆盖根目录；分支 `wt/<slug>`，基于当前 HEAD。
-- `diff` / `apply` 使用 `git diff HEAD`，包含已 staged 与未 staged 的 tracked 改动；已提交到 worktree 分支的改动不会进入 apply，需手动 merge/cherry-pick。`apply` 要求目标 checkout 无未提交改动，否则拒绝并列出 `git status`。未跟踪文件只在输出中提示，不自动复制。
+- `/worktree list|create <slug>|diff <path>|apply <path> [--commit]|remove <path> [--force]`。
+- worktree 默认创建在 `$FASTCODE_HOME/worktrees/<repo>/<slug>`，可用 `FASTCODE_WORKTREES_ROOT` 覆盖根目录（解析为绝对路径）；分支 `wt/<slug>`，基于当前 HEAD，并在 worktree config 记录 `fastcode.base`。
+- `diff` / `apply` 使用记录的 base（含已提交、staged、unstaged 与 binary patch）；未跟踪文件只提示、不自动复制。`apply` 要求目标 checkout 无未提交改动；`--commit` 会在 apply 后自动提交并记录 `fastcode.lastApplied`，支持后续增量重复 apply。
 - 非 git 目录明确报错；dirty worktree 的 remove 需要 `--force` 或先 apply。
 
 ### 2.7 外置插件 manifest

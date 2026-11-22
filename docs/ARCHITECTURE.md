@@ -1,6 +1,6 @@
 # FastCode 架构说明
 
-> 版本：见 `package/package.json`（当前工作树；基于 0.1.8-beta.2 + 2026-11-21 安全/协议/事件/能力/会话/扩展批次；已本地 build，尚未发布）
+> 版本：见 `package/package.json`（当前正式版；基于 0.1.8-beta.4 + 2026-11-21 安全/协议/事件/能力/会话/扩展批次 + yq 第二轮修复；已发布）
 > 适用：`package/src` 当前源码树与 `dist/cli.js` 构建产物
 > 维护：改模块、命令、环境变量或安全语义时同步本文件
 
@@ -117,7 +117,7 @@
 - `session/instructions.ts`：从全局数据目录、项目根（`.git`/`package.json`）到 cwd 链发现 `AGENTS.md`/`FASTCODE.md`；按 global → project → local 顺序拼接到 system（在 agent block 之前），每文件 32KB（UTF-8 字节）、总量 96KB 上限；同名文件按近层覆盖远层；`/context` 显示来源。
 - `/revert <n>`：新增 `revert` fact 与 `factsAfterRevert`；按第 n 条 user 消息边界截断投影（删除该条及之后），JSONL 保持 append-only；`--files` 文件还原尚未实现。
 - `session/plan.ts`：`plan` fact、最新计划与 `[plan]` 受保护 system message；`/plan`（别名 `/todo`）与 `/goal` 修改计划/目标；自动续跑未实现。
-- `session/worktree.ts`：git worktree create/list/diff/apply/remove；默认根 `$FASTCODE_HOME/worktrees/<repo>/<slug>`；diff/apply 使用 `git diff HEAD`（含 staged，不含已提交改动）；apply 前要求目标 checkout clean；dirty remove 需 force。
+- `session/worktree.ts`：git worktree create/list/diff/apply/remove；默认根 `$FASTCODE_HOME/worktrees/<repo>/<slug>`；记录 `fastcode.base`/`fastcode.lastApplied`，diff/apply 含 committed+staged+binary；`apply --commit` 支持增量重复应用；未提交目标先拒绝；dirty remove 需 force。
 - `plugins/manager.ts`：外置插件目录 + 可选 `plugin.json` manifest（name/version/scope/capabilities）；默认关；只支持 prompt/skills，其他能力拒绝导入；`scope:"project"` 仅已信任项目加载并优先于全局。
 
 ## 7. Provider、流与压缩
@@ -155,8 +155,8 @@
 - esbuild 输出自包含 `dist/cli.js`；`highlight.js` 裁剪为常用语言子集；`bash-parser` 纯 JS。
 - 便携包必须包含 `bash-parser` 依赖闭包，否则真机 smoke 直接加载 dist 模块会失败。
 - 发布态已知缺口：`package.json.files` 不含 `scripts/`，`npm test` 指向 `../scripts/smoke-test.mjs`；发布前需纳入打包或改测试入口。PR/push 门禁已由 `.github/workflows/verify.yml` 提供（Node 24、`npm run check`、`verify:artifacts`、`verify-gate` 自检、构建后 `package/dist` 无 modified/untracked）。
-- 当前工作树版本见 `package/package.json`（当前工作树，基于 0.1.8-beta.2 + 2026-11-21 批次）；已本地 `npm run build`，但尚未提交/发布；`release/`、npm `beta` 与 GitHub Release 仍为已发布的 0.1.8-beta.2（`latest` 仍为 0.1.6）。
-- 不提交/发布本工作树的改动，除非用户明确授权。
+- 当前正式版版本见 `package/package.json`（基于 0.1.8-beta.4 + 2026-11-21 批次 + yq 第二轮修复）；已构建、提交并发布；`release/`、npm `latest` 与 GitHub Release 为当前正式版，`beta` 仍为 0.1.8-beta.4。
+- 发布须有用户明确授权；不得把未发布改动写成已发布。
 
 ## 11. 安全边界
 
@@ -178,11 +178,11 @@ git diff --check
 
 当前基线（2026-11-21 PC 复核；Termux 为 2026-11-06 真机记录）：
 
-- PC：**441/441**（当前工作树本地 build；Windows / Node 24；POSIX 专属用例跳过）
+- PC：**447/447**（当前工作树本地 build；Windows / Node 24；POSIX 专属用例跳过）
 - Termux 真机：281/281（历史；2026-11-06 tag 前记录；当前工作树新增用例待复跑）
 - bench（Windows / Node v24.20.0）：cold start 143.74ms、write 200KB 8.86ms、read_many 10×200KB 26.04ms、list 1000 68.19ms、grep 1000 630.06ms
 - bench（Termux / Node v26.4.0）：cold start 893.13ms、write 200KB 32.78ms、read_many 10×200KB 82.57ms、list 1000 153.18ms、grep 1000 865.73ms
 - 回滚演练：`git archive HEAD` 临时目录中的旧 bundle 可启动（`--version` 正常）
-- 2026-11-15 新增用例覆盖单行超长读取、tool 消息硬上限、压缩限界/收敛、无 index 归并/对象参数、悬空 tool_calls、headless 退出码、配额/超时/权限一致性、custom 认证头与 probe modelsPath；失败语义批次覆盖 degraded 会话/幂等 close、审批决策帧、probe 归因、incomplete/terminal latch、`protocol_error`；方言批次覆盖 Hermes/Qwen、Mistral pre-v11/v11+、Kimi K2、Llama tag/裸 JSON；当前版本收尾批次覆盖 #150–#152（400 前缀去重、混排剥离 offset、native 降级 system 同步）。Windows 计数 441（POSIX 442）；Termux 真机计数待复跑。
+- 2026-11-15 新增用例覆盖单行超长读取、tool 消息硬上限、压缩限界/收敛、无 index 归并/对象参数、悬空 tool_calls、headless 退出码、配额/超时/权限一致性、custom 认证头与 probe modelsPath；失败语义批次覆盖 degraded 会话/幂等 close、审批决策帧、probe 归因、incomplete/terminal latch、`protocol_error`；方言批次覆盖 Hermes/Qwen、Mistral pre-v11/v11+、Kimi K2、Llama tag/裸 JSON；当前版本收尾批次覆盖 #150–#152（400 前缀去重、混排剥离 offset、native 降级 system 同步）。Windows 计数 441（POSIX 448）；Termux 真机计数待复跑。
 
 改 `src` 后必须重新 build 并提交新的 `dist`；仓库内文档以本文件、`MODULES.md`、`CONFIGURATION.md` 与两份 README 为准。离线开发文档归档在 `config/kai`，不上传。

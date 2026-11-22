@@ -15,7 +15,9 @@ export declare function worktreeDiff(path: string): {
     status: string;
     diff: string;
 };
-export declare function applyWorktree(cwd: string, path: string): {
+export declare function applyWorktree(cwd: string, path: string, options?: {
+    commit?: boolean;
+}): {
     applied: boolean;
     output: string;
 };

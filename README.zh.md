@@ -4,12 +4,12 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.8-beta.4**（已发布；npm `beta` 0.1.8-beta.4，`latest` 0.1.6） |
+| 版本 | **0.1.8**（已发布；npm `latest` 0.1.8；`beta` 仍为 0.1.8-beta.4） |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> 本次发布（见上方版本）基于 0.1.8-beta.3 + Linux Verify/exec bit 修复；PC smoke **441/441**（POSIX 442），已发布到 GitHub Release 与 npm `beta`；`release/` 为当前版本资产。
+> **0.1.8** 为正式版，包含 0.1.8-beta.4 之上的 yq 第二轮修复；PC smoke **447/447**（POSIX 448），已发布到 GitHub Release 与 npm `latest`。上一版 beta.4 资产仍为 441/441（POSIX 442）。
 
 **English → [README.md](README.md)**
 
@@ -108,7 +108,7 @@ termux-setup-storage     # 让 agent 能访问 ~/storage/shared（手机项目/�
 
 按推荐优先级排列。仓库内已提交 **自包含打包产物** `package/dist/cli.js`（esbuild 把 Ink/React/meow 等依赖全部打进单文件），因此克隆后**无需 `npm install`** 即可运行。
 
-从 npm 安装：`npm install -g @datename/fastcode-termux@beta`（`beta` tag 是已发布的 0.1.8-beta.2；当前工作树 尚未发布）。`release/` 为 0.1.8-beta.2 资产。
+从 npm 安装：`npm install -g @datename/fastcode-termux@latest`（`latest` 为当前正式版；`beta` 仍为 0.1.8-beta.4）。`release/` 为正式版资产。
 
 > ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 
@@ -133,7 +133,7 @@ cd fastcode-portable-<version>
 ./fastcode
 ```
 
-> `release/` 目前仍是 0.1.8-beta.2 已发布资产；`npm run build` + `sh scripts/build-portable.sh` 会按当前 `package.json` 版本（当前 package.json 版本）生成 `fastcode-portable-<version>.tar.gz|zip`、`datename-fastcode-termux-<version>.tgz` 与 `SHA256SUMS`。
+> `release/` 目前仍是 0.1.8-beta.4 已发布资产；`npm run build` + `sh scripts/build-portable.sh` 会按当前 `package.json` 版本（当前 package.json 版本）生成 `fastcode-portable-<version>.tar.gz|zip`、`datename-fastcode-termux-<version>.tgz` 与 `SHA256SUMS`。
 
 ### 方式三：从源码运行（仅在你要改源码 / 重新构建时）
 

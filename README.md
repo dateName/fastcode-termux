@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Version | **0.1.8-beta.4** (published; npm `beta` 0.1.8-beta.4; `latest` 0.1.6) |
+| Version | **0.1.8** (published; npm `latest` 0.1.8; `beta` still 0.1.8-beta.4) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> This release (see **Version** above) is based on 0.1.8-beta.3 plus the Linux Verify/exec-bit fixes. PC smoke **441/441** (POSIX 442); published to GitHub Release and npm `beta`. The tracked `release/` contains the current assets.
+> **0.1.8** is the stable release, containing the yq second-round fixes on top of 0.1.8-beta.4. PC smoke **447/447** (POSIX 448); published to GitHub Release and npm `latest`. The previous beta.4 assets remain 441/441 (POSIX 442).
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
@@ -110,7 +110,7 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-From npm: `npm install -g @datename/fastcode-termux@beta` (the `beta` tag carries the published 0.1.8-beta.2; this working tree's this working tree is not published yet). The tracked `release/` contains the 0.1.8-beta.2 assets.
+From npm: `npm install -g @datename/fastcode-termux@latest` (`latest` carries the current stable; `beta` still carries 0.1.8-beta.4). The tracked `release/` contains the current stable assets.
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
@@ -135,7 +135,7 @@ cd fastcode-portable-<version>
 ./fastcode
 ```
 
-The tracked `release/` still contains the published 0.1.8-beta.2 assets. `sh scripts/build-portable.sh` after `npm run build` generates `fastcode-portable-<version>.tar.gz|zip` and `datename-fastcode-termux-<version>.tgz` for the current `package.json` version.
+The tracked `release/` contains the published stable assets. `sh scripts/build-portable.sh` after `npm run build` generates `fastcode-portable-<version>.tar.gz|zip` and `datename-fastcode-termux-<version>.tgz` for the current `package.json` version.
 
 ### 3. From source (only if you want to modify or rebuild)
 

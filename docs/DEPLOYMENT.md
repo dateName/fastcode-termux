@@ -3,8 +3,8 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
-> 当前工作树版本：见 `package/package.json`（当前工作树，基于 0.1.8-beta.2 + 2026-11-21 批次；已本地 build，尚未发布）。
-> `release/` 仍为已发布的 0.1.8-beta.2 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；npm `beta` 与 GitHub Release 也是 0.1.8-beta.2。
+> 当前正式版版本：见 `package/package.json`（基于 0.1.8-beta.4 + 2026-11-21 批次 + yq 第二轮修复；已发布）。
+> `release/` 为当前正式版 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；npm `latest` 与 GitHub Release 为当前正式版，`beta` 仍为 0.1.8-beta.4。
 > GitHub Release 与 npm 的实际同步以外部查询为准。
 
 ## 0. 先确认 Node 与 git

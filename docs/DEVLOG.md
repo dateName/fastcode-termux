@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前发布：**0.1.8-beta.4**（基于 0.1.8-beta.3 + Linux Verify/exec bit 修复；已发布到 GitHub Release 与 npm `beta`；`latest` 仍为 0.1.6）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 / 0.1.8-beta.1 / 0.1.8-beta.2 / 0.1.8-beta.3 保持不变
+> 当前开发线：**正式版**（基于 0.1.8-beta.4 + yq 第二轮修复；已发布到 GitHub Release 与 npm `latest`，`beta` 仍为 beta.4）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 / 0.1.8-beta.1 / 0.1.8-beta.2 / 0.1.8-beta.3 / 0.1.8-beta.4 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -864,7 +864,7 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 - 2.7：`plugin.json` manifest + capabilities/scope/version；默认关闭；prompt/skills 之外拒绝。
 - 2.6：`session/plan.ts` + `/plan`/`/todo`/`/goal`；`[plan]` 投影保护。
 - 3.3：`session/worktree.ts` + `/worktree` create/list/diff/apply/remove。
-- 验证：Windows **ALL PASS (441/441)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+- 验证：Windows **ALL PASS (447/447)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
 
 ### 回滚
 
@@ -881,5 +881,6 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 - B2-11：进程组组长退出但组仍存活时继续 SIGKILL 升级（POSIX 回归）。
 - B2-08/B2-14：短历史动态压缩、headless/prune 清理 summary、投影 arguments 截断与 200KB 硬上限；usage 告警去重、fallback caller 后缀、400 不再误重试。
 - yq 维护：新增 `lib/atomic-file.ts` 原子写 seam；patch/apply 全 async；write/replace/copy/patch 共用 O_NOFOLLOW/回读/backup；fallback 成功标记 `atomic:false`；apply_patch 逐文件 `diffs`；post-write 收窄；glob 边界修复；worktree apply clean；revert/plan 进 `session/actions.ts`；doctor 报告残留 backup。
-- B2-03/B2-07（shell）按用户要求暂缓。
-- 验证：Windows **ALL PASS (441/441)**（POSIX 442）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。
+- B2-03：shell soft-gate 在 Hard Block 后、审批前检查 trust；未信任目录批准一次也不能执行。B2-07 精确化为“本地敏感读取允许、外传拦截”。
+- yq 第二轮：permissions/grep regex 长度与嵌套量词防护；`**` 上限 4；read_many UTF-8 码点与预算一致；grep 行上限按字节；apply_patch SANDBOX_DENY；worktree recorded base + binary + `--commit` 增量 apply。
+- 验证：Windows **ALL PASS (447/447)**（POSIX 448）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。

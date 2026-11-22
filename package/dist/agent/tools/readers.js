@@ -3,7 +3,7 @@ import { open, readdir, stat } from "node:fs/promises";
 import { basename, extname, join, relative } from "node:path";
 import readline from "node:readline";
 import { createIgnore, isBinaryName } from "../ignore.js";
-import { globSafetyError } from "../../lib/glob.js";
+import { globSafetyError, regexSafetyError } from "../../lib/glob.js";
 import { createOutputBuffer } from "../limits.js";
 export { globSafetyError };
 import { allowedRoots, isInsideAny, realpathOf, sandboxPath } from "./paths.js";
@@ -14,6 +14,31 @@ export async function readManyResult(cwd, paths, maxBytes = readManyMaxBytes()) 
     let filesRead = 0;
     let filesSkipped = 0;
     let truncated = false;
+    const pushBlock = (block) => {
+        const separator = blocks.length > 0 ? 2 : 0;
+        const remaining = Math.max(0, maxBytes - used);
+        const blockBytes = Buffer.byteLength(block, "utf8");
+        if (separator + blockBytes <= remaining) {
+            blocks.push(block);
+            used += separator + blockBytes;
+            return true;
+        }
+        if (remaining < separator) {
+            truncated = true;
+            return false;
+        }
+        const marker = `\n[... read_many budget exhausted at ${maxBytes} bytes ...]`;
+        const markerBytes = Buffer.byteLength(marker, "utf8");
+        const room = Math.max(0, remaining - separator);
+        const clipped = clipUtf8ToBytes(block, Math.max(0, room - markerBytes));
+        const text = clipUtf8ToBytes(clipped + marker, room);
+        if (text) {
+            blocks.push(text);
+            used += separator + Buffer.byteLength(text, "utf8");
+        }
+        truncated = true;
+        return false;
+    };
     for (const path of paths) {
         if (used >= maxBytes) {
             truncated = true;
@@ -30,31 +55,18 @@ export async function readManyResult(cwd, paths, maxBytes = readManyMaxBytes()) 
                 throw err;
             const detail = String(err?.message ?? err).slice(0, 300);
             const block = `### ${path}\n[skipped: ${detail}]`;
-            const blockBytes = Buffer.byteLength(block, "utf8");
-            if (used + blockBytes > maxBytes) {
-                truncated = true;
+            if (!pushBlock(block))
                 break;
-            }
-            blocks.push(block);
-            used += blockBytes;
             filesSkipped += 1;
             truncated = true;
             continue;
         }
         totalBytes += result.totalBytes;
         const block = `### ${file}\n${result.text}`;
-        const blockBytes = Buffer.byteLength(block, "utf8");
-        if (used + blockBytes > maxBytes) {
-            const allowed = Math.max(0, maxBytes - used);
-            const clipped = Buffer.from(block, "utf8").subarray(0, allowed).toString("utf8");
-            blocks.push(`${clipped}\n[... read_many budget exhausted at ${maxBytes} bytes ...]`);
-            used = maxBytes;
+        if (!pushBlock(block)) {
             filesRead += 1;
-            truncated = true;
             break;
         }
-        blocks.push(block);
-        used += blockBytes;
         filesRead += 1;
         if (result.truncated)
             truncated = true;
@@ -62,11 +74,12 @@ export async function readManyResult(cwd, paths, maxBytes = readManyMaxBytes()) 
     filesSkipped += Math.max(0, paths.length - filesRead - filesSkipped);
     if (filesSkipped > 0)
         truncated = true;
+    const text = blocks.join("\n\n");
     return {
-        text: blocks.join("\n\n"),
+        text,
         truncated,
         totalBytes,
-        returnedBytes: used,
+        returnedBytes: Buffer.byteLength(text, "utf8"),
         filesRead,
         filesSkipped,
     };
@@ -161,8 +174,11 @@ export function formatSize(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 /** One very long source line must not dominate a grep result. */
-const GREP_LINE_MAX_CHARS = 500;
+const GREP_LINE_MAX_BYTES = 500;
 export async function grepFiles(sandbox, root, options) {
+    const unsafe = regexSafetyError(options.pattern);
+    if (unsafe)
+        throw Object.assign(new Error(unsafe), { code: "INVALID_ARGS" });
     const re = new RegExp(options.pattern, options.flags ?? "i");
     const maxResults = Math.max(1, options.maxResults ?? 200);
     const context = Math.max(0, options.context ?? 0);
@@ -207,9 +223,9 @@ export async function grepFiles(sandbox, root, options) {
                         continue;
                     printed.add(cursor);
                     const isMatch = cursor === index;
-                    const shown = lines[cursor].length > GREP_LINE_MAX_CHARS
-                        ? lines[cursor].slice(0, GREP_LINE_MAX_CHARS) + "…"
-                        : lines[cursor];
+                    const shown = clipUtf8ToBytes(lines[cursor], GREP_LINE_MAX_BYTES) === lines[cursor]
+                        ? lines[cursor]
+                        : clipUtf8ToBytes(lines[cursor], GREP_LINE_MAX_BYTES) + "…";
                     out.line(`${file}:${cursor + 1}${isMatch ? ": " : "- "}${shown}`);
                     if (out.full) {
                         truncated = true;

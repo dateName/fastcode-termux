@@ -27,6 +27,7 @@ const version = versionArg ?? JSON.parse(readFileSync(join(pkgDir, "package.json
 const textExtensions = new Set([".md", ".json", ".mjs", ".cjs", ".js", ".ts", ".tsx", ".sh", ".yml", ".yaml", ".txt"]);
 const skipDirs = new Set([".git", "node_modules", "release", "refs", ".tmp-home", ".cache"]);
 const outerDocs = ["AGENTS.md", "NOW.md", "PROJECT_INDEX.md", "RUNBOOK.md", "脑图.md"];
+const versionPattern = new RegExp(`(?<![0-9.-])${version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9.-])`);
 const hits = [];
 const seen = new Set();
 
@@ -42,10 +43,10 @@ function scan(file) {
     catch {
         return;
     }
-    if (!text.includes(version))
+    if (!versionPattern.test(text))
         return;
     text.split(/\r?\n/).forEach((line, index) => {
-        if (line.includes(version))
+        if (versionPattern.test(line))
             hits.push({ file: rel, line: index + 1, text: line.trim() });
     });
 }

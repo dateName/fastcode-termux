@@ -1,3 +1,4 @@
+import { regexSafetyError } from "../../lib/glob.js";
 import { globSafetyError, grepFiles } from "./readers.js";
 import { resolvePath } from "./paths.js";
 import type { Tool } from "./types.js";
@@ -33,6 +34,9 @@ export const grepTool: Tool = {
                 if (unsafe)
                     return invalid(unsafe);
             }
+            const unsafeRegex = regexSafetyError(requiredString(call, "pattern"));
+            if (unsafeRegex)
+                return invalid(unsafeRegex);
         }
         catch (err: any) {
             return invalid(`invalid regular expression: ${err?.message ?? String(err)}`, "INVALID_ARGS", "pattern must be a valid regular expression");

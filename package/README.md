@@ -20,7 +20,7 @@ npm install -g @datename/fastcode-termux@beta
 fastcode
 ```
 
-> The `beta` tag carries this version; `latest` remains the stable line. Install with `@beta` (or `@<version>`).
+> The `latest` tag carries this version; `beta` remains at 0.1.8-beta.4. Install with `@latest` (or `@<version>`).
 
 Short alias included:
 
@@ -28,10 +28,10 @@ Short alias included:
 fc
 ```
 
-This release is **0.1.8-beta.4**, based on 0.1.8-beta.3 plus the Linux Verify
-and executable-bit fixes. PC smoke 441/441 (POSIX 442); published to GitHub
-Release and npm `beta` use the current version. The tracked `release/`
-contains the current assets.
+**0.1.8** is the stable release, based on 0.1.8-beta.4 plus the yq
+second-round fixes. PC smoke 447/447 (POSIX 448); published to GitHub Release
+and npm `latest`. The previous beta.4 assets remain 441/441 (POSIX 442), and
+the npm `beta` tag still points at 0.1.8-beta.4.
 
 ---
 

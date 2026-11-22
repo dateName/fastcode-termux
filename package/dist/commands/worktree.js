@@ -1,7 +1,7 @@
 import { applyWorktree, createWorktree, listWorktrees, removeWorktree, worktreeDiff } from "../session/worktree.js";
 export const worktreeCommand = {
     name: "worktree",
-    description: "Git worktree isolation. Usage: /worktree [list|create <slug>|diff <path>|apply <path>|remove <path> [--force]]",
+    description: "Git worktree isolation. Usage: /worktree [list|create <slug>|diff <path>|apply <path> [--commit]|remove <path> [--force]]",
     run({ args }) {
         const sub = (args[0] ?? "list").toLowerCase();
         try {
@@ -22,8 +22,8 @@ export const worktreeCommand = {
             }
             if (sub === "apply") {
                 if (!args[1])
-                    return { message: "Usage: /worktree apply <path>" };
-                const result = applyWorktree(process.cwd(), args[1]);
+                    return { message: "Usage: /worktree apply <path> [--commit]" };
+                const result = applyWorktree(process.cwd(), args[1], { commit: args.includes("--commit") });
                 return { message: result.output };
             }
             if (sub === "remove") {
@@ -32,7 +32,7 @@ export const worktreeCommand = {
                 removeWorktree(process.cwd(), args[1], args.includes("--force"));
                 return { message: `Removed worktree ${args[1]}.` };
             }
-            return { message: "Usage: /worktree [list|create <slug>|diff <path>|apply <path>|remove <path> [--force]]" };
+            return { message: "Usage: /worktree [list|create <slug>|diff <path>|apply <path> [--commit]|remove <path> [--force]]" };
         }
         catch (err) {
             return { message: `Worktree failed: ${err?.message ?? String(err)}` };

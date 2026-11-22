@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { globSafetyError } from "../../lib/glob.js";
+import { globSafetyError, regexSafetyError } from "../../lib/glob.js";
 import { isTrusted } from "../../config/trust.js";
 import { loadConfig } from "../../config/store.js";
 function strings(value) {
@@ -53,6 +53,8 @@ function patternMatcher(pattern) {
         // Treat `/path/` and `/path/foo` as globs. Only an explicit flag set,
         // whitespace, or a regex metacharacter makes the body a regex.
         if (flags || /\s/.test(body) || /[.+^${}()|[\]\\]/.test(body)) {
+            if (regexSafetyError(body))
+                return undefined;
             try {
                 return new RegExp(body, flags || "i");
             }

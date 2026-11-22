@@ -1011,6 +1011,17 @@ ok("grep clips a very long matched line", grepLong.ok === true && grepLong.outpu
     JSON.stringify({ chars: grepLong.output.length }));
 const grepBad = await agentTools.runAgentTool({ tool: "grep", pattern: "(", path: "." }, tmp);
 ok("grep invalid regex is a structured error, not a throw", grepBad.ok === false && grepBad.code === "INVALID_ARGS", JSON.stringify(grepBad));
+const grepUnsafe = await agentTools.runAgentTool({ tool: "grep", pattern: "(a+)+$", path: "." }, tmp);
+ok("grep rejects a nested-quantifier regex before scanning",
+    grepUnsafe.ok === false && grepUnsafe.code === "INVALID_ARGS" && /nested quantifier|too long/.test(grepUnsafe.output),
+    JSON.stringify(grepUnsafe));
+writeFileSync(join(tmp, "utf8-many.txt"), "中".repeat(100), "utf8");
+const utf8Many = await agentTools.runAgentTool({ tool: "read_many", paths: ["utf8-many.txt"], maxBytes: 61 }, tmp);
+ok("read_many clips UTF-8 on a code-point boundary and counts the marker",
+    utf8Many.ok === true && !utf8Many.output.includes("\uFFFD") &&
+        utf8Many.returnedBytes === Buffer.byteLength(utf8Many.output, "utf8") &&
+        utf8Many.returnedBytes <= 61,
+    JSON.stringify({ returnedBytes: utf8Many.returnedBytes, bytes: Buffer.byteLength(utf8Many.output, "utf8"), output: utf8Many.output }));
 
 rmSync(tmp, { recursive: true, force: true });
 rmSync(outsideDir, { recursive: true, force: true });
@@ -1096,15 +1107,36 @@ if (gitAvailable) {
     ok("worktree create/list works", existsSync(created.path) &&
         worktreeModule.listWorktrees(worktreeRepo).some((entry) => resolve(entry.path) === resolve(created.path)), JSON.stringify(created));
     writeFileSync(join(created.path, "a.txt"), "changed", "utf8");
-    execFileSync("git", ["add", "a.txt"], { cwd: created.path, stdio: "ignore" });
+    writeFileSync(join(created.path, "blob.bin"), Buffer.from([0, 1, 2, 3, 255]));
+    execFileSync("git", ["add", "a.txt", "blob.bin"], { cwd: created.path, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "worktree change"], { cwd: created.path, stdio: "ignore" });
     const wtDiff = worktreeModule.worktreeDiff(created.path);
-    ok("worktree diff reports tracked changes", /changed/.test(wtDiff.diff), JSON.stringify(wtDiff));
+    ok("worktree diff includes committed and binary changes",
+        /changed/.test(wtDiff.diff) && /GIT binary patch/.test(wtDiff.diff), JSON.stringify(wtDiff));
     const applied = worktreeModule.applyWorktree(worktreeRepo, created.path);
     ok("worktree apply updates the main checkout",
-        applied.applied === true && readFileSync(join(worktreeRepo, "a.txt"), "utf8") === "changed", JSON.stringify(applied));
+        applied.applied === true && readFileSync(join(worktreeRepo, "a.txt"), "utf8") === "changed" &&
+            existsSync(join(worktreeRepo, "blob.bin")), JSON.stringify(applied));
     const blockedApply = worktreeModule.applyWorktree(worktreeRepo, created.path);
     ok("worktree apply rejects a dirty target checkout",
         blockedApply.applied === false && /uncommitted changes/i.test(blockedApply.output), JSON.stringify(blockedApply));
+    execFileSync("git", ["add", "-A"], { cwd: worktreeRepo, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "apply first"], { cwd: worktreeRepo, stdio: "ignore" });
+    const repeated = worktreeModule.createWorktree(worktreeRepo, "smoke-wt-repeat");
+    writeFileSync(join(repeated.path, "a.txt"), "second", "utf8");
+    execFileSync("git", ["add", "a.txt"], { cwd: repeated.path, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "second"], { cwd: repeated.path, stdio: "ignore" });
+    const appliedSecond = worktreeModule.applyWorktree(worktreeRepo, repeated.path, { commit: true });
+    writeFileSync(join(repeated.path, "a.txt"), "third", "utf8");
+    execFileSync("git", ["add", "a.txt"], { cwd: repeated.path, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "third"], { cwd: repeated.path, stdio: "ignore" });
+    const appliedThird = worktreeModule.applyWorktree(worktreeRepo, repeated.path, { commit: true });
+    ok("worktree apply --commit supports repeated incremental applies",
+        appliedSecond.applied === true && appliedThird.applied === true &&
+            readFileSync(join(worktreeRepo, "a.txt"), "utf8") === "third" &&
+            !worktreeModule.worktreeDiff(worktreeRepo).status.trim(),
+        JSON.stringify({ appliedSecond, appliedThird }));
+    worktreeModule.removeWorktree(worktreeRepo, repeated.path, true);
     worktreeModule.removeWorktree(worktreeRepo, created.path, true);
     ok("worktree remove with force discards the worktree", !existsSync(created.path), created.path);
     rmSync(worktreeRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -2070,6 +2102,21 @@ const hardStillHard = guards.evaluateShellCommand("rm -rf /", {
     permissions: { shell: { allow: ["*"] } },
 });
 ok("declarative permission never overrides Hard Block", hardStillHard.action === "hard_block", JSON.stringify(hardStillHard));
+ok("nested-quantifier permission regex is rejected before matching",
+    permissionsModule.evaluateShellPermission("a".repeat(30) + "b", { shell: { allow: ["/(a+)+$/"] } }) === "none" &&
+        permissionsModule.evaluateShellPermission("a".repeat(30) + "b", { shell: { allow: ["/" + "a".repeat(890) + "/"] } }) === "none");
+const untrustedShellRoot = mkdtempSync(join(tmpdir(), "fastcode-untrusted-shell-"));
+writeFileSync(join(untrustedShellRoot, "marker.txt"), "keep", "utf8");
+trust.untrustProject(untrustedShellRoot);
+const untrustedShell = await agentTools.runAgentTool(
+    { tool: "shell", command: "rm -f marker.txt" },
+    untrustedShellRoot,
+    { requestApproval: async () => ({ kind: "allow", scope: "once" }) },
+);
+ok("untrusted shell soft-gate cannot bypass trust after approval",
+    untrustedShell.ok === false && /not trusted/i.test(untrustedShell.output) && existsSync(join(untrustedShellRoot, "marker.txt")),
+    JSON.stringify(untrustedShell));
+rmSync(untrustedShellRoot, { recursive: true, force: true });
 const untrustedPermissionRoot = mkdtempSync(join(tmpdir(), "fastcode-permissions-"));
 mkdirSync(join(untrustedPermissionRoot, ".fastcode"));
 writeFileSync(join(untrustedPermissionRoot, ".fastcode", "permissions.json"), JSON.stringify({ shell: { allow: ["git reset*"] } }), "utf8");
@@ -2537,6 +2584,7 @@ const hardExecute = await registry.registry.execute({ tool: "shell", command: "r
 ok("Hard Block never asks the resolver and never executes",
     hardExecute.ok === false && hardResolverCalls === 0 && /HARD_BLOCK/.test(hardExecute.output), hardExecute.output);
 
+trust.trustProject(stage0);
 let denyCalls = 0;
 const deniedApproval = await registry.registry.execute({ tool: "shell", command: "git reset --hard" }, {
     cwd: stage0,
@@ -2566,6 +2614,7 @@ ok("session approval reuses the resolver result for the same fingerprint",
     allowCalls === 1 && /not a git repository|fatal|denied|failed/i.test(allowedApproval.output) && secondApproval !== undefined,
     `${allowCalls} / ${allowedApproval.output} / ${secondApproval.output}`);
 approvalStore.clearSessionApprovals();
+trust.untrustProject(stage0);
 
 process.env.FASTCODE_TRUST_ALL = "1";
 let runnerApprovalCalls = 0;
@@ -3239,6 +3288,11 @@ ok("#45 patch supports Add/Update/Delete/Move", patched45.ok === true &&
     patched45.diffs?.length === 4 && patched45.diffs.some((diff) => diff.path.endsWith("up.txt") && diff.oldText === "old" + LF && diff.newText === "new" + LF),
     patched45.output);
 ok("FC-057 patch returns a per-file diff", patched45.output.includes("--- a/up.txt") && patched45.output.includes("+++ b/up.txt") && patched45.output.includes("@@"));
+const sandboxPatch = ["*** Begin Patch", "*** Add File: ../outside-patch.txt", "+x", "*** End Patch", ""].join(LF);
+const sandboxPatchDenied = await agentTools.runAgentTool({ tool: "apply_patch", patch: sandboxPatch }, stage0);
+ok("apply_patch reports SANDBOX_DENY for an escaped target",
+    sandboxPatchDenied.ok === false && sandboxPatchDenied.code === "SANDBOX_DENY" && /outside sandbox/i.test(sandboxPatchDenied.output),
+    JSON.stringify(sandboxPatchDenied));
 const bigPatchBody = Array.from({ length: 205 }, (_value, index) => `+line ${index}`).join(LF);
 const bigPatch = ["*** Begin Patch", "*** Add File: big-approved.txt", bigPatchBody, "*** End Patch", ""].join(LF);
 let bigPatchDenyCalls = 0;

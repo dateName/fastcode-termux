@@ -103,6 +103,12 @@ export class ToolRegistry {
             const verdict = evaluateShellCommand(call.command, { cwd: ctx.cwd });
             if (verdict.action === "hard_block")
                 return { kind: "deny", reason: verdict.output, code: verdict.code, target: verdict.target };
+            if ((tool.revalidate ?? []).includes("trust") && !isTrusted(ctx.cwd)) {
+                return {
+                    kind: "deny",
+                    reason: `project is not trusted: ${ctx.cwd}. Run \`fastcode trust ${ctx.cwd}\` or accept the trust prompt.`,
+                };
+            }
             if (verdict.action === "soft_gate") {
                 const key = approvalKey(tool.name, call, ctx.cwd);
                 if (isPreApproved(key, this.catalogHash))
