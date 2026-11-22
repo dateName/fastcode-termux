@@ -2,9 +2,23 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.8-beta.3（2026-11-21，工作树）
+## 0.1.8-beta.4（2026-11-22，已发布）
 
-> 状态：基于已发布的 0.1.8-beta.2 + 2026-11-21 批次；Windows smoke **441/441**；已本地 build，但**未提交、未发布**；npm `beta` 仍为 0.1.8-beta.2，`latest` 仍为 0.1.6；`release/` 仍为 0.1.8-beta.2 已发布资产。
+> 状态：基于 0.1.8-beta.3 的发布修正；修复 Linux Verify 的 smoke trust 顺序与 `dist/cli.js` exec bit；重新打包并同步 README/文档发布状态。Windows smoke **441/441**（POSIX 442）。GitHub Release 与 npm `beta` 均为当前版本；`latest` 仍为 0.1.6。
+
+### 修复
+
+- Linux smoke 的 in-sandbox dangling-link 用例在写前显式 `trustProject`，避免 tag Verify 失败。
+- 跟踪 `package/dist/cli.js` 的 0755 模式，保证 clean-build 门禁在 POSIX 稳定。
+- 文档/README 发布口径同步到当前版本。
+
+### 验证
+
+- `typecheck` / `lint` / `build` / smoke 441/441（POSIX 442）/ `verify:artifacts` / `verify:gate` / 15 版本锚点。
+
+## 0.1.8-beta.3（2026-11-22，已发布）
+
+> 状态：基于已发布的 0.1.8-beta.2 + 2026-11-21/22 批次；Windows smoke **441/441**；已构建并发布到 GitHub Release `v0.1.8-beta.3` 与 npm `beta`。该 tag 的首次 Verify 因 Linux smoke trust 顺序失败，随后由当前版本修正。
 
 ### 安全与健壮性
 

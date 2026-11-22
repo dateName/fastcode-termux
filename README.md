@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Version | **0.1.8-beta.3** (working tree; not published; npm `beta` still 0.1.8-beta.2; `latest` still 0.1.6) |
+| Version | **0.1.8-beta.4** (published; npm `beta` 0.1.8-beta.4; `latest` 0.1.6) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> This working tree (see **Version** above) is based on 0.1.8-beta.2 plus the 2026-11-21 security/protocol/event/capability/session/extension batches. It is built locally (PC smoke **441/441**) but **not yet published**; npm `beta` still points at 0.1.8-beta.2. The tracked `release/` still contains the published 0.1.8-beta.2 assets.
+> This release (see **Version** above) is based on 0.1.8-beta.3 plus the Linux Verify/exec-bit fixes. PC smoke **441/441** (POSIX 442); published to GitHub Release and npm `beta`. The tracked `release/` contains the current assets.
 
 **中文文档 → [README.zh.md](README.zh.md)**
 

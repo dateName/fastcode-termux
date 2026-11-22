@@ -1,4 +1,4 @@
-# FastCode 0.1.3 → 0.1.8-beta.3 修复清单
+# FastCode 0.1.3 → 0.1.8-beta.4 修复清单
 
 > 本版 = 0.1.8-beta.2 + 2026-11-21 安全/协议/事件/能力/回滚/扩展/CI 批次；当前工作树 **未提交、未发布**；`release/`、npm `beta` 与 GitHub Release 仍为已发布的 0.1.8-beta.2。
 
