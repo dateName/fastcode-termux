@@ -794,6 +794,8 @@ if (danglingAncestorLink) {
     ok("B2-01 copy_file refuses a dangling symlink ancestor",
         copyViaDanglingAncestor.ok === false && !existsSync(join(danglingOutsideDir, "pwn.txt")), copyViaDanglingAncestor.output);
 }
+const trustForHardLinks = await load("config/trust.js");
+trustForHardLinks.trustProject(tmp);
 let insideDanglingLink = false;
 const insideDanglingTarget = join(tmp, "created-through-inside-link.txt");
 try {
@@ -808,8 +810,6 @@ if (insideDanglingLink) {
     ok("B2-01 an in-sandbox dangling link resolves to an in-sandbox target",
         insideWrite.ok === true && readFileSync(insideDanglingTarget, "utf8") === "safe", insideWrite.output);
 }
-const trustForHardLinks = await load("config/trust.js");
-trustForHardLinks.trustProject(tmp);
 let hardLinksMade = false;
 const hardWriteOutside = join(outsideDir, "hard-write-outside.txt");
 const hardAppendOutside = join(outsideDir, "hard-append-outside.txt");
