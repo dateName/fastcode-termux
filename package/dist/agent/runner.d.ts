@@ -1,6 +1,7 @@
 import type { ChatChunk, ChatMessage, NativeToolCall, Provider, ReasoningEffort, ToolSchema } from "../types.js";
 import type { ActiveFile } from "../session/log.js";
-import type { SideEffects } from "./tools/types.js";
+import type { SideEffects, ToolCheckResult } from "./tools/types.js";
+import { type StructuredDiff } from "../lib/values.js";
 import { type CompactionConfig } from "./compaction.js";
 import { type ToolProtocol } from "./protocol-mode.js";
 import type { ApprovalResolver } from "./approval.js";
@@ -84,6 +85,17 @@ export type AgentEvent = {
     filesRead?: number;
     filesSkipped?: number;
     matches?: number;
+    oldText?: string;
+    newText?: string;
+    changedStartLine?: number;
+    oldLineCount?: number;
+    newLineCount?: number;
+    diffTruncated?: boolean;
+    diffs?: Array<StructuredDiff & {
+        path: string;
+    }>;
+    atomic?: boolean;
+    check?: ToolCheckResult;
 } | {
     type: "egress_denied";
     outlet: string;
@@ -110,6 +122,7 @@ export type AgentEvent = {
     message: string;
     text?: string;
     used?: number;
+    detail?: string;
 } | {
     type: "checkpoint";
     turn: number;

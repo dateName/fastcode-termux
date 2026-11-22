@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+/** Date of the built-in model/context/pricing snapshot. */
+export const MODEL_META_UPDATED = "2026-11-21";
 export const UNKNOWN_MODEL_META = {
     contextWindow: 32_768,
     supportsTools: false,
@@ -22,15 +24,17 @@ const PROVIDER_META = {
     custom: { contextWindow: 32_768, supportsTools: false, charsPerToken: 2.5 },
 };
 const MODEL_OVERRIDES = {
-    "claude-haiku-5.5": { contextWindow: 200_000 },
+    "claude-haiku-5.5": { contextWindow: 200_000, pricing: { inputUsdPerM: 0.8, outputUsdPerM: 4 } },
     "claude-haiku-4.5": { contextWindow: 200_000 },
+    "claude-sonnet-5.5": { contextWindow: 1_000_000, pricing: { inputUsdPerM: 3, outputUsdPerM: 15 } },
+    "claude-opus-5.5": { contextWindow: 1_000_000, pricing: { inputUsdPerM: 15, outputUsdPerM: 75 } },
     "claude-sonnet-5": { contextWindow: 1_000_000 },
     "claude-opus-5": { contextWindow: 1_000_000 },
     "claude-sonnet-4.6": { contextWindow: 1_000_000 },
     "claude-opus-4.6": { contextWindow: 1_000_000 },
-    "gpt-4o": { contextWindow: 128_000 },
-    "gpt-4o-mini": { contextWindow: 128_000 },
-    "gpt-4.1": { contextWindow: 1_000_000 },
+    "gpt-4o": { contextWindow: 128_000, pricing: { inputUsdPerM: 2.5, outputUsdPerM: 10 } },
+    "gpt-4o-mini": { contextWindow: 128_000, pricing: { inputUsdPerM: 0.15, outputUsdPerM: 0.6 } },
+    "gpt-4.1": { contextWindow: 1_000_000, pricing: { inputUsdPerM: 2, outputUsdPerM: 8 } },
     o3: { contextWindow: 200_000 },
     "o4-mini": { contextWindow: 200_000 },
     "gemini-3.5-flash-lite": { contextWindow: 1_048_576 },
@@ -86,19 +90,47 @@ function apply(base, ...layers) {
             next.supportsTools = layer.supportsTools;
         if (typeof layer.maxOutputTokens === "number" && layer.maxOutputTokens > 0)
             next.maxOutputTokens = Math.floor(layer.maxOutputTokens);
+        if (layer.pricing && typeof layer.pricing === "object") {
+            const pricing = { ...(next.pricing ?? {}) };
+            if (typeof layer.pricing.inputUsdPerM === "number" && Number.isFinite(layer.pricing.inputUsdPerM) && layer.pricing.inputUsdPerM >= 0)
+                pricing.inputUsdPerM = layer.pricing.inputUsdPerM;
+            if (typeof layer.pricing.outputUsdPerM === "number" && Number.isFinite(layer.pricing.outputUsdPerM) && layer.pricing.outputUsdPerM >= 0)
+                pricing.outputUsdPerM = layer.pricing.outputUsdPerM;
+            if (Object.keys(pricing).length > 0)
+                next.pricing = pricing;
+        }
     }
     return next;
 }
-export function getModelMeta(providerId, model) {
-    const provider = providerId && PROVIDER_META[providerId] ? PROVIDER_META[providerId] : UNKNOWN_MODEL_META;
-    const overrides = loadOverrides();
-    const keys = [
+function overrideKeys(providerId, model) {
+    return [
         providerId && model ? `${providerId}/${model}` : undefined,
         providerId && model ? `${providerId}::${model}` : undefined,
         model,
     ].filter((key) => Boolean(key));
-    const layers = keys.map((key) => overrides[key]);
+}
+export function getModelMeta(providerId, model) {
+    const provider = providerId && PROVIDER_META[providerId] ? PROVIDER_META[providerId] : UNKNOWN_MODEL_META;
+    const overrides = loadOverrides();
+    const layers = overrideKeys(providerId, model).map((key) => overrides[key]);
     return apply(provider, model ? MODEL_OVERRIDES[model] : undefined, ...layers);
+}
+export function modelMetaSource(providerId, model) {
+    const overrides = loadOverrides();
+    if (overrideKeys(providerId, model).some((key) => Boolean(overrides[key])))
+        return "override";
+    if ((providerId && PROVIDER_META[providerId]) || (model && MODEL_OVERRIDES[model]))
+        return "built-in";
+    return "default";
+}
+export function estimateCostUsd(inputTokens, outputTokens, pricing) {
+    if (!pricing)
+        return undefined;
+    const input = Math.max(0, Number.isFinite(inputTokens) ? inputTokens : 0);
+    const output = Math.max(0, Number.isFinite(outputTokens) ? outputTokens : 0);
+    const cost = (input / 1_000_000) * (pricing.inputUsdPerM ?? 0) +
+        (output / 1_000_000) * (pricing.outputUsdPerM ?? 0);
+    return Number.isFinite(cost) && cost > 0 ? cost : undefined;
 }
 export function estTokens(text, options = {}) {
     if (!text)

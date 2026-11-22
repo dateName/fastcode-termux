@@ -1,49 +1,70 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { getPaths } from "../config/paths.js";
-export function listInstalledPlugins() {
-    const { plugins } = getPaths();
-    if (!existsSync(plugins))
+import { isTrusted } from "../config/trust.js";
+function projectPluginsDir(cwd: string): string {
+    return join(cwd, ".fastcode", "plugins");
+}
+function loadPluginsFrom(dir: string) {
+    if (!existsSync(dir))
         return [];
-    return readdirSync(plugins, { withFileTypes: true })
+    return readdirSync(dir, { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
-        .map((entry) => loadPlugin(join(plugins, entry.name), entry.name))
-        .filter((plugin) => plugin !== undefined)
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .map((entry) => loadPlugin(join(dir, entry.name), entry.name))
+        .filter((plugin) => plugin !== undefined);
 }
-export function getPlugin(name) {
-    return listInstalledPlugins().find((p) => p.name === name || basename(p.path) === name);
+export function listInstalledPlugins(cwd = process.cwd()) {
+    const byName = new Map();
+    const dirs = [getPaths().plugins];
+    if (isTrusted(cwd))
+        dirs.push(projectPluginsDir(cwd));
+    for (const dir of dirs) {
+        for (const plugin of loadPluginsFrom(dir))
+            byName.set(plugin.name, plugin);
+    }
+    return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
-export function importPlugin(source, name) {
-    const { plugins } = getPaths();
+export function getPlugin(name, cwd = process.cwd()) {
+    return listInstalledPlugins(cwd).find((p) => p.name === name || basename(p.path) === name);
+}
+export function importPlugin(source, name, cwd = process.cwd()) {
     const src = resolve(source);
     if (!existsSync(src))
         throw new Error(`Plugin source does not exist: ${source}`);
     if (!statSync(src).isDirectory())
         throw new Error("Plugin source must be a directory");
-    const folder = slugify(name ?? basename(src));
-    const target = join(plugins, folder);
+    const fallback = slugify(name ?? basename(src));
+    const manifest = readManifest(src, fallback);
+    const folder = slugify(name ?? manifest.name);
+    const base = manifest.scope === "project" ? projectPluginsDir(cwd) : getPaths().plugins;
+    const target = join(base, folder);
     if (existsSync(target))
         rmSync(target, { recursive: true, force: true });
     mkdirSync(target, { recursive: true });
     cpSync(src, target, { recursive: true });
     writeFileSync(join(target, ".fastcode-source"), src);
     const loaded = loadPlugin(target, folder);
-    if (!loaded)
+    if (!loaded) {
+        rmSync(target, { recursive: true, force: true });
         throw new Error("Plugin must include PLUGIN.md, README.md, or at least one SKILL.md");
+    }
+    if (loaded.unsupported.length > 0) {
+        rmSync(target, { recursive: true, force: true });
+        throw new Error(`Plugin declares unsupported capabilities: ${loaded.unsupported.join(", ")} (only prompt/skills are supported)`);
+    }
     return loaded;
 }
-export function removePlugin(name) {
-    const plugin = getPlugin(name);
+export function removePlugin(name, cwd = process.cwd()) {
+    const plugin = getPlugin(name, cwd);
     if (!plugin)
         return false;
     rmSync(plugin.path, { recursive: true, force: true });
     return true;
 }
-export function buildPluginsPrompt(enabled) {
+export function buildPluginsPrompt(enabled, cwd = process.cwd()) {
     if (enabled.length === 0)
         return "";
-    const plugins = enabled.map(getPlugin).filter((p) => p !== undefined);
+    const plugins = enabled.map((name) => getPlugin(name, cwd)).filter((p) => p !== undefined && (p.unsupported?.length ?? 0) === 0);
     if (plugins.length === 0)
         return "";
     const chunks = plugins.map((plugin) => {
@@ -60,7 +81,33 @@ export function buildPluginsPrompt(enabled) {
         chunks.join("\n\n"),
     ].join("\n");
 }
+const SUPPORTED_PLUGIN_CAPABILITIES = new Set(["prompt", "skills"]);
+
+function readManifest(path, fallbackName) {
+    const file = join(path, "plugin.json");
+    if (!existsSync(file))
+        return { name: fallbackName, capabilities: [], scope: "global", unsupported: [] };
+    try {
+        const raw = JSON.parse(readFileSync(file, "utf8"));
+        const declared = Array.isArray(raw?.capabilities)
+            ? raw.capabilities.filter((entry) => typeof entry === "string" && entry.trim())
+            : [];
+        return {
+            name: typeof raw?.name === "string" && raw.name.trim() ? slugify(raw.name) : fallbackName,
+            version: typeof raw?.version === "string" ? raw.version : undefined,
+            description: typeof raw?.description === "string" ? raw.description : undefined,
+            capabilities: declared,
+            scope: raw?.scope === "project" ? "project" : "global",
+            unsupported: declared.filter((capability) => !SUPPORTED_PLUGIN_CAPABILITIES.has(capability)),
+        };
+    }
+    catch {
+        return { name: fallbackName, capabilities: [], scope: "global", unsupported: [] };
+    }
+}
+
 function loadPlugin(path, fallbackName) {
+    const manifest = readManifest(path, fallbackName);
     const pluginMd = firstExisting([join(path, "PLUGIN.md"), join(path, "README.md")]);
     const skillsDir = join(path, "skills");
     const rootSkill = join(path, "SKILL.md");
@@ -79,12 +126,21 @@ function loadPlugin(path, fallbackName) {
     if (!pluginMd && skills.length === 0)
         return undefined;
     const body = pluginMd ? readFileSync(pluginMd, "utf8") : `Plugin ${fallbackName}`;
+    const inferred = [
+        ...(pluginMd ? ["prompt"] : []),
+        ...(skills.length > 0 ? ["skills"] : []),
+    ];
+    const capabilities = manifest.capabilities.length > 0 ? manifest.capabilities : inferred;
     return {
-        name: fallbackName,
-        description: firstParagraph(body) || `${fallbackName} plugin`,
+        name: manifest.name,
+        description: manifest.description || firstParagraph(body) || `${fallbackName} plugin`,
         path,
         body,
         skills,
+        version: manifest.version,
+        capabilities,
+        scope: manifest.scope,
+        unsupported: capabilities.filter((capability) => !SUPPORTED_PLUGIN_CAPABILITIES.has(capability)),
     };
 }
 function firstExisting(paths) {

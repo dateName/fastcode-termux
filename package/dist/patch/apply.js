@@ -1,14 +1,16 @@
-import { closeSync, constants as fsConstants, fchmodSync, lstatSync, mkdirSync, openSync, renameSync, rmSync, unlinkSync, writeSync } from "node:fs";
+import { lstatSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-export function applyPatchPlan(plan) {
+import { atomicFile } from "../lib/atomic-file.js";
+export async function applyPatchPlan(plan) {
     const warnings = [...plan.warnings];
     const applied = [];
     const touched = [];
     const removed = [];
-    const temps = [];
+    let atomic = true;
     try {
         for (const file of plan.files) {
-            commit(file, warnings, temps);
+            if (!(await commit(file)))
+                atomic = false;
             applied.push(file);
             if (file.kind === "delete") {
                 removed.push(file.path);
@@ -26,15 +28,7 @@ export function applyPatchPlan(plan) {
         }
     }
     catch (err) {
-        for (const tmp of temps) {
-            try {
-                rmSync(tmp, { force: true });
-            }
-            catch {
-                // best effort
-            }
-        }
-        rollback(applied, warnings);
+        await rollback(applied, warnings);
         return {
             ok: false,
             output: `patch failed: ${err?.message ?? String(err)}; rolled back ${applied.length} file(s)`,
@@ -42,6 +36,7 @@ export function applyPatchPlan(plan) {
             touched: [],
             removed: [],
             warnings,
+            atomic,
         };
     }
     const files = plan.files.map((file) => ({
@@ -56,13 +51,14 @@ export function applyPatchPlan(plan) {
         touched,
         removed,
         warnings,
+        atomic,
     };
 }
-function commit(file, warnings, temps) {
+async function commit(file) {
     if (file.kind === "delete") {
         rejectSymlink(file.path);
         unlinkSync(file.path);
-        return;
+        return true;
     }
     const target = file.moveTo ?? file.path;
     if (file.kind === "add" || file.moveTo) {
@@ -71,27 +67,16 @@ function commit(file, warnings, temps) {
     }
     rejectSymlink(target, true);
     mkdirSync(dirname(target), { recursive: true });
-    const tmp = `${target}.fastcode-patch-${process.pid}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-    temps.push(tmp);
-    const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0);
-    const fd = openSync(tmp, flags, 0o600);
+    const staged = atomicFile.temp(target, { mode: file.origMode & 0o777 });
+    let committedAtomic = true;
     try {
-        writeSync(fd, file.newContent ?? "");
-        try {
-            fchmodSync(fd, file.origMode & 0o777);
-        }
-        catch {
-            warnings.push(`could not restore mode ${(file.origMode & 0o777).toString(8)} on ${target}; check permissions`);
-        }
+        await staged.write(file.newContent ?? "");
+        committedAtomic = (await staged.commit()).atomic;
     }
-    finally {
-        closeSync(fd);
+    catch (err) {
+        await staged.discard();
+        throw err;
     }
-    rejectSymlink(target, true);
-    renameSync(tmp, target);
-    const index = temps.indexOf(tmp);
-    if (index >= 0)
-        temps.splice(index, 1);
     if (file.moveTo) {
         try {
             unlinkSync(file.path);
@@ -106,6 +91,7 @@ function commit(file, warnings, temps) {
             throw err;
         }
     }
+    return committedAtomic;
 }
 function rejectSymlink(path, allowMissing = false) {
     try {
@@ -127,7 +113,7 @@ function lexists(path) {
         return false;
     }
 }
-function rollback(applied, warnings) {
+async function rollback(applied, warnings) {
     for (let i = applied.length - 1; i >= 0; i -= 1) {
         const file = applied[i];
         try {
@@ -136,37 +122,30 @@ function rollback(applied, warnings) {
                 continue;
             }
             if (file.kind === "delete") {
-                restore(file.path, file.oldContent ?? "", file.origMode);
+                await restore(file.path, file.oldContent ?? "", file.origMode);
                 continue;
             }
             if (file.moveTo) {
                 rmSync(file.moveTo, { force: true });
-                restore(file.path, file.oldContent ?? "", file.origMode);
+                await restore(file.path, file.oldContent ?? "", file.origMode);
                 continue;
             }
-            restore(file.path, file.oldContent ?? "", file.origMode);
+            await restore(file.path, file.oldContent ?? "", file.origMode);
         }
         catch (err) {
             warnings.push(`rollback failed for ${file.path}: ${err?.message ?? String(err)}`);
         }
     }
 }
-function restore(path, content, mode) {
+async function restore(path, content, mode) {
     mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.fastcode-restore-${process.pid}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-    const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0);
-    const fd = openSync(tmp, flags, 0o600);
+    const staged = atomicFile.temp(path, { mode: mode & 0o777 });
     try {
-        writeSync(fd, content);
-        try {
-            fchmodSync(fd, mode & 0o777);
-        }
-        catch {
-            // best effort during rollback
-        }
+        await staged.write(content);
+        await staged.commit();
     }
-    finally {
-        closeSync(fd);
+    catch (err) {
+        await staged.discard();
+        throw err;
     }
-    renameSync(tmp, path);
 }

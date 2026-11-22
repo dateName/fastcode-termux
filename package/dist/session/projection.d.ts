@@ -54,6 +54,20 @@ export declare function cwdDigest(cwd: string): string;
 export declare function projectionFingerprint(meta: SessionMeta, compactionSource?: ProjectionFingerprint["compactionSource"]): ProjectionFingerprint;
 export declare function sameFingerprint(a: ProjectionFingerprint | undefined, b: ProjectionFingerprint): boolean;
 export declare function sessionMetaFromFacts(facts: any[]): SessionMeta;
+/**
+ * Apply every revert fact in order on top of the latest clear boundary. Each
+ * revert removes the target user fact and everything after it from the current
+ * visible set, so a later revert cannot resurrect an earlier removal.
+ */
+export declare function factsAfterRevert(facts: any[]): any[];
+export interface RevertBoundary {
+    targetUserSeq: number;
+    keepBeforeSeq: number;
+    removed: number;
+    userMessages: number;
+}
+/** Resolve /revert <n>: remove the n-th user message and everything after it. */
+export declare function revertBoundary(facts: any[], n: number): RevertBoundary | undefined;
 export declare function sessionMetaFromFile(file: string): SessionMeta;
 export declare function factsToMessages(facts: any[]): ChatMessage[];
 export declare function compactionSourceFromFacts(facts: any[]): ProjectionFingerprint["compactionSource"];

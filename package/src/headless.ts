@@ -5,7 +5,7 @@
  */
 import readline from "node:readline";
 import { agentSystemPrompt } from "./agent/protocol.js";
-import { compactionConfigFromEnv } from "./agent/compaction.js";
+import { compactionConfigFromEnv, removeSummaryFile } from "./agent/compaction.js";
 import { rememberToolCapability, resolveToolProtocol } from "./agent/protocol-mode.js";
 import { runAgent } from "./agent/runner.js";
 import { setShellPoolSize } from "./agent/shell-session.js";
@@ -17,19 +17,14 @@ import { buildSkillsPrompt } from "./skills/manager.js";
 import { loadConfig, resolveApiKey } from "./config/store.js";
 import { getProviderOrThrow } from "./providers/index.js";
 import { resumeSession } from "./session/projection.js";
+import { discoverInstructions, formatInstructionPrompt } from "./session/instructions.js";
 import { cleanupProcesses } from "./lib/lifecycle.js";
+import { EventStream, headlessSessionId, serializeAgentEvent } from "./agent/event-stream.js";
 
 interface HeadlessOptions {
     prompt: string;
     ui: "json" | "plain";
     resume?: string;
-}
-
-let eventSeq = 0;
-
-function writeEvent(value: Record<string, any>): void {
-    eventSeq += 1;
-    process.stdout.write(JSON.stringify({ v: 1, seq: eventSeq, ts: new Date().toISOString(), ...value }) + "\n");
 }
 
 function optionalBudget(name: string): number | undefined {
@@ -40,6 +35,7 @@ function optionalBudget(name: string): number | undefined {
 export async function runHeadless(options: HeadlessOptions): Promise<void> {
     let config = loadConfig();
     setShellPoolSize(config.shellPoolSize);
+    const stream = options.ui === "json" ? new EventStream(headlessSessionId(options.resume)) : undefined;
     const provider = getProviderOrThrow(config.providerId);
     let apiKey: string | undefined;
     if (provider.authEnv.length > 0) {
@@ -54,6 +50,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         config.systemPrompt,
         buildSkillsPrompt(config.enabledSkills),
         buildPluginsPrompt(config.enabledPlugins),
+        formatInstructionPrompt(discoverInstructions(process.cwd()).entries),
         config.agentMode ? agentSystemPrompt(protocol) : "",
     ].filter((part) => part.trim()).join("\n\n");
     const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -95,18 +92,18 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
 
     const requestApproval = async (request: ApprovalRequest): Promise<ApprovalDecision> => {
         if (options.ui === "json") {
-            writeEvent(encodeGateAsk(request));
+            stream!.emit(encodeGateAsk(request));
             const line = await nextLine(request.timeoutMs ?? 60_000);
             if (line === undefined) {
                 const decision: ApprovalDecision = { kind: "deny", reason: "approval timeout/EOF" };
                 // No session log in headless: the decision frame is the record.
-                writeEvent(encodeGateDecision(request, decision, "timeout/EOF"));
+                stream!.emit(encodeGateDecision(request, decision, "timeout/EOF"));
                 return decision;
             }
             const parsed = parseGateDecision(request, line);
-            writeEvent(encodeGateDecision(request, parsed.decision, parsed.error));
+            stream!.emit(encodeGateDecision(request, parsed.decision, parsed.error));
             if (parsed.error) {
-                writeEvent({ event: "gate:error", version: 1, id: request.id, error: parsed.error });
+                stream!.emit({ event: "gate:error", id: request.id, error: parsed.error });
                 return parsed.decision;
             }
             return parsed.decision;
@@ -133,6 +130,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
     let failed = false;
     let toolCallCount = 0;
     let httpRequestCount = 0;
+    const headlessSummaries = new Set<string>();
     let lastTurn = 0;
     const onSigint = () => abort.abort();
     const onTerminate = () => abort.abort();
@@ -162,7 +160,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             onProtocolFallback: (message) => {
                 rememberToolCapability(config.providerId, config.model, "pseudo");
                 if (options.ui === "json")
-                    writeEvent({ event: "notice", text: message });
+                    stream!.emit({ event: "notice", text: message });
                 else
                     process.stderr.write(`[fastcode] ${message}\n`);
             },
@@ -174,98 +172,23 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         })) {
             if (event.type === "assistant_raw")
                 httpRequestCount += 1;
+            if (event.type === "compaction" && event.summaryFile)
+                headlessSummaries.add(event.summaryFile);
             if (options.ui === "json") {
-                if (event.type === "assistant_text")
-                    writeEvent({ event: "assistant", text: event.text });
-                else if (event.type === "tool_call") {
-                    toolCallCount += 1;
-                    writeEvent({
-                        event: "tool_call",
-                        id: event.id,
-                        tool: event.call.tool,
-                        args: event.call,
-                        ...(event.native ? { native: true } : {}),
-                    });
-                }
-                else if (event.type === "loop_detected")
-                    writeEvent({
-                        event: "loop_detected",
-                        fingerprint: event.fingerprint,
-                        occurrences: event.occurrences,
-                        warned: event.warned,
-                    });
-                else if (event.type === "compaction")
-                    writeEvent({
-                        event: "compaction",
-                        before_chars: event.beforeChars,
-                        after_chars: event.afterChars,
-                        before_tokens: event.beforeTokens,
-                        after_tokens: event.afterTokens,
-                        dropped_messages: event.droppedMessages,
-                        kept_messages: event.keptMessages,
-                        reason: event.reason,
-                        source: event.source,
-                        ...(event.summaryFile ? { summary_file: event.summaryFile } : {}),
-                    });
-                else if (event.type === "checkpoint") {
+                if (event.type === "checkpoint") {
                     lastTurn = event.turn;
-                    writeEvent({
-                        event: "checkpoint",
-                        turn: event.turn,
-                        cwd: event.cwd,
-                        provider_id: event.providerId,
-                        model: event.model,
-                        active_files: event.activeFiles,
-                    });
+                    stream!.setTurn(event.turn + 1);
                 }
-                else if (event.type === "egress_denied")
-                    writeEvent({
-                        event: "egress_denied",
-                        outlet: event.outlet,
-                        ...(event.target ? { target: event.target } : {}),
-                        rule: event.rule,
-                        mode: event.mode,
-                        would_block: event.wouldBlock,
-                        code: event.code,
-                        reason: event.reason,
-                    });
-                else if (event.type === "tool_result")
-                    writeEvent({
-                        event: "tool_result",
-                        id: event.id,
-                        tool: event.call.tool,
-                        ok: event.ok,
-                        output: event.output,
-                        ...(event.sideEffects ? { side_effects: event.sideEffects } : {}),
-                        ...(event.code ? { code: event.code } : {}),
-                        ...(event.hint ? { hint: event.hint } : {}),
-                        ...(event.truncated !== undefined ? { truncated: event.truncated } : {}),
-                        ...(event.totalLines !== undefined ? { total_lines: event.totalLines } : {}),
-                        ...(event.returnedLines !== undefined ? { returned_lines: event.returnedLines } : {}),
-                        ...(event.totalBytes !== undefined ? { total_bytes: event.totalBytes } : {}),
-                        ...(event.returnedBytes !== undefined ? { returned_bytes: event.returnedBytes } : {}),
-                        ...(event.filesRead !== undefined ? { files_read: event.filesRead } : {}),
-                        ...(event.filesSkipped !== undefined ? { files_skipped: event.filesSkipped } : {}),
-                        ...(event.matches !== undefined ? { matches: event.matches } : {}),
-                    });
-                else if (event.type === "usage")
-                    writeEvent({
-                        event: "usage",
-                        input_tokens: event.usage.inputTokens ?? 0,
-                        output_tokens: event.usage.outputTokens ?? 0,
-                        cost_usd: event.usage.costUsd ?? 0,
-                    });
-                else if (event.type === "notice")
-                    writeEvent({ event: "notice", text: event.text });
-                else if (event.type === "error") {
+                if (event.type === "tool_call")
+                    toolCallCount += 1;
+                if (event.type === "error")
                     failed = true;
-                    writeEvent({ event: "error", kind: event.kind, code: event.kind, message: event.message });
-                }
-                else if (event.type === "done") {
-                    if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error" || event.stopReason === "loop_detected")
-                        failed = true;
-                    writeEvent({ event: "done", stopReason: event.stopReason, finalText: event.finalText });
-                }
+                if (event.type === "done" &&
+                    (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error" || event.stopReason === "loop_detected"))
+                    failed = true;
+                const frame = serializeAgentEvent(event);
+                if (frame)
+                    stream!.emit(frame, event.type === "checkpoint" ? event.turn : undefined);
             }
             else if (event.type === "assistant_text") {
                 process.stdout.write(event.text);
@@ -277,7 +200,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
                 // Plain mode must not fail silently: errors go to stderr and
                 // the process exits non-zero so scripts can detect the failure.
                 failed = true;
-                process.stderr.write(`[fastcode] error (${event.kind}): ${event.message}\n`);
+                process.stderr.write(`[fastcode] error (${event.kind}): ${event.message}${event.detail ? `\n${event.detail}` : ""}\n`);
             }
             else if (event.type === "done" && event.finalText) {
                 if (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error" || event.stopReason === "loop_detected")
@@ -286,13 +209,15 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             }
         }
         if (options.ui === "json")
-            writeEvent({ event: "summary", tool_call_count: toolCallCount, http_request_count: httpRequestCount, last_turn: lastTurn });
+            stream!.emit({ event: "summary", tool_call_count: toolCallCount, http_request_count: httpRequestCount, last_turn: lastTurn }, lastTurn);
     }
     finally {
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onTerminate);
         process.removeListener("SIGHUP", onTerminate);
         rl.close();
+        for (const ref of headlessSummaries)
+            removeSummaryFile(ref);
         // Resident shells keep the event loop alive; a normal headless finish
         // must release them just like the TUI and signal paths do.
         cleanupProcesses();

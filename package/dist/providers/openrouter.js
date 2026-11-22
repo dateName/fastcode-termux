@@ -22,6 +22,6 @@ export const openrouterProvider = {
     baseUrl: BASE,
     defaultModel: "anthropic/claude-sonnet-5.5",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC, extraHeaders: EXTRA_HEADERS }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC, extraHeaders: EXTRA_HEADERS, reasoning: "openrouter" }),
+    stream: (req, apiKey) => streamChatCompletion(req, { providerId: "openrouter", baseUrl: BASE, apiKey, staticModels: STATIC, extraHeaders: EXTRA_HEADERS, reasoning: "openrouter" }),
     supportsReasoning: () => true,
 };

@@ -80,11 +80,19 @@ export declare function collectDiagnostics(): {
     customAuthExtraHeaders: boolean;
     toolProtocol: import("../agent/protocol-mode.js").ToolProtocol;
     stdioBackend: string;
+    checkCommand: any;
+    checkTimeoutMs: number;
+    checkFiles: string;
+    checkMode: string;
+    worktreesRoot: string;
+    atomicBackups: string[];
     toolProtocolMode: string;
     toolCapability: string;
     loopExempt: string[];
     modelMetaFile: string;
     modelMeta: import("./model-meta.js").ModelMeta;
+    modelMetaSource: "override" | "built-in" | "default";
+    modelMetaUpdated: string;
     providers: {
         id: string;
         label: string;

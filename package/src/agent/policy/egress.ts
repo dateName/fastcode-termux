@@ -9,6 +9,7 @@
  */
 import { basename, relative, resolve } from "node:path";
 import { getPaths } from "../../config/paths.js";
+import { realpathOf } from "../../lib/realpath.js";
 import { isCriticalReadTarget, isSensitiveTarget, isSharedStoragePath } from "../guards.js";
 import type { EgressAudit, ToolCall } from "../tools/types.js";
 import { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG, type EgressConfig, type EgressMode } from "./defaults.js";
@@ -156,7 +157,8 @@ function expandHome(target: string): string {
 }
 
 function normalizeTarget(target: string, cwd: string): string {
-    return resolve(cwd, expandHome(target)).replace(/\\/g, "/");
+    const lexical = resolve(cwd, expandHome(target));
+    return (realpathOf(lexical) ?? lexical).replace(/\\/g, "/");
 }
 
 function isInside(child: string, parent: string): boolean {

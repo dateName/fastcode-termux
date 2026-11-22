@@ -1,6 +1,19 @@
+import { redactSecrets } from "../lib/child-env.js";
 import { fetchJson, streamSSE } from "../lib/http.js";
+import { IncompleteStreamError } from "../lib/net.js";
 import { finalizeToolCalls, mergeToolCallDelta } from "../lib/native-tools.js";
+import { estimateCostUsd, getModelMeta } from "../lib/model-meta.js";
 import { buildHeaders, buildRequestUrl } from "./spec.js";
+function pricingFor(model, staticModels, providerId) {
+    const known = staticModels?.find((entry) => entry.id === model)?.pricing;
+    if (known && typeof known === "object")
+        return known;
+    return getModelMeta(providerId, model).pricing;
+}
+function withUsageCost(model, usage, staticModels, providerId) {
+    const cost = estimateCostUsd(usage.inputTokens ?? 0, usage.outputTokens ?? 0, pricingFor(model, staticModels, providerId));
+    return cost !== undefined ? { ...usage, costUsd: cost } : usage;
+}
 export function toRequestSpec(opts) {
     return {
         baseUrl: trim(opts.baseUrl),
@@ -85,9 +98,9 @@ export async function* streamChatCompletion(req, opts) {
         // the thinking parameter, or it rejects the legacy OpenAI parameters;
         // never chain both (that used to turn one bad turn into 3 HTTP calls).
         const retryReasoning = res.status === 400 && hasReasoning
-            && /reasoning|thinking|effort|unsupported|unrecognized|unknown parameter/i.test(detail);
+            && /(?:reasoning|thinking|effort)[^.\n]{0,80}(?:unsupported|not supported|unrecognized|unknown)|(?:unsupported|not supported|unrecognized|unknown)[^.\n]{0,40}(?:reasoning|thinking|effort)/i.test(detail);
         const retryCompat = !retryReasoning && res.status === 400
-            && /max_tokens|max_completion_tokens|temperature|unsupported|unrecognized|unknown parameter/i.test(detail);
+            && /(?:max_tokens|max_completion_tokens|temperature)[^.\n]{0,80}(?:unsupported|not supported|unrecognized|unknown)|(?:unsupported|not supported|unrecognized|unknown)[^.\n]{0,40}(?:max_tokens|max_completion_tokens|temperature)/i.test(detail);
         if (retryReasoning || retryCompat) {
             res = await send(retryCompat, false);
             detail = res.ok ? detail : await res.text().catch(() => "");
@@ -95,7 +108,7 @@ export async function* streamChatCompletion(req, opts) {
         if (!res.ok) {
             const prefix = `${res.status} ${res.statusText}`;
             const body = detail.startsWith(`${prefix}:`) ? detail.slice(prefix.length + 1).trimStart() : detail;
-            throw new Error(`${prefix}: ${body.slice(0, 500)}`);
+            throw new Error(`${prefix}: ${redactSecrets(body.slice(0, 500))}`);
         }
     }
     // Some gateways ignore `stream: true` and return one complete JSON body.
@@ -108,7 +121,7 @@ export async function* streamChatCompletion(req, opts) {
             payload = JSON.parse(bodyText);
         }
         catch {
-            throw new Error("Non-stream response was not valid JSON: " + bodyText.slice(0, 200));
+            throw new Error("Non-stream response was not valid JSON: " + redactSecrets(bodyText.slice(0, 200)));
         }
         const choice = payload?.choices?.[0];
         const message = choice?.message ?? choice?.delta ?? {};
@@ -135,11 +148,11 @@ export async function* streamChatCompletion(req, opts) {
                 .filter((call) => Boolean(call.name))
             : [];
         const parsedUsage = payload?.usage
-            ? {
+            ? withUsageCost(req.model, {
                 inputTokens: payload.usage.prompt_tokens,
                 outputTokens: payload.usage.completion_tokens,
                 totalTokens: payload.usage.total_tokens,
-            }
+            }, opts.staticModels, opts.providerId)
             : undefined;
         yield {
             delta: "",
@@ -151,10 +164,14 @@ export async function* streamChatCompletion(req, opts) {
         return;
     }
     let usage;
+    let partialText = "";
+    let sawTerminal = false;
     const toolCalls = new Map();
     for await (const ev of streamSSE(res, { idleTimeoutMs: req.idleTimeoutMs })) {
-        if (ev.data === "[DONE]")
+        if (ev.data === "[DONE]") {
+            sawTerminal = true;
             break;
+        }
         let payload;
         try {
             payload = JSON.parse(ev.data);
@@ -164,6 +181,8 @@ export async function* streamChatCompletion(req, opts) {
         }
         const obj = payload;
         const choice = obj.choices?.[0];
+        if (choice?.finish_reason)
+            sawTerminal = true;
         const raw = choice?.delta?.content ?? choice?.text;
         const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
         if (Array.isArray(choice?.delta?.tool_calls)) {
@@ -175,22 +194,27 @@ export async function* streamChatCompletion(req, opts) {
                 mergeToolCallDelta(toolCalls, delta);
         }
         if (obj.usage) {
-            usage = {
+            usage = withUsageCost(req.model, {
                 inputTokens: obj.usage.prompt_tokens,
                 outputTokens: obj.usage.completion_tokens,
                 totalTokens: obj.usage.total_tokens,
-            };
+            }, opts.staticModels, opts.providerId);
         }
         const text = typeof raw === "string"
             ? raw
             : Array.isArray(raw)
                 ? raw.map((part) => (part?.text ?? "")).join("")
                 : "";
-        if (text)
+        if (text) {
+            partialText += text;
             yield { delta: text, done: false };
-        else if (typeof reasoning === "string" && reasoning)
+        }
+        else if (typeof reasoning === "string" && reasoning) {
             yield { delta: "", done: false, reasoning };
+        }
     }
+    if (!sawTerminal)
+        throw new IncompleteStreamError("OpenAI-compatible stream ended without [DONE] or finish_reason", partialText);
     const calls = finalizeToolCalls(toolCalls);
     yield calls.length > 0 ? { delta: "", done: true, usage, toolCalls: calls } : { delta: "", done: true, usage };
 }

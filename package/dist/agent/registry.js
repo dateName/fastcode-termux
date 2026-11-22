@@ -3,11 +3,19 @@ import { isTrusted } from "../config/trust.js";
 import { DEFAULT_ALLOW_OPTIONS, approvalRequestId, } from "./approval.js";
 import { approvalKey, isPreApproved, rememberApproval } from "./approval-store.js";
 import { evaluateShellCommand } from "./guards.js";
+import { runCheckCommand } from "./check-loop.js";
 import { TOOLS } from "./tools/index.js";
 import { loadConfig } from "../config/store.js";
 import { egressAudit, evaluateEgressCall, evaluateEgressOutput, formatEgressDenial, normalizeEgressConfig, } from "./policy/egress.js";
 const STATE_SCOPES = new Set(["call", "turn", "session"]);
 const REVALIDATE_KEYS = new Set(["trust", "sandboxRoots", "schema", "modelCaps"]);
+const POST_WRITE_TOOLS = new Set([
+    "write_file",
+    "append_file",
+    "replace_in_file",
+    "apply_patch",
+    "copy_file",
+]);
 const TOOL_ERROR_CODES = new Set([
     "ENOENT", "EACCES", "EEXIST", "ENOTDIR", "EISDIR", "EXDEV", "INVALID_ARGS",
     "SANDBOX_DENY", "APPROVAL_DENY", "EGRESS_DENY", "NOT_FOUND", "ABORTED", "UNKNOWN",
@@ -92,7 +100,7 @@ export class ToolRegistry {
         if (!tool)
             return { kind: "deny", reason: `unknown tool: ${String(call.tool)}` };
         if (tool.name === "shell") {
-            const verdict = evaluateShellCommand(call.command);
+            const verdict = evaluateShellCommand(call.command, { cwd: ctx.cwd });
             if (verdict.action === "hard_block")
                 return { kind: "deny", reason: verdict.output, code: verdict.code, target: verdict.target };
             if (verdict.action === "soft_gate") {
@@ -120,7 +128,8 @@ export class ToolRegistry {
         const prepared = tool.prepare(call, toolCtx);
         if (prepared.ok === false)
             return { ok: false, output: prepared.output, code: prepared.code ?? "INVALID_ARGS", hint: prepared.hint };
-        const egressConfig = normalizeEgressConfig(loadConfig().egress);
+        const config = loadConfig();
+        const egressConfig = normalizeEgressConfig(config.egress);
         const preEgress = evaluateEgressCall(call, ctx.cwd, egressConfig);
         if (preEgress.action === "deny") {
             const egressDecision = preEgress.decision;
@@ -179,6 +188,22 @@ export class ToolRegistry {
                 sideEffects: normalizeSideEffects(result.sideEffects),
                 ...(preAudit && !result.egress ? { egress: preAudit } : {}),
             };
+            if (result.ok && config.checkCommand && result.sideEffects && POST_WRITE_TOOLS.has(call.tool)) {
+                const files = Array.from(new Set([
+                    ...(result.sideEffects.created ?? []),
+                    ...(result.sideEffects.touched ?? []),
+                    ...(result.sideEffects.removed ?? []),
+                ]));
+                const check = await runCheckCommand(config.checkCommand, ctx.cwd, files, config.checkTimeoutMs);
+                if (check) {
+                    const status = check.ok ? "passed" : check.timedOut ? "timed out" : "failed";
+                    result = {
+                        ...result,
+                        check,
+                        output: `${result.output}\n\n[check ${status}]${check.output ? `\n${check.output}` : ""}`.trimEnd(),
+                    };
+                }
+            }
             const postEgress = evaluateEgressOutput(call.tool, result.output, egressConfig);
             if (postEgress.action === "deny") {
                 const egressDecision = postEgress.decision;

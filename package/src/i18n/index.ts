@@ -25,8 +25,8 @@ let override: Locale | undefined;
 let cached: Locale | undefined;
 
 /** Reduce an arbitrary tag to a supported base locale, defaulting to English. */
-export function normalizeLocale(input: string | undefined | null): Locale {
-    const value = (input ?? "").trim().toLowerCase();
+export function normalizeLocale(input: unknown): Locale {
+    const value = String(input ?? "").trim().toLowerCase();
     if (!value) return "en";
     if (value.startsWith("zh")) return "zh";
     return "en";
@@ -34,8 +34,8 @@ export function normalizeLocale(input: string | undefined | null): Locale {
 
 function configuredLocale(): string | undefined {
     try {
-        const config = loadConfig() as { language?: string } | undefined;
-        return config?.language;
+        const config = loadConfig() as { language?: unknown } | undefined;
+        return typeof config?.language === "string" ? config.language : undefined;
     } catch {
         return undefined;
     }
@@ -51,8 +51,8 @@ export function resolveLocale(): Locale {
 }
 
 /** Force a locale for this process; pass `undefined` to fall back to auto-detect. */
-export function setLocale(locale: string | undefined): Locale {
-    override = locale && locale.trim() ? normalizeLocale(locale) : undefined;
+export function setLocale(locale: unknown): Locale {
+    override = typeof locale === "string" && locale.trim() ? normalizeLocale(locale) : undefined;
     cached = undefined;
     return resolveLocale();
 }

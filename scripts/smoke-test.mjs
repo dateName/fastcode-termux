@@ -3,8 +3,9 @@
  * FastCode smoke test — structural and behavioural checks on the compiled package.
  * Usage (from the project root):  node scripts/smoke-test.mjs
  */
-import { readdirSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, existsSync, writeFileSync, readFileSync, chmodSync, statSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readdirSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, linkSync, existsSync, writeFileSync, readFileSync, chmodSync, statSync } from "node:fs";
+import { copyFile as fsCopyFile, open as fsOpen, rename as fsRename } from "node:fs/promises";
+import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -192,6 +193,90 @@ try {
 finally {
     await new Promise((resolve) => specServer.close(resolve));
 }
+const truncatedSseServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`);
+        res.end();
+    });
+});
+await new Promise((resolve) => truncatedSseServer.listen(0, "127.0.0.1", resolve));
+const truncatedSsePort = truncatedSseServer.address().port;
+let truncatedSseError = null;
+try {
+    for await (const _ of compatible.streamChatCompletion({ model: "m", messages: [] }, { baseUrl: `http://127.0.0.1:${truncatedSsePort}/v1`, apiKey: "k" }))
+        void _;
+}
+catch (err) {
+    truncatedSseError = err;
+}
+await new Promise((resolve) => truncatedSseServer.close(resolve));
+ok("B2-04 premature SSE EOF is reported as incomplete",
+    truncatedSseError?.name === "IncompleteStreamError" && /without \[DONE\]/.test(String(truncatedSseError?.message)),
+    JSON.stringify({ name: truncatedSseError?.name, message: String(truncatedSseError?.message ?? "") }));
+const anthropicProviderForEof = providers.getProvider("anthropic");
+const savedFetchForAnthropic = globalThis.fetch;
+let anthropicEofError = null;
+globalThis.fetch = async () => new Response(
+    `data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "partial" } })}\n\n`,
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+);
+try {
+    for await (const _ of anthropicProviderForEof.stream({ model: "claude-sonnet-5.5", messages: [{ role: "user", content: "hi" }], maxOutputTokens: 128 }, "k"))
+        void _;
+}
+catch (err) {
+    anthropicEofError = err;
+}
+finally {
+    globalThis.fetch = savedFetchForAnthropic;
+}
+ok("B2-04 Anthropic premature EOF is reported as incomplete",
+    anthropicEofError?.name === "IncompleteStreamError" && /message_stop/.test(String(anthropicEofError?.message)),
+    JSON.stringify({ name: anthropicEofError?.name, message: String(anthropicEofError?.message ?? "") }));
+const redactedErrorServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "bad credential sk-supersecret12345678" } }));
+    });
+});
+await new Promise((resolve) => redactedErrorServer.listen(0, "127.0.0.1", resolve));
+const redactedErrorPort = redactedErrorServer.address().port;
+let redactedError = "";
+try {
+    for await (const _ of compatible.streamChatCompletion({ model: "m", messages: [] }, { baseUrl: `http://127.0.0.1:${redactedErrorPort}/v1`, apiKey: "k" }))
+        void _;
+}
+catch (err) {
+    redactedError = String(err?.message ?? err);
+}
+await new Promise((resolve) => redactedErrorServer.close(resolve));
+ok("B2-13 provider error bodies redact secrets",
+    /500/.test(redactedError) && /\[REDACTED\]/.test(redactedError) && !redactedError.includes("sk-supersecret12345678"),
+    redactedError.slice(0, 200));
+const httpModuleForRedaction = await load("lib/http.js");
+const fetchJsonErrorServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "upstream key sk-jsonsecret12345678" }));
+    });
+});
+await new Promise((resolve) => fetchJsonErrorServer.listen(0, "127.0.0.1", resolve));
+const fetchJsonErrorPort = fetchJsonErrorServer.address().port;
+let fetchJsonError = "";
+try {
+    await httpModuleForRedaction.fetchJson(`http://127.0.0.1:${fetchJsonErrorPort}/v1`);
+}
+catch (err) {
+    fetchJsonError = String(err?.message ?? err);
+}
+await new Promise((resolve) => fetchJsonErrorServer.close(resolve));
+ok("B2-13 fetchJson errors redact secrets",
+    /502/.test(fetchJsonError) && /\[REDACTED\]/.test(fetchJsonError) && !fetchJsonError.includes("sk-jsonsecret12345678"),
+    fetchJsonError.slice(0, 200));
 let nonStreamJsonRequests = 0;
 const nonStreamJsonServer = createServer((req, res) => {
     req.on("data", () => { });
@@ -213,6 +298,27 @@ ok("#129 non-stream JSON content stays plain text instead of a tool-call channel
         nonStreamJsonChunks.every((chunk) => !chunk.toolCalls || chunk.toolCalls.length === 0) &&
         nonStreamJsonChunks.map((chunk) => chunk.delta).join("").includes("<fastcode_tool>"),
     JSON.stringify(nonStreamJsonChunks));
+
+const costServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1000000, completion_tokens: 500000, total_tokens: 1500000 } })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+    });
+});
+await new Promise((resolve) => costServer.listen(0, "127.0.0.1", resolve));
+const costPort = costServer.address().port;
+let costUsage;
+for await (const chunk of compatible.streamChatCompletion({ model: "gpt-4o", messages: [] }, { baseUrl: `http://127.0.0.1:${costPort}/v1`, apiKey: "k" })) {
+    if (chunk.usage)
+        costUsage = chunk.usage;
+}
+costServer.close();
+ok("openai-compatible usage includes costUsd from built-in pricing",
+    costUsage?.costUsd === 7.5, JSON.stringify(costUsage));
 
 let retry400Requests = 0;
 const retry400Server = createServer((req, res) => {
@@ -237,6 +343,29 @@ retry400Server.close();
 ok("#139 a compatibility 400 is retried at most once",
     retry400Requests === 2 && /\b400\b/.test(retry400Error),
     JSON.stringify({ retry400Requests, retry400Error: retry400Error.slice(0, 200) }));
+let toolsUnsupportedRequests = 0;
+const toolsUnsupportedServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        toolsUnsupportedRequests += 1;
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "tools are unsupported by this model" } }));
+    });
+});
+await new Promise((resolve) => toolsUnsupportedServer.listen(0, "127.0.0.1", resolve));
+const toolsUnsupportedPort = toolsUnsupportedServer.address().port;
+let toolsUnsupportedError = "";
+try {
+    for await (const _ of compatible.streamChatCompletion({ model: "m", messages: [] }, { baseUrl: `http://127.0.0.1:${toolsUnsupportedPort}/v1`, apiKey: "k" }))
+        void _;
+}
+catch (err) {
+    toolsUnsupportedError = String(err?.message ?? err);
+}
+toolsUnsupportedServer.close();
+ok("B2-14 a tools-unsupported 400 is not retried as a parameter error",
+    toolsUnsupportedRequests === 1 && /\b400\b/.test(toolsUnsupportedError),
+    JSON.stringify({ requests: toolsUnsupportedRequests, error: toolsUnsupportedError.slice(0, 200) }));
 
 const duplicate400Server = createServer((req, res) => {
     req.on("data", () => { });
@@ -621,6 +750,178 @@ if (fileLink) {
     const grepOutside = await agentTools.runAgentTool({ tool: "grep", pattern: "grep-secret-needle", path: ".", maxDepth: 2 }, tmp);
     ok("grep does not follow a file symlink that leaves the sandbox", grepOutside.ok === true && !grepOutside.output.includes("grep-secret-needle"), grepOutside.output);
 }
+let danglingWriteLink = false;
+const danglingOutsideTarget = join(outsideDir, "dangling-created.txt");
+try {
+    symlinkSync(danglingOutsideTarget, join(tmp, "dangling-write"), "file");
+    danglingWriteLink = true;
+}
+catch {
+    // Windows without symlink privilege: skip this case.
+}
+if (danglingWriteLink) {
+    const danglingWrite = await agentTools.runAgentTool({ tool: "write_file", path: "dangling-write", content: "PWNED" }, tmp);
+    ok("B2-01 write_file refuses a dangling symlink target", danglingWrite.ok === false && !existsSync(danglingOutsideTarget), danglingWrite.output);
+    const danglingAppend = await agentTools.runAgentTool({ tool: "append_file", path: "dangling-write", content: "PWNED" }, tmp);
+    ok("B2-01 append_file refuses a dangling symlink target", danglingAppend.ok === false && !existsSync(danglingOutsideTarget), danglingAppend.output);
+    const danglingCopy = await agentTools.runAgentTool({ tool: "copy_file", from: "a.txt", to: "dangling-write" }, tmp);
+    ok("B2-01 copy_file refuses a dangling symlink target", danglingCopy.ok === false && !existsSync(danglingOutsideTarget), danglingCopy.output);
+}
+let danglingAncestorLink = false;
+const danglingOutsideDir = join(outsideDir, "dangling-dir");
+try {
+    symlinkSync(danglingOutsideDir, join(tmp, "dangling-ancestor"), "dir");
+    danglingAncestorLink = true;
+}
+catch {
+    try {
+        // Windows can create a directory junction without symlink privilege.
+        symlinkSync(danglingOutsideDir, join(tmp, "dangling-ancestor"), "junction");
+        danglingAncestorLink = true;
+    }
+    catch {
+        // Windows without symlink/junction privilege: skip this case.
+    }
+}
+if (danglingAncestorLink) {
+    const viaDanglingAncestor = await agentTools.runAgentTool({ tool: "write_file", path: "dangling-ancestor/pwn.txt", content: "PWNED" }, tmp);
+    ok("B2-01 write_file refuses a dangling symlink ancestor",
+        viaDanglingAncestor.ok === false && !existsSync(join(danglingOutsideDir, "pwn.txt")), viaDanglingAncestor.output);
+    const appendViaDanglingAncestor = await agentTools.runAgentTool({ tool: "append_file", path: "dangling-ancestor/pwn.txt", content: "PWNED" }, tmp);
+    ok("B2-01 append_file refuses a dangling symlink ancestor",
+        appendViaDanglingAncestor.ok === false && !existsSync(join(danglingOutsideDir, "pwn.txt")), appendViaDanglingAncestor.output);
+    const copyViaDanglingAncestor = await agentTools.runAgentTool({ tool: "copy_file", from: "a.txt", to: "dangling-ancestor/pwn.txt" }, tmp);
+    ok("B2-01 copy_file refuses a dangling symlink ancestor",
+        copyViaDanglingAncestor.ok === false && !existsSync(join(danglingOutsideDir, "pwn.txt")), copyViaDanglingAncestor.output);
+}
+let insideDanglingLink = false;
+const insideDanglingTarget = join(tmp, "created-through-inside-link.txt");
+try {
+    symlinkSync(insideDanglingTarget, join(tmp, "inside-dangling"), "file");
+    insideDanglingLink = true;
+}
+catch {
+    // Windows without symlink privilege: skip this case.
+}
+if (insideDanglingLink) {
+    const insideWrite = await agentTools.runAgentTool({ tool: "write_file", path: "inside-dangling", content: "safe" }, tmp);
+    ok("B2-01 an in-sandbox dangling link resolves to an in-sandbox target",
+        insideWrite.ok === true && readFileSync(insideDanglingTarget, "utf8") === "safe", insideWrite.output);
+}
+const trustForHardLinks = await load("config/trust.js");
+trustForHardLinks.trustProject(tmp);
+let hardLinksMade = false;
+const hardWriteOutside = join(outsideDir, "hard-write-outside.txt");
+const hardAppendOutside = join(outsideDir, "hard-append-outside.txt");
+const hardCopyOutside = join(outsideDir, "hard-copy-outside.txt");
+const hardReplaceOutside = join(outsideDir, "hard-replace-outside.txt");
+try {
+    writeFileSync(hardWriteOutside, "ORIGINAL", "utf8");
+    linkSync(hardWriteOutside, join(tmp, "hard-write"));
+    writeFileSync(hardAppendOutside, "ORIGINAL", "utf8");
+    linkSync(hardAppendOutside, join(tmp, "hard-append"));
+    writeFileSync(hardCopyOutside, "ORIGINAL", "utf8");
+    linkSync(hardCopyOutside, join(tmp, "hard-copy"));
+    writeFileSync(hardReplaceOutside, "ORIGINAL needle", "utf8");
+    linkSync(hardReplaceOutside, join(tmp, "hard-replace"));
+    hardLinksMade = true;
+}
+catch {
+    // Filesystems without hard-link support: skip these cases.
+}
+if (hardLinksMade) {
+    const hardWrite = await agentTools.runAgentTool({ tool: "write_file", path: "hard-write", content: "PWNED" }, tmp);
+    ok("B2-01b write_file breaks a hard link instead of writing outside",
+        hardWrite.ok === true && readFileSync(hardWriteOutside, "utf8") === "ORIGINAL" &&
+            readFileSync(join(tmp, "hard-write"), "utf8") === "PWNED",
+        JSON.stringify({ result: hardWrite, outside: readFileSync(hardWriteOutside, "utf8"), inside: readFileSync(join(tmp, "hard-write"), "utf8") }));
+    const hardAppend = await agentTools.runAgentTool({ tool: "append_file", path: "hard-append", content: "PWNED" }, tmp);
+    ok("B2-01b append_file refuses a hard-linked target",
+        hardAppend.ok === false && readFileSync(hardAppendOutside, "utf8") === "ORIGINAL" &&
+            readFileSync(join(tmp, "hard-append"), "utf8") === "ORIGINAL", hardAppend.output);
+    const hardCopy = await agentTools.runAgentTool({ tool: "copy_file", from: "a.txt", to: "hard-copy", overwrite: true }, tmp);
+    ok("B2-01b copy_file breaks a hard link instead of writing outside",
+        hardCopy.ok === true && readFileSync(hardCopyOutside, "utf8") === "ORIGINAL" &&
+            readFileSync(join(tmp, "hard-copy"), "utf8") === readFileSync(join(tmp, "a.txt"), "utf8"),
+        JSON.stringify({ result: hardCopy, outside: readFileSync(hardCopyOutside, "utf8"), inside: readFileSync(join(tmp, "hard-copy"), "utf8") }));
+    const hardReplace = await agentTools.runAgentTool({ tool: "replace_in_file", path: "hard-replace", find: "needle", replace: "safe" }, tmp);
+    ok("B2-01b replace_in_file breaks a hard link instead of writing outside",
+        hardReplace.ok === true && readFileSync(hardReplaceOutside, "utf8") === "ORIGINAL needle" &&
+            readFileSync(join(tmp, "hard-replace"), "utf8") === "ORIGINAL safe",
+        JSON.stringify({ result: hardReplace, outside: readFileSync(hardReplaceOutside, "utf8"), inside: readFileSync(join(tmp, "hard-replace"), "utf8") }));
+    const normalAppend = await agentTools.runAgentTool({ tool: "append_file", path: "append-normal.txt", content: "hello" }, tmp);
+    ok("B2-01b append_file still appends to a normal file",
+        normalAppend.ok === true && readFileSync(join(tmp, "append-normal.txt"), "utf8") === "hello" &&
+            normalAppend.oldText === "" && normalAppend.newText === "hello",
+        JSON.stringify(normalAppend));
+}
+const atomicModule = await load("lib/atomic-file.js");
+const atomicRoot = mkdtempSync(join(tmpdir(), "fastcode-atomic-"));
+const atomicTarget = join(atomicRoot, "a.txt");
+writeFileSync(atomicTarget, "old", "utf8");
+let renameFailures = 1;
+const fallbackAtomic = atomicModule.createAtomicFile({
+    rename: async (from, to) => {
+        if (renameFailures > 0) {
+            renameFailures -= 1;
+            throw Object.assign(new Error("cross-device rename"), { code: "EXDEV" });
+        }
+        return fsRename(from, to);
+    },
+});
+const fallbackWrite = await fallbackAtomic.write(atomicTarget, "new", { mode: 0o600 });
+ok("atomic-file fallback succeeds and marks atomic:false",
+    fallbackWrite.atomic === false && readFileSync(atomicTarget, "utf8") === "new",
+    JSON.stringify(fallbackWrite));
+const restoreTarget = join(atomicRoot, "restore.txt");
+writeFileSync(restoreTarget, "before", "utf8");
+const restoreAtomic = atomicModule.createAtomicFile({
+    rename: async () => { throw Object.assign(new Error("cross-device rename"), { code: "EXDEV" }); },
+    open: async (path, flags, mode) => {
+        if (path === restoreTarget)
+            throw Object.assign(new Error("simulated target write failure"), { code: "EIO" });
+        return fsOpen(path, flags, mode);
+    },
+});
+let restoreError = null;
+try {
+    await restoreAtomic.write(restoreTarget, "after");
+}
+catch (err) {
+    restoreError = err;
+}
+ok("atomic-file restores the original bytes after fallback failure",
+    restoreError && readFileSync(restoreTarget, "utf8") === "before" &&
+        restoreAtomic.backups(atomicRoot).length === 0,
+    JSON.stringify({ message: restoreError?.message, backups: restoreAtomic.backups(atomicRoot) }));
+const keepTarget = join(atomicRoot, "keep.txt");
+writeFileSync(keepTarget, "keep-before", "utf8");
+const keepAtomic = atomicModule.createAtomicFile({
+    rename: async () => { throw Object.assign(new Error("cross-device rename"), { code: "EXDEV" }); },
+    open: async (path, flags, mode) => {
+        if (path === keepTarget)
+            throw Object.assign(new Error("simulated target write failure"), { code: "EIO" });
+        return fsOpen(path, flags, mode);
+    },
+    copyFile: async (from, to) => {
+        if (String(from).includes(".fastcode-backup-"))
+            throw Object.assign(new Error("simulated restore failure"), { code: "EACCES" });
+        return fsCopyFile(from, to);
+    },
+});
+let keepError = null;
+try {
+    await keepAtomic.write(keepTarget, "keep-after");
+}
+catch (err) {
+    keepError = err;
+}
+const keptBackups = keepAtomic.backups(atomicRoot);
+ok("atomic-file keeps a backup when restore also fails",
+    keepError && /backup kept at/.test(String(keepError.message)) &&
+        readFileSync(keepTarget, "utf8") === "keep-before" && keptBackups.length === 1,
+    JSON.stringify({ message: keepError?.message, backups: keptBackups }));
+rmSync(atomicRoot, { recursive: true, force: true });
 const extraDir = mkdtempSync(join(tmpdir(), "fastcode-extra-"));
 writeFileSync(join(extraDir, "allowed.txt"), "needle extra" + LF, "utf8");
 const blockedByDefault = await agentTools.runAgentTool({ tool: "read_file", path: join(extraDir, "allowed.txt") }, tmp);
@@ -663,6 +964,21 @@ const manyRead = await agentTools.runAgentTool({ tool: "read_many", paths: manyP
 ok("read_many honors the total byte budget",
     manyRead.ok === true && manyRead.truncated === true && manyRead.returnedBytes <= 150_000 && manyRead.filesRead < 10,
     JSON.stringify({ ok: manyRead.ok, returnedBytes: manyRead.returnedBytes, filesRead: manyRead.filesRead, filesSkipped: manyRead.filesSkipped }));
+const savedReadManyMax = process.env.FASTCODE_READ_MANY_MAX_BYTES;
+process.env.FASTCODE_READ_MANY_MAX_BYTES = "16";
+const clampedReadMany = await agentTools.runAgentTool({ tool: "read_many", paths: ["many/f0.txt"], maxBytes: 100_000 }, tmp);
+if (savedReadManyMax === undefined)
+    delete process.env.FASTCODE_READ_MANY_MAX_BYTES;
+else
+    process.env.FASTCODE_READ_MANY_MAX_BYTES = savedReadManyMax;
+ok("B2-06 read_many clamps maxBytes to the configured budget",
+    clampedReadMany.ok === true && clampedReadMany.returnedBytes <= 16 && clampedReadMany.truncated === true,
+    JSON.stringify(clampedReadMany));
+const partialReadMany = await agentTools.runAgentTool({ tool: "read_many", paths: ["many/f0.txt", "missing-many.txt"] }, tmp);
+ok("B2-06 read_many skips a missing file instead of losing all results",
+    partialReadMany.ok === true && partialReadMany.filesRead === 1 && partialReadMany.filesSkipped >= 1 &&
+        /missing-many\.txt/.test(partialReadMany.output),
+    JSON.stringify(partialReadMany));
 
 writeFileSync(join(tmp, "case.txt"), "Needle" + LF + "needle" + LF + "NEEDLE" + LF, "utf8");
 const grepCase = await agentTools.runAgentTool({ tool: "grep", pattern: "Needle", path: ".", caseSensitive: true, glob: "case.txt" }, tmp);
@@ -674,6 +990,22 @@ writeFileSync(join(tmp, "matches.txt"), Array.from({ length: 10 }, (_, index) =>
 const grepMax = await agentTools.runAgentTool({ tool: "grep", pattern: "hit", path: ".", glob: "matches.txt", maxResults: 3 }, tmp);
 ok("grep maxResults truncates with metadata", grepMax.ok === true && grepMax.matches === 3 && grepMax.truncated === true, JSON.stringify(grepMax));
 writeFileSync(join(tmp, "longline.txt"), "needle " + "z".repeat(5_000) + LF, "utf8");
+const unsafeGlob = await agentTools.runAgentTool({ tool: "grep", pattern: "x", path: ".", glob: "**/".repeat(9) + "*.ts" }, tmp);
+const ignoreRoot = mkdtempSync(join(tmpdir(), "fastcode-ignore-"));
+writeFileSync(join(ignoreRoot, ".fastcodeignore"), "**/".repeat(9) + "secret\n", "utf8");
+const ignoreModule = await load("agent/ignore.js");
+const ignoreMatcher = ignoreModule.createIgnore(ignoreRoot);
+const unsafeIgnoreSkipped = ignoreMatcher.ignored("secret", join(ignoreRoot, "secret"), false) === false;
+rmSync(ignoreRoot, { recursive: true, force: true });
+ok("B2-05 over-complex globs are rejected or capped",
+    unsafeGlob.ok === false && /too many/.test(unsafeGlob.output) && unsafeIgnoreSkipped,
+    JSON.stringify({ safe: unsafeGlob, ignoreSkipped: unsafeIgnoreSkipped }));
+const bigIgnoreRoot = mkdtempSync(join(tmpdir(), "fastcode-ignore-big-"));
+writeFileSync(join(bigIgnoreRoot, ".fastcodeignore"), "#".repeat(300 * 1024), "utf8");
+const bigIgnoreMatcher = ignoreModule.createIgnore(bigIgnoreRoot);
+ok("B2-05 oversized .fastcodeignore is ignored instead of parsed",
+    bigIgnoreMatcher.ignored("secret", join(bigIgnoreRoot, "secret"), false) === false);
+rmSync(bigIgnoreRoot, { recursive: true, force: true });
 const grepLong = await agentTools.runAgentTool({ tool: "grep", pattern: "needle", path: ".", glob: "longline.txt", maxResults: 1 }, tmp);
 ok("grep clips a very long matched line", grepLong.ok === true && grepLong.output.includes("…") && !grepLong.output.includes("z".repeat(600)),
     JSON.stringify({ chars: grepLong.output.length }));
@@ -693,6 +1025,11 @@ ok("config and keys stay in separate files", !existsSync(paths.getPaths().auth))
 
 // API keys are provider-scoped: every model of a provider reuses one key.
 store.setCredential("deepseek", "deepseek-chat", "sk-1234567890abcd");
+const authFile = join(process.env.FASTCODE_HOME, "auth.json");
+const authFileMode = statSync(authFile).mode & 0o777;
+ok("B2-12 auth.json is written with 0600 permissions",
+    process.platform === "win32" || authFileMode === 0o600,
+    JSON.stringify({ mode: authFileMode.toString(8) }));
 ok("a provider key resolves for its own model", store.resolveApiKey("deepseek", "deepseek-chat", []).status === "ok");
 ok("the same provider key resolves for another model", store.resolveApiKey("deepseek", "deepseek-reasoner", []).status === "ok");
 process.env.DEEPSEEK_API_KEY = "sk-fromenv";
@@ -727,6 +1064,55 @@ ok("partial /login provider+model args continue at key entry", loginStarts.at(-1
 const changesBeforeUnknown = quickChanges.length;
 const unknownLogin = await loginCommands.loginCommand.run({ args: ["not-a-provider"], actions: commandActions });
 const unknownProvider = providerCommands.providerCommand.run({ args: ["not-a-provider"], actions: commandActions, state: commandState });
+const planCommands = await load("commands/plan.js");
+let planResult = planCommands.planCommand.run({ args: ["set", "one;", "two"], state: {} });
+ok("plan set creates pending items",
+    planResult.plan?.items.length === 2 && planResult.plan.items.every((item) => item.status === "pending"),
+    JSON.stringify(planResult));
+planResult = planCommands.planCommand.run({ args: ["done", "2"], state: { plan: planResult.plan } });
+ok("plan done updates the item status",
+    planResult.plan?.items[1].status === "done", JSON.stringify(planResult));
+const goalResult = planCommands.goalCommand.run({ args: ["ship", "it"], state: { plan: planResult.plan } });
+ok("goal sets the session goal", goalResult.plan?.goal === "ship it", JSON.stringify(goalResult));
+
+let gitAvailable = false;
+try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    gitAvailable = true;
+}
+catch {
+    // no git on this machine
+}
+const worktreeModule = await load("session/worktree.js");
+if (gitAvailable) {
+    const worktreeRepo = mkdtempSync(join(tmpdir(), "fastcode-worktree-"));
+    execFileSync("git", ["init"], { cwd: worktreeRepo, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "smoke@example.com"], { cwd: worktreeRepo, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Smoke"], { cwd: worktreeRepo, stdio: "ignore" });
+    writeFileSync(join(worktreeRepo, "a.txt"), "base", "utf8");
+    execFileSync("git", ["add", "a.txt"], { cwd: worktreeRepo, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: worktreeRepo, stdio: "ignore" });
+    const created = worktreeModule.createWorktree(worktreeRepo, "smoke-wt");
+    ok("worktree create/list works", existsSync(created.path) &&
+        worktreeModule.listWorktrees(worktreeRepo).some((entry) => resolve(entry.path) === resolve(created.path)), JSON.stringify(created));
+    writeFileSync(join(created.path, "a.txt"), "changed", "utf8");
+    execFileSync("git", ["add", "a.txt"], { cwd: created.path, stdio: "ignore" });
+    const wtDiff = worktreeModule.worktreeDiff(created.path);
+    ok("worktree diff reports tracked changes", /changed/.test(wtDiff.diff), JSON.stringify(wtDiff));
+    const applied = worktreeModule.applyWorktree(worktreeRepo, created.path);
+    ok("worktree apply updates the main checkout",
+        applied.applied === true && readFileSync(join(worktreeRepo, "a.txt"), "utf8") === "changed", JSON.stringify(applied));
+    const blockedApply = worktreeModule.applyWorktree(worktreeRepo, created.path);
+    ok("worktree apply rejects a dirty target checkout",
+        blockedApply.applied === false && /uncommitted changes/i.test(blockedApply.output), JSON.stringify(blockedApply));
+    worktreeModule.removeWorktree(worktreeRepo, created.path, true);
+    ok("worktree remove with force discards the worktree", !existsSync(created.path), created.path);
+    rmSync(worktreeRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+else {
+    ok("worktree tests skipped (git unavailable)", true);
+}
+
 ok("unknown providers do not change configuration", quickChanges.length === changesBeforeUnknown &&
     /Unknown provider/.test(unknownLogin.message) && /Unknown provider/.test(unknownProvider.message));
 providerCommands.providerCommand.run({ args: ["openai"], actions: commandActions, state: commandState });
@@ -842,6 +1228,63 @@ const verifyConfirmed = await skillsCommand.skillsCommand.run({ args: ["verify",
 ok("/skills verify --confirm re-baselines the skill", /locked/.test(verifyConfirmed.message), verifyConfirmed.message);
 rmSync(integrityDir, { recursive: true, force: true });
 
+const pluginsManager = await load("plugins/manager.js");
+const pluginSource = mkdtempSync(join(tmpdir(), "fastcode-plugin-source-"));
+writeFileSync(join(pluginSource, "plugin.json"), JSON.stringify({
+    name: "manifest-plugin",
+    version: "1.2.3",
+    description: "manifest test",
+    capabilities: ["prompt", "skills"],
+    scope: "global",
+}), "utf8");
+writeFileSync(join(pluginSource, "PLUGIN.md"), "manifest body", "utf8");
+const importedPlugin = pluginsManager.importPlugin(pluginSource, "manifest-plugin");
+ok("external plugin manifest is loaded and starts disabled",
+    importedPlugin.version === "1.2.3" && importedPlugin.scope === "global" &&
+        importedPlugin.capabilities.includes("prompt") && pluginsManager.buildPluginsPrompt([]) === "",
+    JSON.stringify(importedPlugin));
+ok("enabled external plugin contributes its prompt",
+    /manifest body/.test(pluginsManager.buildPluginsPrompt([importedPlugin.name])),
+    pluginsManager.buildPluginsPrompt([importedPlugin.name]));
+const badPluginSource = mkdtempSync(join(tmpdir(), "fastcode-plugin-bad-"));
+writeFileSync(join(badPluginSource, "plugin.json"), JSON.stringify({ name: "bad-plugin", capabilities: ["tools"] }), "utf8");
+writeFileSync(join(badPluginSource, "PLUGIN.md"), "bad body", "utf8");
+let badPluginRejected = false;
+try {
+    pluginsManager.importPlugin(badPluginSource, "bad-plugin");
+}
+catch (err) {
+    badPluginRejected = /unsupported capabilities/i.test(String(err.message));
+}
+ok("unsupported plugin capabilities are rejected", badPluginRejected &&
+    !pluginsManager.listInstalledPlugins().some((plugin) => plugin.name === "bad-plugin"));
+const projectPluginCwd = mkdtempSync(join(tmpdir(), "fastcode-plugin-project-"));
+const projectPluginSource = mkdtempSync(join(tmpdir(), "fastcode-plugin-project-source-"));
+writeFileSync(join(projectPluginSource, "plugin.json"), JSON.stringify({
+    name: "project-plugin",
+    scope: "project",
+    capabilities: ["prompt"],
+}), "utf8");
+writeFileSync(join(projectPluginSource, "PLUGIN.md"), "project plugin body", "utf8");
+const importedProjectPlugin = pluginsManager.importPlugin(projectPluginSource, "project-plugin", projectPluginCwd);
+const untrustedProjectPluginHidden = !pluginsManager.listInstalledPlugins(projectPluginCwd).some((plugin) => plugin.name === "project-plugin");
+const pluginTrust = await load("config/trust.js");
+pluginTrust.trustProject(projectPluginCwd);
+ok("project-scoped plugins require trust and install under the project",
+    untrustedProjectPluginHidden &&
+        resolve(importedProjectPlugin.path) === resolve(join(projectPluginCwd, ".fastcode", "plugins", "project-plugin")) &&
+        pluginsManager.listInstalledPlugins(projectPluginCwd).some((plugin) => plugin.name === "project-plugin") &&
+        !pluginsManager.listInstalledPlugins().some((plugin) => plugin.name === "project-plugin") &&
+        /project plugin body/.test(pluginsManager.buildPluginsPrompt(["project-plugin"], projectPluginCwd)),
+    JSON.stringify({ imported: importedProjectPlugin, hiddenWhileUntrusted: untrustedProjectPluginHidden }));
+pluginTrust.untrustProject(projectPluginCwd);
+pluginsManager.removePlugin(importedProjectPlugin.name, projectPluginCwd);
+pluginsManager.removePlugin(importedPlugin.name);
+rmSync(pluginSource, { recursive: true, force: true });
+rmSync(badPluginSource, { recursive: true, force: true });
+rmSync(projectPluginSource, { recursive: true, force: true });
+rmSync(projectPluginCwd, { recursive: true, force: true });
+
 const slog = await load("session/log.js");
 const session = slog.createSessionLog({ providerId: "deepseek" });
 session.append({ type: "message", role: "user", content: "hi" });
@@ -849,6 +1292,27 @@ session.close();
 const sessions = slog.listSessions();
 ok("session log writes JSONL and lists it", sessions.length === 1 && sessions[0].messages === 1, JSON.stringify(sessions));
 ok("session log can be replayed", (slog.loadSessionMessages(sessions[0].file)[0] ?? {}).content === "hi");
+ok("B2-02 resume rejects a non-jsonl path", slog.resolveResumeFile("./notes.txt") === undefined);
+ok("B2-02 resume rejects a .JSONL path outside the sessions directory", slog.resolveResumeFile("./S.JSONL") === undefined);
+const bareResume = slog.resolveResumeFile("session-id");
+ok("B2-02 resume still resolves a bare session id", typeof bareResume === "string" && bareResume.endsWith("session-id.jsonl"));
+const directResume = slog.resolveResumeFile(sessions[0].file);
+ok("B2-02 resume accepts a .jsonl file inside the sessions directory", directResume === sessions[0].file);
+ok("B2-02 uppercase .JSONL maps to a distinct projection", slog.projectionPath("S.JSONL") === "S.projection.json");
+const projectionModuleB2 = await load("session/projection.js");
+const resumeNoteDir = mkdtempSync(join(tmpdir(), "fastcode-resume-note-"));
+const notesPath = join(resumeNoteDir, "resume-note.txt");
+writeFileSync(notesPath, "do not overwrite" + LF, "utf8");
+let projectionRefused = false;
+try {
+    projectionModuleB2.writeProjection(notesPath, { version: 1 }, []);
+}
+catch {
+    projectionRefused = true;
+}
+ok("B2-02 projection refuses to overwrite its session source",
+    projectionRefused && readFileSync(notesPath, "utf8") === "do not overwrite" + LF);
+rmSync(resumeNoteDir, { recursive: true, force: true });
 
 const degradedLog = slog.createSessionLog({ providerId: "deepseek" });
 rmSync(degradedLog.file, { force: true });
@@ -1226,6 +1690,8 @@ const structuredServer = createServer((req, res) => {
         const text = structuredRequests === 1
             ? 'Writing.\n<fastcode_tool>{"tool":"write_file","path":"out.txt","content":"hello"}</fastcode_tool>'
             : "Done.";
+        if (structuredRequests === 1)
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "thinking about the file" } }] })}\n\n`);
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
         res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } })}\n\n`);
         res.write("data: [DONE]\n\n");
@@ -1272,8 +1738,17 @@ ok("headless JSON exposes tool_call/tool_result, side_effects, output and v/seq/
     structuredExit === 0 && Boolean(structuredToolCall) && Boolean(structuredToolResult) &&
         structuredToolResult.ok === true && /wrote/.test(structuredToolResult.output) &&
         ((structuredEffects.touched ?? []).length + (structuredEffects.created ?? []).length === 1) &&
-        structuredWritten && structuredSeqOk,
+        structuredToolResult.old_text === "" && structuredToolResult.new_text === "hello" &&
+        structuredToolResult.changed_start_line === 1 && structuredWritten && structuredSeqOk,
     JSON.stringify({ structuredExit, structuredToolCall, structuredToolResult, structuredSeqOk, stderr: structuredErr.slice(0, 300) }));
+const structuredSessionIds = new Set(structuredEvents.map((event) => event.session_id));
+ok("headless JSON frames carry a stable session_id and turn",
+    structuredEvents.every((event) => typeof event.session_id === "string" && event.session_id.length > 0 &&
+        Number.isInteger(event.turn) && event.turn >= 1) && structuredSessionIds.size === 1,
+    JSON.stringify({ sessionIds: Array.from(structuredSessionIds), turns: structuredEvents.map((event) => event.turn) }));
+const structuredReasoning = structuredEvents.find((event) => event.event === "reasoning");
+ok("headless JSON emits reasoning frames",
+    /thinking about the file/.test(String(structuredReasoning?.text ?? "")), JSON.stringify(structuredReasoning));
 const structuredSummary = structuredEvents.find((event) => event.event === "summary");
 ok("#138 headless JSON emits an aggregate summary frame",
     structuredSummary?.tool_call_count === 1 && structuredSummary?.last_turn >= 1,
@@ -1515,6 +1990,14 @@ const covered = providers.PROVIDERS.every((p) => {
 ok("model-meta covers all " + providers.PROVIDERS.length + " provider default models", covered);
 const unknownMeta = modelMeta.getModelMeta("not-a-provider", "not-a-model");
 ok("unknown models fall back conservatively", unknownMeta.contextWindow === 32768 && unknownMeta.charsPerToken === 2.5, JSON.stringify(unknownMeta));
+const gptPricingMeta = modelMeta.getModelMeta("openai", "gpt-4o");
+ok("model-meta exposes built-in pricing",
+    gptPricingMeta.pricing?.inputUsdPerM === 2.5 && gptPricingMeta.pricing?.outputUsdPerM === 10 &&
+        modelMeta.modelMetaSource("openai", "gpt-4o") === "built-in",
+    JSON.stringify(gptPricingMeta));
+ok("estimateCostUsd uses per-1M pricing",
+    modelMeta.estimateCostUsd(1_000_000, 500_000, { inputUsdPerM: 2, outputUsdPerM: 4 }) === 4,
+    String(modelMeta.estimateCostUsd(1_000_000, 500_000, { inputUsdPerM: 2, outputUsdPerM: 4 })));
 const cjkTokens = modelMeta.estTokens("x".repeat(100), { providerId: "deepseek", model: "deepseek-v4-pro" });
 const latinTokens = modelMeta.estTokens("x".repeat(100), { providerId: "openai", model: "gpt-4.1" });
 ok("estTokens uses the model chars/token ratio", cjkTokens > latinTokens, cjkTokens + " vs " + latinTokens);
@@ -1523,6 +2006,103 @@ modelMeta.clearModelMetaCache();
 ok("user model-meta.json overrides the built-in table", modelMeta.getModelMeta("deepseek", "deepseek-v4-pro").contextWindow === 4096);
 rmSync(join(process.env.FASTCODE_HOME, "model-meta.json"), { force: true });
 modelMeta.clearModelMetaCache();
+writeFileSync(join(process.env.FASTCODE_HOME, "model-meta.json"), JSON.stringify({ "openai/gpt-4o": { pricing: { inputUsdPerM: 1, outputUsdPerM: 2 } } }));
+modelMeta.clearModelMetaCache();
+const overriddenPricing = modelMeta.getModelMeta("openai", "gpt-4o");
+ok("user model-meta.json overrides pricing and reports source",
+    overriddenPricing.pricing?.inputUsdPerM === 1 && overriddenPricing.pricing?.outputUsdPerM === 2 &&
+        modelMeta.modelMetaSource("openai", "gpt-4o") === "override",
+    JSON.stringify(overriddenPricing));
+rmSync(join(process.env.FASTCODE_HOME, "model-meta.json"), { force: true });
+modelMeta.clearModelMetaCache();
+
+const instructionsModule = await load("session/instructions.js");
+const instructionRoot = mkdtempSync(join(tmpdir(), "fastcode-instructions-"));
+mkdirSync(join(instructionRoot, ".git"));
+mkdirSync(join(instructionRoot, "sub"));
+writeFileSync(join(instructionRoot, "FASTCODE.md"), "root rules", "utf8");
+writeFileSync(join(instructionRoot, "sub", "AGENTS.md"), "sub rules", "utf8");
+const instructionBundle = instructionsModule.discoverInstructions(join(instructionRoot, "sub"));
+ok("instruction discovery layers project then subdirectory",
+    instructionBundle.entries.length === 2 &&
+        instructionBundle.entries[0].scope === "project" &&
+        instructionBundle.entries[1].scope === "local" &&
+        instructionBundle.text.indexOf("root rules") < instructionBundle.text.indexOf("sub rules"),
+    JSON.stringify(instructionBundle));
+const overrideRoot = mkdtempSync(join(tmpdir(), "fastcode-instructions-override-"));
+mkdirSync(join(overrideRoot, ".git"));
+mkdirSync(join(overrideRoot, "sub"));
+writeFileSync(join(overrideRoot, "AGENTS.md"), "root agents", "utf8");
+writeFileSync(join(overrideRoot, "sub", "AGENTS.md"), "sub agents", "utf8");
+const overrideBundle = instructionsModule.discoverInstructions(join(overrideRoot, "sub"));
+ok("nearer instruction file overrides the same filename farther up",
+    overrideBundle.entries.length === 1 && overrideBundle.entries[0].content === "sub agents" &&
+        !overrideBundle.text.includes("root agents"),
+    JSON.stringify(overrideBundle));
+rmSync(instructionRoot, { recursive: true, force: true });
+rmSync(overrideRoot, { recursive: true, force: true });
+
+const permissionsModule = await load("agent/policy/permissions.js");
+ok("declarative shell permissions allow/deny and deny-wins",
+    permissionsModule.evaluateShellPermission("git reset --hard", { shell: { allow: ["git reset*"] } }) === "allow" &&
+        permissionsModule.evaluateShellPermission("git reset --hard", { shell: { allow: ["git reset*"], deny: ["*reset*"] } }) === "deny",
+    "permission evaluation mismatch");
+ok("absolute path globs are not mistaken for regexes",
+    permissionsModule.evaluateShellPermission("/tmp/tool --flag", { shell: { allow: ["/tmp/*"] } }) === "allow" &&
+        permissionsModule.evaluateShellPermission("/tmp/foo", { shell: { allow: ["/tmp/foo"] } }) === "allow" &&
+        permissionsModule.evaluateShellPermission("/usr/bin/git status", { shell: { allow: ["/usr/bin/git*"] } }) === "allow" &&
+        permissionsModule.evaluateShellPermission("git status", { shell: { allow: ["/git status/"] } }) === "allow",
+    "absolute glob or regex permission mismatch");
+const allowedVerdict = guards.evaluateShellCommand("git reset --hard", {
+    cwd: process.cwd(),
+    permissions: { shell: { allow: ["git reset*"] } },
+});
+ok("declarative permission allows a soft-gate command",
+    allowedVerdict.action === "allow" && allowedVerdict.code === "permission_allow", JSON.stringify(allowedVerdict));
+const deniedVerdict = guards.evaluateShellCommand("git reset --hard", {
+    cwd: process.cwd(),
+    permissions: { shell: { deny: ["*reset*"] } },
+});
+ok("declarative permission deny keeps the soft gate",
+    deniedVerdict.action === "soft_gate" && deniedVerdict.code === "permission_deny", JSON.stringify(deniedVerdict));
+const hardStillHard = guards.evaluateShellCommand("rm -rf /", {
+    cwd: process.cwd(),
+    permissions: { shell: { allow: ["*"] } },
+});
+ok("declarative permission never overrides Hard Block", hardStillHard.action === "hard_block", JSON.stringify(hardStillHard));
+const untrustedPermissionRoot = mkdtempSync(join(tmpdir(), "fastcode-permissions-"));
+mkdirSync(join(untrustedPermissionRoot, ".fastcode"));
+writeFileSync(join(untrustedPermissionRoot, ".fastcode", "permissions.json"), JSON.stringify({ shell: { allow: ["git reset*"] } }), "utf8");
+const untrustedPolicy = permissionsModule.loadPermissionPolicy(untrustedPermissionRoot);
+ok("untrusted project permission files are ignored",
+    permissionsModule.evaluateShellPermission("git reset --hard", untrustedPolicy) === "none",
+    JSON.stringify(untrustedPolicy));
+trust.trustProject(untrustedPermissionRoot);
+const trustedPolicy = permissionsModule.loadPermissionPolicy(untrustedPermissionRoot);
+ok("trusted project permission files apply",
+    permissionsModule.evaluateShellPermission("git reset --hard", trustedPolicy) === "allow",
+    JSON.stringify(trustedPolicy));
+trust.untrustProject(untrustedPermissionRoot);
+rmSync(untrustedPermissionRoot, { recursive: true, force: true });
+
+const checkLoop = await load("agent/check-loop.js");
+const checkRoot = mkdtempSync(join(tmpdir(), "fastcode-check-"));
+writeFileSync(join(checkRoot, "check-ok.mjs"), [
+    "import { writeFileSync } from 'node:fs';",
+    "const files=(process.env.FASTCODE_CHECK_FILES||'').split('\\n').filter(Boolean);",
+    "writeFileSync('check-seen.txt', files.join('|'));",
+    "console.log('check passed '+files.length);",
+].join("\n"), "utf8");
+const checkOk = await checkLoop.runCheckCommand("node check-ok.mjs", checkRoot, ["a.txt", "b.txt"], 5000);
+ok("post-write check runs and passes",
+    checkOk?.ok === true && /check passed 2/.test(checkOk.output) &&
+        readFileSync(join(checkRoot, "check-seen.txt"), "utf8") === "a.txt|b.txt",
+    JSON.stringify(checkOk));
+const checkFail = await checkLoop.runCheckCommand('node -e "process.exit(2)"', checkRoot, ["a.txt"], 5000);
+ok("post-write check failure is reported without throwing", checkFail?.ok === false && checkFail.exitCode === 2, JSON.stringify(checkFail));
+const checkTimeout = await checkLoop.runCheckCommand('node -e "setTimeout(()=>{},5000)"', checkRoot, ["a.txt"], 1000);
+ok("post-write check timeout is reported", checkTimeout?.timedOut === true && checkTimeout.ok === false, JSON.stringify(checkTimeout));
+rmSync(checkRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
 ok("read-only compound commands are recognized", guards.isReadOnlyCommand("git status && ls | head") === true);
 ok("one side-effecting segment taints the whole command", guards.isReadOnlyCommand("ls && rm -rf x") === false && guards.isReadOnlyCommand("ls | xargs rm") === false);
@@ -1880,14 +2460,14 @@ approvalStore.rememberApproval(sessionKey, "catalog-a", "session");
 const approvalJson = await load("agent/approval-json.js");
 const gateAsk = approvalJson.encodeGateAsk(softRequest);
 const gateAllow = approvalJson.parseGateDecision(softRequest, JSON.stringify({
-    event: "gate:decision", version: gateAsk.version, id: softRequest.id, option: "allow-once",
+    event: "gate:decision", v: gateAsk.v, id: softRequest.id, option: "allow-once",
 }));
 const gateWrongId = approvalJson.parseGateDecision(softRequest, JSON.stringify({
-    event: "gate:decision", version: gateAsk.version, id: "wrong", option: "allow-once",
+    event: "gate:decision", v: gateAsk.v, id: "wrong", option: "allow-once",
 }));
 const gateBadJson = approvalJson.parseGateDecision(softRequest, "not json");
 ok("JSON gate schema is versioned with stable option ids",
-    gateAsk.event === "gate:ask" && gateAsk.version === 1 && gateAsk.id === softRequest.id &&
+    gateAsk.event === "gate:ask" && gateAsk.v === 1 && gateAsk.id === softRequest.id &&
         gateAsk.options.some((option) => option.id === "allow-once") && gateAsk.default === "deny");
 ok("JSON gate decisions reject wrong ids, unknown options, and malformed input",
     gateAllow.decision.kind === "allow" && gateWrongId.decision.kind === "deny" &&
@@ -1895,8 +2475,23 @@ ok("JSON gate decisions reject wrong ids, unknown options, and malformed input",
 const gateDecisionFrame = approvalJson.encodeGateDecision(softRequest, { kind: "deny", reason: "denied by user" }, "policy");
 ok("gate decision frame records the decision and error without secrets",
     gateDecisionFrame.event === "gate:decision" && gateDecisionFrame.id === softRequest.id &&
-        gateDecisionFrame.decision.kind === "deny" && gateDecisionFrame.error === "policy",
+        gateDecisionFrame.v === 1 && gateDecisionFrame.decision.kind === "deny" && gateDecisionFrame.error === "policy",
     JSON.stringify(gateDecisionFrame));
+const eventStreamModule = await load("agent/event-stream.js");
+const reasoningFrame = eventStreamModule.serializeAgentEvent({ type: "assistant_raw", text: "", reasoning: "thinking" });
+ok("event stream serializes reasoning frames",
+    reasoningFrame?.event === "reasoning" && reasoningFrame.text === "thinking", JSON.stringify(reasoningFrame));
+const streamLines = [];
+const streamProbe = new eventStreamModule.EventStream("s-test", (line) => streamLines.push(JSON.parse(line)));
+streamProbe.emit(reasoningFrame);
+streamProbe.setTurn(3);
+streamProbe.emit(eventStreamModule.serializeAgentEvent({ type: "assistant_text", text: "hi" }));
+ok("event stream envelope carries v/seq/ts/session_id/turn",
+    streamLines.length === 2 &&
+        streamLines.every((frame, index) => frame.v === 1 && frame.seq === index + 1 &&
+            typeof frame.ts === "string" && frame.session_id === "s-test" && Number.isInteger(frame.turn)) &&
+        streamLines[0].turn === 1 && streamLines[1].turn === 3,
+    JSON.stringify(streamLines));
 const approvalCore = await load("agent/approval.js");
 const feedbackOption = approvalCore.DEFAULT_ALLOW_OPTIONS.find((option) => option.kind === "feedback");
 const feedbackMissing = approvalCore.decisionForOption(feedbackOption);
@@ -1906,10 +2501,10 @@ ok("feedback requires user input instead of echoing the prompt",
         feedbackWithText.text === "use a safer command",
     JSON.stringify({ feedbackMissing, feedbackWithText }));
 const gateFeedbackMissing = approvalJson.parseGateDecision(softRequest, JSON.stringify({
-    event: "gate:decision", version: gateAsk.version, id: softRequest.id, option: "feedback",
+    event: "gate:decision", v: gateAsk.v, id: softRequest.id, option: "feedback",
 }));
 const gateFeedback = approvalJson.parseGateDecision(softRequest, JSON.stringify({
-    event: "gate:decision", version: gateAsk.version, id: softRequest.id, option: "feedback", input: "  not safe  ",
+    event: "gate:decision", v: gateAsk.v, id: softRequest.id, option: "feedback", input: "  not safe  ",
 }));
 ok("JSON feedback requires and returns user text",
     gateFeedbackMissing.decision.kind === "deny" && gateFeedback.decision.kind === "feedback" &&
@@ -2008,12 +2603,37 @@ ok("#148 shell exposes the exit code and rejects an ignored cwd",
     JSON.stringify({ failed: failedShell.output, cwd: cwdShell.output }));
 const trustedWrite = await agentTools.runAgentTool({ tool: "write_file", path: "b.txt", content: "x" }, stage0);
 const trustedWriteEffects = trustedWrite.sideEffects ?? {};
-ok("trusted writes report sideEffects", trustedWrite.ok === true && ((trustedWriteEffects.touched ?? []).length + (trustedWriteEffects.created ?? []).length) === 1, JSON.stringify(trustedWrite));
+ok("trusted writes report sideEffects", trustedWrite.ok === true && ((trustedWriteEffects.touched ?? []).length + (trustedWriteEffects.created ?? []).length) === 1 &&
+    typeof trustedWrite.oldText === "string" && trustedWrite.newText === "x" && trustedWrite.changedStartLine >= 1, JSON.stringify(trustedWrite));
+const checkConfigBefore = store.loadConfig();
+writeFileSync(join(stage0, "check.mjs"), [
+    "import { writeFileSync } from 'node:fs';",
+    "const files=(process.env.FASTCODE_CHECK_FILES||'').split('\\n').filter(Boolean);",
+    "writeFileSync('check-files.txt', files.join('|'));",
+    "console.log('checked '+files.length);",
+].join("\n"), "utf8");
+try {
+    store.saveConfig({ ...checkConfigBefore, checkCommand: "node check.mjs", checkTimeoutMs: 5000 });
+    const checkedWrite = await agentTools.runAgentTool({ tool: "write_file", path: "checked.txt", content: "x" }, stage0);
+    ok("post-write check is attached to the tool result",
+        checkedWrite.ok === true && checkedWrite.check?.ok === true &&
+            /checked 1/.test(checkedWrite.check.output) && checkedWrite.check.files.some((file) => file.endsWith("checked.txt")) &&
+            /\[check passed\]/.test(checkedWrite.output),
+        JSON.stringify(checkedWrite));
+    rmSync(join(stage0, "checked.txt"), { force: true });
+    rmSync(join(stage0, "check-files.txt"), { force: true });
+}
+finally {
+    store.saveConfig(checkConfigBefore);
+    rmSync(join(stage0, "check.mjs"), { force: true });
+}
 
 writeFileSync(join(stage0, "replace.txt"), "a a a", "utf8");
 const replaceOk = await agentTools.runAgentTool({ tool: "replace_in_file", path: "replace.txt", find: "a", replace: "b", expectedMatches: 3 }, stage0);
 ok("replace_in_file reports the exact match count",
-    replaceOk.ok === true && replaceOk.matches === 3 && readFileSync(join(stage0, "replace.txt"), "utf8") === "b b b",
+    replaceOk.ok === true && replaceOk.matches === 3 && readFileSync(join(stage0, "replace.txt"), "utf8") === "b b b" &&
+        replaceOk.oldText === "a a a" && replaceOk.newText === "b b b" &&
+        replaceOk.changedStartLine === 1 && replaceOk.oldLineCount === 1 && replaceOk.newLineCount === 1,
     JSON.stringify(replaceOk));
 const replaceMismatch = await agentTools.runAgentTool({ tool: "replace_in_file", path: "replace.txt", find: "b", replace: "c", expectedMatches: 2 }, stage0);
 ok("replace_in_file expectedMatches mismatch leaves the file unchanged",
@@ -2256,6 +2876,82 @@ const firstResume = projectionModule.resumeSession(factLog.file, stage0);
 ok("resume returns the saved projection messages", firstResume.messages.length === 4 &&
     firstResume.messages[0].role === "user" && firstResume.messages.at(-1).content === "Done.",
     JSON.stringify(firstResume.messages));
+const revertFacts = [
+    { seq: 1, type: "session_start", cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" },
+    { seq: 2, type: "user", content: "one" },
+    { seq: 3, type: "assistant_raw", content: "answer one" },
+    { seq: 4, type: "user", content: "two" },
+    { seq: 5, type: "assistant_raw", content: "answer two" },
+];
+const revertPoint = projectionModule.revertBoundary(revertFacts, 2);
+ok("revert boundary removes the target user message and later",
+    revertPoint?.targetUserSeq === 4 && revertPoint.removed === 2 && revertPoint.userMessages === 2,
+    JSON.stringify(revertPoint));
+const revertedProjection = projectionModule.buildProjection([
+    ...revertFacts,
+    { seq: 6, type: "revert", keepBeforeSeq: 4, targetUserSeq: 4, removed: 2 },
+], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
+const revertedContents = revertedProjection.messages.map((message) => String(message.content ?? ""));
+ok("revert projection ignores target and later facts",
+    revertedContents.includes("one") && revertedContents.includes("answer one") &&
+        !revertedContents.includes("two") && !revertedContents.includes("answer two"),
+    JSON.stringify(revertedContents));
+const secondRevertFacts = [
+    ...revertFacts,
+    { seq: 6, type: "revert", keepBeforeSeq: 4, targetUserSeq: 4, removed: 2 },
+    { seq: 7, type: "user", content: "three" },
+    { seq: 8, type: "assistant_raw", content: "answer three" },
+];
+const secondRevertPoint = projectionModule.revertBoundary(secondRevertFacts, 2);
+const secondRevertProjection = projectionModule.buildProjection([
+    ...secondRevertFacts,
+    { seq: 9, type: "revert", keepBeforeSeq: 7, targetUserSeq: 7, removed: 2 },
+], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
+const secondRevertContents = secondRevertProjection.messages.map((message) => String(message.content ?? ""));
+ok("a later revert does not resurrect facts removed by an earlier revert",
+    secondRevertPoint?.targetUserSeq === 7 &&
+        secondRevertContents.includes("one") && secondRevertContents.includes("answer one") &&
+        !secondRevertContents.includes("two") && !secondRevertContents.includes("answer two") &&
+        !secondRevertContents.includes("three") && !secondRevertContents.includes("answer three"),
+    JSON.stringify({ point: secondRevertPoint, contents: secondRevertContents }));
+const externalSummaryRoot = mkdtempSync(join(tmpdir(), "fastcode-summary-leak-"));
+const externalSummary = join(externalSummaryRoot, "summary-1-secret.md");
+writeFileSync(externalSummary, "SECRET-SUMMARY-CONTENT", "utf8");
+const summaryLeakProjection = projectionModule.buildProjection([
+    { seq: 1, type: "session_start", cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" },
+    { seq: 2, type: "user", content: "hello" },
+    { seq: 3, type: "compacted", source: "local", summaryRef: externalSummary, keepMessages: 1 },
+], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
+const summaryLeakText = summaryLeakProjection.messages.map((message) => String(message.content ?? "")).join("\n");
+ok("B2-10 projection rejects summary files outside sessions",
+    !summaryLeakText.includes("SECRET-SUMMARY-CONTENT") && /Summary path rejected/.test(summaryLeakText),
+    JSON.stringify({ messages: summaryLeakProjection.messages }));
+rmSync(externalSummaryRoot, { recursive: true, force: true });
+const oversizedSummary = join(paths.getPaths().sessions, "summary-999997-big.md");
+writeFileSync(oversizedSummary, "BEGIN-OVERSIZED-SUMMARY" + "x".repeat(300 * 1024), "utf8");
+const oversizedSummaryProjection = projectionModule.buildProjection([
+    { seq: 1, type: "session_start", cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" },
+    { seq: 2, type: "user", content: "hello" },
+    { seq: 3, type: "compacted", source: "local", summaryRef: oversizedSummary, keepMessages: 1 },
+], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
+const oversizedSummaryText = oversizedSummaryProjection.messages.map((message) => String(message.content ?? "")).join("\n");
+ok("B2-10 projection rejects oversized summary files",
+    !oversizedSummaryText.includes("BEGIN-OVERSIZED-SUMMARY") && /Summary file is too large/.test(oversizedSummaryText),
+    JSON.stringify(oversizedSummaryProjection.messages));
+rmSync(oversizedSummary, { force: true });
+const revertCmd = (await load("commands/revert.js")).revertCommand;
+ok("revert command parses a message number and defers --files",
+    revertCmd.run({ args: ["2"] }).revert === 2 &&
+        /not implemented/i.test(revertCmd.run({ args: ["2", "--files"] }).message),
+    JSON.stringify(revertCmd.run({ args: ["2"] })));
+const planProjection = projectionModule.buildProjection([
+    ...revertFacts,
+    { seq: 6, type: "plan", goal: "ship it", items: [{ text: "one", status: "pending" }, { text: "two", status: "done" }] },
+], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
+ok("projection includes the session plan as a protected system message",
+    planProjection.messages.some((message) => message.role === "system" &&
+        message.content.startsWith("[plan]") && message.content.includes("ship it") && message.content.includes("[x] two")),
+    JSON.stringify(planProjection.messages.filter((message) => message.role === "system")));
 const egressProjection = projectionModule.factsToMessages([
     { type: "user", content: "hi" },
     { type: "egress_denied", outlet: "write_file.path", target: ".env", rule: "sensitive_path", mode: "audit", wouldBlock: true, code: "EGRESS_DENY", reason: "test egress" },
@@ -2333,6 +3029,17 @@ const hugeProjection = projectionModule.buildProjection([
     { seq: 5, type: "assistant_raw", content: "done" },
 ], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
 ok("large tool output is folded/clamped in the projection", Buffer.byteLength(JSON.stringify(hugeProjection), "utf8") < 200000);
+const hugeArgsProjection = projectionModule.buildProjection([
+    { seq: 1, type: "user", content: "hi" },
+    { seq: 2, type: "assistant_raw", content: "", toolCalls: [{ id: "big", name: "write_file", arguments: JSON.stringify({ path: "a.txt", blob: "z".repeat(300000) }) }] },
+    { seq: 3, type: "tool_call", id: "big", tool: "write_file", args: { tool: "write_file", path: "a.txt" } },
+    { seq: 4, type: "tool_result", id: "big", tool: "write_file", ok: true, output: "wrote" },
+], { cwd: stage0, providerId: "deepseek", model: "deepseek-v4-pro" });
+const hugeArgsText = JSON.stringify(hugeArgsProjection);
+ok("B2-08 projection clips oversized tool-call arguments",
+    Buffer.byteLength(hugeArgsText, "utf8") < 200000 && /_truncated/.test(hugeArgsText) &&
+        !hugeArgsText.includes("z".repeat(5000)),
+    String(Buffer.byteLength(hugeArgsText, "utf8")));
 const hugeText = hugeProjection.messages.map((message) => message.content).join("\n");
 ok("tool payloads are folded to edit facts in the projection",
     !hugeText.includes("y".repeat(1000)) && /read_file a\.txt → ok/.test(hugeText), hugeText.slice(0, 400));
@@ -2398,6 +3105,13 @@ const cleanupKeep = join(stage0, "keep-not-a-summary.txt");
 writeFileSync(cleanupKeep, "keep", "utf8");
 compactionModule.removeSummaryFile(cleanupKeep);
 ok("summary cleanup refuses non-summary paths", existsSync(cleanupKeep));
+const pruneSummaryFile = join(paths.getPaths().sessions, "summary-999999-smoke.md");
+writeFileSync(pruneSummaryFile, "summary to prune", "utf8");
+const pruneSummaryLog = slog.createSessionLog({ providerId: "deepseek", model: "deepseek-v4-pro", cwd: stage0 });
+pruneSummaryLog.append({ type: "compacted", source: "local", summaryRef: pruneSummaryFile, keepMessages: 1 });
+pruneSummaryLog.close();
+slog.pruneSessions(0);
+ok("B2-08 prune removes referenced summary files", !existsSync(pruneSummaryFile), pruneSummaryFile);
 const longHistory = [{ role: "user", content: "Please fix src/early-file.ts and keep notes in src/early-notes.md" }];
 for (let i = 0; i < 40; i += 1) {
     longHistory.push({ role: "assistant", content: `Step ${i}: edited src/file-${i}.ts and wrote the result.` });
@@ -2430,6 +3144,22 @@ const heapCompacted = compactionModule.compactMessages(heapHistory, { ...compact
     model: "deepseek-v4-pro",
 });
 ok("#56 heap pressure forces compaction below the token threshold", heapCompacted.compacted && heapCompacted.reason === "heap", JSON.stringify({ reason: heapCompacted.reason, compacted: heapCompacted.compacted }));
+const shortHistory = [
+    { role: "user", content: "head request" },
+    { role: "assistant", content: "middle answer" },
+    { role: "user", content: "middle follow-up" },
+    { role: "assistant", content: "recent answer" },
+    { role: "user", content: "current request" },
+];
+const shortCompacted = compactionModule.compactMessages(shortHistory, { ...compactionModule.DEFAULT_COMPACTION_CONFIG, localThresholdRatio: 0.0001 }, {
+    contextWindow: 32768,
+    providerId: "deepseek",
+    model: "deepseek-v4-pro",
+});
+ok("B2-08 short history compacts instead of returning noop",
+    shortCompacted.compacted === true && shortCompacted.droppedMessages >= 1 &&
+        /middle follow-up|middle answer/.test(shortCompacted.summary),
+    JSON.stringify({ compacted: shortCompacted.compacted, dropped: shortCompacted.droppedMessages, summary: shortCompacted.summary?.slice(0, 120) }));
 const serverCompacted = compactionModule.compactMessages(heapHistory, { ...compactionModule.DEFAULT_COMPACTION_CONFIG, serverCompactionAware: true }, {
     contextWindow: 1,
     providerId: "deepseek",
@@ -2505,7 +3235,9 @@ ok("#45 patch supports Add/Update/Delete/Move", patched45.ok === true &&
     readFileSync(join(stage0, "add.txt"), "utf8") === "added" + LF &&
     readFileSync(join(stage0, "up.txt"), "utf8") === "new" + LF &&
     !existsSync(join(stage0, "move.txt")) && readFileSync(join(stage0, "moved.txt"), "utf8") === "move" + LF &&
-    !existsSync(join(stage0, "del.txt")), patched45.output);
+    !existsSync(join(stage0, "del.txt")) &&
+    patched45.diffs?.length === 4 && patched45.diffs.some((diff) => diff.path.endsWith("up.txt") && diff.oldText === "old" + LF && diff.newText === "new" + LF),
+    patched45.output);
 ok("FC-057 patch returns a per-file diff", patched45.output.includes("--- a/up.txt") && patched45.output.includes("+++ b/up.txt") && patched45.output.includes("@@"));
 const bigPatchBody = Array.from({ length: 205 }, (_value, index) => `+line ${index}`).join(LF);
 const bigPatch = ["*** Begin Patch", "*** Add File: big-approved.txt", bigPatchBody, "*** End Patch", ""].join(LF);
@@ -2823,6 +3555,48 @@ if (process.platform !== "win32") {
         esrchThrew = true;
     }
     ok("terminateProcessTree treats ESRCH as already exited", !esrchThrew);
+
+    const grandchildPidFile = join(tmpdir(), `fastcode-grandchild-${process.pid}-${Date.now()}.pid`);
+    const leaderScript = [
+        "const {spawn}=require('node:child_process');",
+        "const fs=require('node:fs');",
+        "const c=spawn(process.execPath,['-e','process.on(\"SIGTERM\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'});",
+        `fs.writeFileSync(${JSON.stringify(grandchildPidFile)}, String(c.pid));`,
+        "setTimeout(()=>process.exit(0),50);",
+    ].join("");
+    const groupLeader = spawn(process.execPath, ["-e", leaderScript], { detached: true, stdio: "ignore" });
+    let grandchildPid = 0;
+    for (let i = 0; i < 40 && !grandchildPid; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        try {
+            grandchildPid = Number(readFileSync(grandchildPidFile, "utf8"));
+        }
+        catch {
+            // wait for the leader to report its child pid
+        }
+    }
+    processTree.terminateProcessTree(groupLeader, { graceMs: 200 });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    let grandchildAlive = Boolean(grandchildPid);
+    if (grandchildAlive) {
+        try {
+            process.kill(grandchildPid, 0);
+        }
+        catch {
+            grandchildAlive = false;
+        }
+    }
+    ok("B2-11 escalation survives the group leader exiting first", Boolean(grandchildPid) && !grandchildAlive,
+        JSON.stringify({ leader: groupLeader.pid, grandchild: grandchildPid, alive: grandchildAlive }));
+    if (grandchildAlive) {
+        try {
+            process.kill(-groupLeader.pid, "SIGKILL");
+        }
+        catch {
+            // best effort cleanup
+        }
+    }
+    rmSync(grandchildPidFile, { force: true });
 
     const stubbornBackground = await shells.executeShellCommand(
         'node -e "process.on(\'SIGTERM\',()=>{});setInterval(()=>{},1000)"',
@@ -3256,6 +4030,118 @@ ok("native tools execute and produce tool-role history", nativeDone.stopReason =
     nativeDone.history.some((message) => message.role === "tool" && message.toolCallId === "call_1"),
     JSON.stringify(nativeDone.history));
 
+const valuesModule = await load("lib/values.js");
+const repairedTrailing = valuesModule.parseJsonObjectWithRepair('{"path":"x","content":"y",}');
+ok("[1.3] trailing-comma arguments are repaired", repairedTrailing.repaired && repairedTrailing.value?.path === "x", JSON.stringify(repairedTrailing));
+const repairedUnclosed = valuesModule.parseJsonObjectWithRepair('{"path":"x","content":"y"');
+ok("[1.3] unclosed string/brackets are repaired", repairedUnclosed.repaired && repairedUnclosed.value?.content === "y", JSON.stringify(repairedUnclosed));
+const repairedArray = valuesModule.parseJsonObjectWithRepair('[{"path":"x"}]');
+ok("[1.3] a single-element array wrapper is unwrapped", repairedArray.value?.path === "x", JSON.stringify(repairedArray));
+const repairedScalars = valuesModule.parseJsonObjectWithRepair('{"timeoutMs":"5000","overwrite":"true"}');
+ok("[1.3] known numeric/boolean strings are coerced",
+    repairedScalars.value?.timeoutMs === 5000 && repairedScalars.value?.overwrite === true, JSON.stringify(repairedScalars));
+const structuredDiff = valuesModule.buildStructuredDiff("a\nb\nc", "a\nB\nc");
+ok("[2.4] structured diff anchors the first changed line",
+    structuredDiff.changedStartLine === 2 && structuredDiff.oldLineCount === 3 &&
+        structuredDiff.newLineCount === 3 && structuredDiff.oldText === "a\nb\nc" &&
+        structuredDiff.newText === "a\nB\nc", JSON.stringify(structuredDiff));
+const unrepaired = valuesModule.parseJsonObjectWithRepair('{"path":');
+ok("[1.3] irreparable arguments still fail", Boolean(unrepaired.error) && !unrepaired.value, JSON.stringify(unrepaired));
+
+trust.trustProject(stage0);
+const badNativeRun = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { toolCalls: [{ id: "bad_b2", name: "write_file", arguments: '{"path":"bad-b2.txt","content":' }] },
+        { toolCalls: [{ id: "bad_b2_2", name: "write_file", arguments: '{"path":"bad-b2.txt","content":' }] },
+        { text: "done" },
+    ]),
+    model: "mock",
+    prompt: "bad native arguments",
+    maxTurns: 3,
+    cwd: stage0,
+    protocol: "native",
+    tools: schemas,
+}));
+const badNativeDone = badNativeRun.at(-1);
+const badNativeResults = badNativeRun.filter((event) => event.type === "tool_result");
+ok("[B10] native argument parse failures never execute the tool",
+    badNativeResults.length === 2 && badNativeResults.every((result) => result.ok === false) && !existsSync(join(stage0, "bad-b2.txt")),
+    JSON.stringify({ results: badNativeResults, final: badNativeDone }));
+ok("[B9/B14] two consecutive native argument failures stop in <=2 turns",
+    badNativeDone.stopReason === "protocol_error" && badNativeResults.length <= 2,
+    JSON.stringify(badNativeDone));
+ok("[B11/B12] protocol error text is emitted once with detail",
+    badNativeDone.finalText === "" &&
+        badNativeRun.some((event) => event.type === "error" && event.kind === "protocol_error" && String(event.detail ?? "").includes("invalid arguments")),
+    JSON.stringify({ finalText: badNativeDone.finalText, errors: badNativeRun.filter((event) => event.type === "error") }));
+
+const recoverNativeRun = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { toolCalls: [{ id: "recover_bad", name: "write_file", arguments: '{"path":"bad-recover.txt","content":' }] },
+        { toolCalls: [{ id: "recover_ok", name: "pwd", arguments: "{}" }] },
+    ]),
+    model: "mock",
+    prompt: "recover native arguments",
+    maxTurns: 2,
+    cwd: stage0,
+    protocol: "native",
+    tools: schemas,
+}));
+const recoverNativeDone = recoverNativeRun.at(-1);
+ok("[B9] a bad first turn followed by a valid turn stays max_turns",
+    recoverNativeDone.stopReason === "max_turns" && !existsSync(join(stage0, "bad-recover.txt")),
+    JSON.stringify(recoverNativeDone));
+
+const repairedNativeRun = await collect(runner.runAgent({
+    provider: scriptedProvider([
+        { toolCalls: [{ id: "repaired_b2", name: "write_file", arguments: '{"path":"repaired-b2.txt","content":"ok",}' }] },
+        { text: "done" },
+    ]),
+    model: "mock",
+    prompt: "repaired native arguments",
+    maxTurns: 2,
+    cwd: stage0,
+    protocol: "native",
+    tools: schemas,
+}));
+ok("[1.3] repaired native arguments execute the tool",
+    repairedNativeRun.some((event) => event.type === "tool_result" && event.ok === true) &&
+        readFileSync(join(stage0, "repaired-b2.txt"), "utf8") === "ok",
+    JSON.stringify(repairedNativeRun.filter((event) => event.type === "tool_result")));
+
+const unexecutedMarkerRun = await collect(runner.runAgent({
+    provider: scriptedProvider([{ text: '- <fastcode_tool>{"tool":"pwd"}</fastcode_tool>' }]),
+    model: "mock",
+    prompt: "list marker",
+    maxTurns: 1,
+    cwd: stage0,
+    protocol: "legacy",
+    tools: schemas,
+}));
+ok("[B13] zero executed calls with a marker produce a visible hint",
+    unexecutedMarkerRun.filter((event) => event.type === "tool_call").length === 0 &&
+        unexecutedMarkerRun.at(-1).stopReason === "complete" &&
+        /not executed/i.test(String(unexecutedMarkerRun.at(-1).finalText ?? "")),
+    JSON.stringify(unexecutedMarkerRun.at(-1)));
+
+const fencedMarkerRun = await collect(runner.runAgent({
+    provider: scriptedProvider([{ text: "```\n<fastcode_tool>{\"tool\":\"pwd\"}</fastcode_tool>\n```" }]),
+    model: "mock",
+    prompt: "fenced marker",
+    maxTurns: 1,
+    cwd: stage0,
+    protocol: "legacy",
+    tools: schemas,
+}));
+ok("[B13] fenced examples do not produce an unexecuted hint",
+    fencedMarkerRun.filter((event) => event.type === "tool_call").length === 0 &&
+        !/not executed/i.test(String(fencedMarkerRun.at(-1).finalText ?? "")),
+    JSON.stringify(fencedMarkerRun.at(-1)));
+
+rmSync(join(stage0, "bad-b2.txt"), { force: true });
+rmSync(join(stage0, "bad-recover.txt"), { force: true });
+rmSync(join(stage0, "repaired-b2.txt"), { force: true });
+
 const nativeTextRun = await collect(runner.runAgent({
     provider: scriptedProvider([{ text: '<fastcode_tool>{"tool":"pwd"}</fastcode_tool>' }]),
     model: "mock",
@@ -3343,6 +4229,12 @@ ok("#152 native fallback teaches the pseudo protocol without dropping caller ins
         !fallbackSystems[0].includes("<fastcode_tool>") &&
         fallbackSystems.slice(1).every((system) => system.includes("<fastcode_tool>")),
     JSON.stringify({ count: fallbackSystems.length, systems: fallbackSystems.map((system) => system.slice(-80)) }));
+const fallbackWithSuffix = protocol.systemPromptForFallback(`${protocol.agentSystemPrompt("native")}\n\nCALLER SUFFIX`);
+ok("B2-14 fallback replaces the native block even with caller text after it",
+    Boolean(fallbackWithSuffix) && fallbackWithSuffix.includes("<fastcode_tool>") &&
+        fallbackWithSuffix.includes("CALLER SUFFIX") &&
+        fallbackWithSuffix.indexOf("<fastcode_tool>") < fallbackWithSuffix.indexOf("CALLER SUFFIX"),
+    String(fallbackWithSuffix).slice(-200));
 
 let pairingRequests = 0;
 let pairingFallbacks = 0;
@@ -3421,9 +4313,25 @@ const attachCommand = await load("commands/attach.js");
 const attachOutput = await attachCommand.attachCommand.run({ args: ["sh_missing"] });
 ok("/attach reports an unknown session", /Unknown session/.test(attachOutput.message));
 const diagnostics = await load("lib/diagnostics.js");
+const i18nModule = await load("i18n/index.js");
+ok("B2-09 invalid config language falls back safely",
+    i18nModule.normalizeLocale(123) === "en" && i18nModule.normalizeLocale("zh-CN") === "zh" &&
+        i18nModule.setLocale(123) === "en",
+    JSON.stringify({ numeric: i18nModule.normalizeLocale(123), region: i18nModule.normalizeLocale("zh-CN") }));
+
+const residualBackup = join(process.env.FASTCODE_HOME, "probe.fastcode-backup-123");
+writeFileSync(residualBackup, "backup", "utf8");
+const doctorWithBackup = diagnostics.collectDiagnostics();
+ok("doctor reports residual atomic backups",
+    doctorWithBackup.atomicBackups.includes(residualBackup) &&
+        /backups\s+1 residual atomic backup/.test(diagnostics.formatDiagnostics(doctorWithBackup)),
+    JSON.stringify(doctorWithBackup.atomicBackups));
+rmSync(residualBackup, { force: true });
 const doctor = diagnostics.collectDiagnostics();
 ok("doctor reports tmpdir, auth mode, and memory", typeof doctor.tmpdir === "string" && doctor.tmpdir.length > 0 &&
-    typeof doctor.authMode === "string" && doctor.memTotalMb > 0 && doctor.sseIdleMs >= 25000, JSON.stringify({ tmpdir: doctor.tmpdir, authMode: doctor.authMode, mem: doctor.memTotalMb, sse: doctor.sseIdleMs }));
+    typeof doctor.authMode === "string" && doctor.memTotalMb > 0 && doctor.sseIdleMs >= 25000 &&
+    typeof doctor.worktreesRoot === "string" && /worktrees/.test(diagnostics.formatDiagnostics(doctor)),
+    JSON.stringify({ tmpdir: doctor.tmpdir, authMode: doctor.authMode, mem: doctor.memTotalMb, sse: doctor.sseIdleMs, worktrees: doctor.worktreesRoot }));
 ok("doctor exposes the egress policy",
     doctor.egress && ["audit", "block", "off"].includes(doctor.egress.mode) &&
         doctor.egress.maxScanBytes > 0 && doctor.egress.denyContentMarkers >= 1 &&

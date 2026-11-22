@@ -1,6 +1,6 @@
 # 执行后端抽象（Execution Backends）
 
-> 状态：2026-11-15。事件契约、单一装配器、环境白名单与 stdio 后端基础层已实现并通过回归；**CLI 后端默认不注册**，启用范围与首个后端形态待拍板（见 `OPEN_QUESTIONS.md` OQ-10）。
+> 状态：2026-11-21（随当前版本发布）。事件契约、单一装配器、环境白名单与 stdio 后端基础层已实现并通过回归；设置 `FASTCODE_STDIO_COMMAND` 时注册 `stdio` provider，否则 **CLI 后端默认不注册**；启用范围与首个后端形态待拍板（见 `OPEN_QUESTIONS.md` OQ-10）。
 > 权威范围：本文件描述后端边界、事件契约与安全不变量；具体工具/守卫/审批语义仍以 `ARCHITECTURE.md`、`CONFIGURATION.md` 为准。
 
 ## 1. 为什么需要这一层
@@ -71,7 +71,7 @@
 - stderr 只保留末尾若干行，并在错误信息中经 `redactSecrets()` 去掉 ANSI、`sk-…`、`Bearer …`、`api_key=…` 等形状；
 - abort 时先关闭读取侧、再按进程组 `SIGTERM → grace → SIGKILL` 终止，保证 1s 级收敛；
 - 子进程退出但未发 `done` 时，以退出码 + 脱敏 stderr 尾部报错，而不是静默成功；
-- **默认不注册**：它没有被加入 `PROVIDERS`，也没有 UI/配置入口。启用需要显式决策。
+- **默认不注册**：未设置 `FASTCODE_STDIO_COMMAND` 时不加入 `PROVIDERS`，也没有 UI 入口；设置该环境变量后由 `providers/index.ts` 注册 `stdio` provider（`ARGS`/`MODEL`/`ENV_ALLOWLIST` 见 `CONFIGURATION.md`）。
 
 ## 6. 规范 NDJSON 协议
 
@@ -106,13 +106,13 @@ stdin 一行：
 
 1. 写一个薄包装脚本：把 CLI 的原生流（NDJSON/JSON-RPC/文本）翻译成 §6 的规范事件；工具调用只输出 `tool-call`，不要执行。
 2. 用 `createStdioProvider({ id, label, command, args, envAllowlist, staticModels })` 创建 provider。
-3. 通过显式配置把 provider 交给 runner（当前代码未注册到 `PROVIDERS`；接入 UI/config 属于下一步决策）。
+3. 设置 `FASTCODE_STDIO_COMMAND`（及可选 `FASTCODE_STDIO_ARGS` / `FASTCODE_STDIO_MODEL` / `FASTCODE_STDIO_ENV_ALLOWLIST`）后由 `providers/index.ts` 注册；接入 UI/交互式配置属于下一步决策。
 4. 用 `runStream` 走一遍：文本/thinking/工具提议/usage/abort 五类事件都要在会话 facts 中可见。
 5. 在 Termux 真机上验证：二进制可得性、进程组语义、包管理器/订阅登录方式。
 
 ## 9. 当前未做（待拍板）
 
-- 是否把 stdio 后端注册为可选 provider，以及配置字段（bin/args/protocol/capabilities/认证方式/会话续接）。
+- 是否把 stdio provider 接入交互式配置/正式 provider 列表（当前仅通过 `FASTCODE_STDIO_*` 环境变量注册），以及后续配置字段（protocol/capabilities/认证方式/会话续接）。
 - 首个验证后端：只读 CLI（只提议 read/search）还是完整 agent CLI。
 - 是否允许外部 CLI 自执行工具（当前明确不允许）。
 - 外部模型目录（在线模型目录 + 本地缓存）与窗口元数据。

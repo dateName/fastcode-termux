@@ -14,7 +14,7 @@ import { PROVIDERS, getProvider } from "./providers/index.js";
 import { collectDiagnostics, formatDiagnostics } from "./lib/diagnostics.js";
 import { probeConnectivity } from "./lib/http.js";
 import { existsSync } from "node:fs";
-import { latestSessionFile, listSessions, projectionPath, readSession, resolveSessionFile } from "./session/log.js";
+import { latestSessionFile, listSessions, projectionPath, readSession, resolveResumeFile, resolveSessionFile } from "./session/log.js";
 import { readProjection, sessionMetaFromFile } from "./session/projection.js";
 import { forgetToolApproval, listToolApprovals, listTrusted, trustProject, untrustProject } from "./config/trust.js";
 import { isValidModelId } from "./commands/model.js";
@@ -236,8 +236,12 @@ export async function parseCli() {
     }
     if (first === "resume") {
         const target = rest[0];
-        const file = !target || target === "latest" ? latestSessionFile() : resolveSessionFile(target);
-        if (!file || !existsSync(file)) {
+        const file = !target || target === "latest" ? latestSessionFile() : resolveResumeFile(target);
+        if (!file) {
+            console.error("Resume expects a session id or a .jsonl file inside the sessions directory.");
+            process.exit(1);
+        }
+        if (!existsSync(file)) {
             console.error("No saved session to resume. Start one with: fastcode");
             process.exit(1);
         }

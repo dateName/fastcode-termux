@@ -1,0 +1,42 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package/package-lock.json
+
+      - name: Install dependencies
+        working-directory: package
+        run: npm ci --no-audit --no-fund
+
+      - name: Check (smoke + typecheck + lint + build)
+        working-directory: package
+        run: npm run check
+
+      - name: Verify artifacts
+        working-directory: package
+        run: npm run verify:artifacts
+
+      - name: Verify runtime literals and gate self-test
+        run: node scripts/verify-gate.mjs --self-test
+
+      - name: Ensure tracked dist matches a clean build
+        run: |
+          git diff --exit-code -- package/dist
+          test -z "$(git status --porcelain -- package/dist)"

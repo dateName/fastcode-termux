@@ -21,7 +21,7 @@ export function encodeGateAsk(request) {
     const requireInput = request.freeInput?.prompt ?? feedbackOption?.prompt;
     return {
         event: "gate:ask",
-        version: GATE_PROTOCOL_VERSION,
+        v: GATE_PROTOCOL_VERSION,
         id: request.id,
         tier: request.tier ?? 2,
         action: request.tool,
@@ -49,7 +49,7 @@ export function encodeGateDecision(request, decision, error) {
                 : { kind: decision.kind };
     return {
         event: "gate:decision",
-        version: GATE_PROTOCOL_VERSION,
+        v: GATE_PROTOCOL_VERSION,
         id: request.id,
         decision: payload,
         ...(error ? { error } : {}),
@@ -68,7 +68,7 @@ export function parseGateDecision(request, line) {
     catch {
         return { decision: { kind: "deny", reason: "malformed JSON decision" }, error: "malformed JSON" };
     }
-    if (!payload || typeof payload !== "object" || payload.version !== GATE_PROTOCOL_VERSION)
+    if (!payload || typeof payload !== "object" || (payload.v !== GATE_PROTOCOL_VERSION && payload.version !== GATE_PROTOCOL_VERSION))
         return { decision: { kind: "deny", reason: "unsupported gate protocol version" }, error: "version" };
     if (payload.event !== "gate:decision")
         return { decision: { kind: "deny", reason: "unexpected gate event" }, error: "event" };

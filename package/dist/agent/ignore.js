@@ -11,6 +11,7 @@
  */
 import { readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { globSafetyError } from "../lib/glob.js";
 const DEFAULT_NAMES = new Set([
     "node_modules",
     ".git",
@@ -35,6 +36,8 @@ const DEFAULT_NAMES = new Set([
     ".idea",
 ]);
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|ico|bmp|tiff?|pdf|zip|gz|tgz|bz2|xz|7z|rar|exe|dll|so|dylib|bin|wasm|mp3|mp4|mov|avi|mkv|wav|flac|ttf|otf|woff2?|eot|class|jar|apk|ipa|sqlite|db|lock)$/i;
+const MAX_IGNORE_BYTES = 256 * 1024;
+const MAX_IGNORE_RULES = 2000;
 export function isBinaryName(name) {
     return BINARY_EXT.test(name);
 }
@@ -66,7 +69,7 @@ function loadRules(root) {
     let text = "";
     try {
         const info = statSync(file);
-        if (!info.isFile())
+        if (!info.isFile() || info.size > MAX_IGNORE_BYTES)
             return [];
         text = readFileSync(file, "utf8");
     }
@@ -75,6 +78,8 @@ function loadRules(root) {
     }
     const rules = [];
     for (const raw of text.split(/\r?\n/)) {
+        if (rules.length >= MAX_IGNORE_RULES)
+            break;
         const line = raw.trim();
         if (!line || line.startsWith("#"))
             continue;
@@ -84,6 +89,8 @@ function loadRules(root) {
             continue;
         const dirOnly = body.endsWith("/");
         const pattern = dirOnly ? body.slice(0, -1) : body;
+        if (globSafetyError(pattern))
+            continue;
         const anchored = pattern.startsWith("/");
         const glob = anchored ? pattern.slice(1) : pattern;
         try {

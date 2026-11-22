@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { estMessagesTokens, estTokens, getModelMeta } from "../lib/model-meta.js";
+import { parseJsonObjectWithRepair } from "../lib/values.js";
 import { compactMessages, DEFAULT_COMPACTION_CONFIG } from "./compaction.js";
 import { isLoopExempt, isReadOnlyToolCall, toolCallFingerprint } from "./guards.js";
 import { boundToolMessage } from "./limits.js";
 import { pairToolMessages } from "../session/projection.js";
 import { isNativeUnsupportedError, isToolPairingError } from "./protocol-mode.js";
-import { formatToolResults, parseToolCalls, stripToolCalls, systemPromptForFallback } from "./protocol.js";
+import { formatToolResults, hasUnexecutedToolMarkup, parseToolCalls, stripToolCalls, systemPromptForFallback } from "./protocol.js";
 import { runStream } from "./stream.js";
 import { runAgentTool } from "./tools.js";
 export const LOOP_WARNING = "[loop detection] You appear to be repeating the same tool call. " +
@@ -77,7 +78,9 @@ export async function* runAgent(options) {
     let spentCost = 0;
     let stopReason = "complete";
     let errorMessage = "";
-    let protocolErrors = 0;
+    let consecutiveProtocolErrors = 0;
+    let lastProtocolError = "";
+    let lastTurnHadProtocolError = false;
     // Fingerprints of broken markup already re-emitted once; a repeat means the
     // model is not going to recover, so stop instead of burning every turn.
     const protocolReemit = new Set();
@@ -93,6 +96,7 @@ export async function* runAgent(options) {
             stopReason = "aborted";
             break;
         }
+        lastTurnHadProtocolError = false;
         for (const steering of options.takeSteering?.() ?? []) {
             history = [...history, { role: "system", content: "[user steering] " + steering }];
             yield { type: "notice", text: "Steering applied to the next request." };
@@ -237,6 +241,7 @@ export async function* runAgent(options) {
             history = [...history, { role: "assistant", content: streamed.text, toolCalls: nativeCalls }];
             const nativeIds = nativeCalls.map((native) => native.id || `tc_${++toolCallSeq}`);
             const executed = new Set();
+            let nativeTurnHadError = false;
             for (let nativeIndex = 0; nativeIndex < nativeCalls.length; nativeIndex += 1) {
                 const native = nativeCalls[nativeIndex];
                 if (signal?.aborted) {
@@ -247,15 +252,34 @@ export async function* runAgent(options) {
                 let call;
                 let parseError = "";
                 try {
-                    const args = native.arguments ? JSON.parse(native.arguments) : {};
-                    if (!args || typeof args !== "object" || Array.isArray(args))
-                        throw new Error("arguments must be a JSON object");
-                    call = { ...args, tool: native.name };
+                    const parsed = parseJsonObjectWithRepair(native.arguments ?? "");
+                    if (parsed.error || !parsed.value)
+                        throw new Error(parsed.error ?? "arguments must be a JSON object");
+                    call = { ...parsed.value, tool: native.name };
                 }
                 catch (err) {
                     parseError = `invalid arguments for ${native.name}: ${err?.message ?? String(err)}`;
-                    protocolErrors += 1;
-                    call = { tool: native.name };
+                    nativeTurnHadError = true;
+                    lastTurnHadProtocolError = true;
+                    consecutiveProtocolErrors += 1;
+                    lastProtocolError = parseError;
+                }
+                if (!call) {
+                    // Never execute a tool with fabricated/default arguments when
+                    // the provider's JSON was invalid. Feed the error back once.
+                    const errorCall = { tool: native.name };
+                    const output = `Invalid arguments for ${native.name}; the tool was NOT executed. ${parseError}\n` +
+                        "Re-emit a complete JSON object for this tool.";
+                    yield { type: "tool_call", id, call: errorCall, native: true };
+                    yield { type: "tool_result", id, call: errorCall, ok: false, output, code: "INVALID_ARGS", hint: "Re-emit a complete JSON object." };
+                    history = [...history, { role: "tool", toolCallId: id, content: output }];
+                    executed.add(id);
+                    if (consecutiveProtocolErrors >= 2) {
+                        stopReason = "protocol_error";
+                        errorMessage = `Tool-call protocol failed ${consecutiveProtocolErrors} time(s); native arguments were invalid twice. Last error: ${lastProtocolError}`;
+                        break;
+                    }
+                    continue;
                 }
                 const fingerprint = toolCallFingerprint(call, cwd);
                 if (!isLoopExempt(call.tool)) {
@@ -272,9 +296,7 @@ export async function* runAgent(options) {
                     }
                 }
                 yield { type: "tool_call", id, call, native: true };
-                const result = parseError
-                    ? { ok: false, output: parseError }
-                    : await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
+                const result = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
                 if (typeof result.output === "string")
                     result.output = boundToolMessage(result.output);
                 trackSideEffects(activeFiles, result.sideEffects);
@@ -294,6 +316,10 @@ export async function* runAgent(options) {
                         toolCallId: id,
                         content: "[not executed: the run stopped before this tool call could run]",
                     }];
+            }
+            if (!nativeTurnHadError) {
+                consecutiveProtocolErrors = 0;
+                lastProtocolError = "";
             }
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
             if (stopReason === "complete")
@@ -316,12 +342,14 @@ export async function* runAgent(options) {
             if (foreignDialect) {
                 // Recognized but unexecutable markup: report once and stop.
                 // Re-prompting here is what let one bad example burn every turn.
-                protocolErrors += 1;
                 const detail = parsed.detectedDialects.length > 0
                     ? `Detected tool-call dialects: ${parsed.detectedDialects.join(", ")}.`
                     : "Detected an unsupported tool-call dialect.";
                 stopReason = "protocol_error";
                 errorMessage = `${detail} No valid call could be parsed; stopping instead of re-emitting.`;
+                consecutiveProtocolErrors += 1;
+                lastProtocolError = errorMessage;
+                lastTurnHadProtocolError = true;
                 yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
                 break;
             }
@@ -331,14 +359,18 @@ export async function* runAgent(options) {
                 // same fingerprint twice means it did not recover — stop.
                 const reemitKey = parsed.errors.join("\n");
                 if (protocolReemit.has(reemitKey)) {
-                    protocolErrors += 1;
                     stopReason = "protocol_error";
                     errorMessage = "Tool-call markup was invalid again after one re-emit request; stopped instead of looping.";
+                    consecutiveProtocolErrors += 1;
+                    lastProtocolError = errorMessage;
+                    lastTurnHadProtocolError = true;
                     yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
                     break;
                 }
                 protocolReemit.add(reemitKey);
-                protocolErrors += 1;
+                consecutiveProtocolErrors += 1;
+                lastProtocolError = parsed.errors.join("\n");
+                lastTurnHadProtocolError = true;
                 const id = `tc_${++toolCallSeq}`;
                 const call = { tool: "protocol_error" };
                 const output = "Previous output contained invalid tool-call markup. " +
@@ -350,12 +382,19 @@ export async function* runAgent(options) {
                 yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
                 continue;
             }
-            lastVisible = visibleText || streamed.text;
+            const baseVisible = visibleText || streamed.text;
+            lastVisible = hasUnexecutedToolMarkup(streamed.text)
+                ? `${baseVisible}\n\n[fastcode] Tool-call markup was present but not executed; a call must start at a line boundary.`.trim()
+                : baseVisible;
             naturalFinish = true;
             stopReason = "complete";
+            consecutiveProtocolErrors = 0;
+            lastProtocolError = "";
             yield { type: "checkpoint", turn: turn + 1, cwd, providerId: provider.id, model, activeFiles: Array.from(activeFiles.values()) };
             break;
         }
+        consecutiveProtocolErrors = 0;
+        lastProtocolError = "";
         history = [...history, { role: "assistant", content: streamed.text }];
         if (visibleText)
             yield { type: "assistant_text", text: visibleText };
@@ -405,11 +444,13 @@ export async function* runAgent(options) {
     }
     if (stopReason === "complete" && !naturalFinish)
         stopReason = "max_turns";
-    // Repeated broken markup/arguments must not look like a normal turn cap:
-    // surface it as its own stop reason so scripts get a non-zero exit.
-    if (stopReason === "max_turns" && protocolErrors > 0) {
+    // A protocol error only rewrites the turn cap when the *last* turn still
+    // failed. A single early bad argument followed by successful turns must
+    // remain a normal max_turns/completed run.
+    if (stopReason === "max_turns" && lastTurnHadProtocolError && consecutiveProtocolErrors > 0) {
         stopReason = "protocol_error";
-        errorMessage = `Tool-call protocol failed ${protocolErrors} time(s); the run stopped before producing a valid tool call.`;
+        errorMessage = `Tool-call protocol failed ${consecutiveProtocolErrors} time(s); the run stopped before producing a valid tool call.` +
+            (lastProtocolError ? ` Last error: ${lastProtocolError}` : "");
     }
     let finalText = "";
     if (stopReason === "aborted") {
@@ -418,8 +459,10 @@ export async function* runAgent(options) {
         yield { type: "error", kind: "aborted", message: "Cancelled.", text: partial };
     }
     else if (stopReason === "protocol_error") {
-        finalText = lastVisible || errorMessage;
-        yield { type: "error", kind: "protocol_error", message: errorMessage, text: lastVisible || undefined };
+        // Keep the error in the single error event; do not also repeat it as
+        // final assistant text (TUI/headless would render it twice).
+        finalText = lastVisible;
+        yield { type: "error", kind: "protocol_error", message: errorMessage, text: lastVisible || undefined, detail: lastProtocolError || undefined };
     }
     else if (stopReason === "token_budget" || stopReason === "cost_budget" || stopReason === "loop_detected" || stopReason === "incomplete") {
         finalText = lastVisible || errorMessage;
@@ -453,6 +496,15 @@ function toolResultMeta(result) {
         ...(result.filesRead !== undefined ? { filesRead: result.filesRead } : {}),
         ...(result.filesSkipped !== undefined ? { filesSkipped: result.filesSkipped } : {}),
         ...(result.matches !== undefined ? { matches: result.matches } : {}),
+        ...(result.oldText !== undefined ? { oldText: result.oldText } : {}),
+        ...(result.newText !== undefined ? { newText: result.newText } : {}),
+        ...(result.changedStartLine !== undefined ? { changedStartLine: result.changedStartLine } : {}),
+        ...(result.oldLineCount !== undefined ? { oldLineCount: result.oldLineCount } : {}),
+        ...(result.newLineCount !== undefined ? { newLineCount: result.newLineCount } : {}),
+        ...(result.diffTruncated !== undefined ? { diffTruncated: result.diffTruncated } : {}),
+        ...(result.diffs ? { diffs: result.diffs } : {}),
+        ...(result.atomic === false ? { atomic: false } : {}),
+        ...(result.check ? { check: result.check } : {}),
     };
 }
 function trackSideEffects(activeFiles, sideEffects) {

@@ -21,6 +21,6 @@ export const openaiProvider = {
     baseUrl: BASE,
     defaultModel: "gpt-6-luna",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC, reasoning: "openai" }),
+    stream: (req, apiKey) => streamChatCompletion(req, { providerId: "openai", baseUrl: BASE, apiKey, staticModels: STATIC, reasoning: "openai" }),
     supportsReasoning: (model) => /^(o\d|gpt-5|gpt-6)/i.test(model),
 };

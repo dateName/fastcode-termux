@@ -89,13 +89,18 @@ export function terminateProcessTree(child, options = {}) {
     const graceMs = Math.max(0, Math.floor(options.graceMs ?? KILL_GRACE_MS));
     const timer = setTimeout(() => {
         pendingKills.delete(child);
-        if (child.exitCode !== null || child.signalCode !== null)
-            return;
+        // The direct child may have exited while a descendant in the same
+        // process group ignored SIGTERM. Escalate as long as the group lives.
         if (!isAlive(pid))
             return;
         sendSignal(pid, "SIGKILL");
     }, graceMs);
     timer.unref?.();
     pendingKills.set(child, timer);
-    child.once("exit", () => clearPending(child));
+    child.once("exit", () => {
+        // Do not cancel escalation just because the leader exited; the timer
+        // itself will clear if the whole group is gone.
+        if (!isAlive(pid))
+            clearPending(child);
+    });
 }

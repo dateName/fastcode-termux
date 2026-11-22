@@ -61,7 +61,19 @@ function isCallBoundary(raw, index) {
     const lineStart = raw.lastIndexOf("\n", index - 1) + 1;
     if (/^[ \t]*$/.test(raw.slice(lineStart, index)))
         return true;
-    return /<\/(?:fastcode_tool|tool_calls?|function_calls?|invoke)>[ \t]*$/i.test(raw.slice(0, index));
+    // Only a short suffix can matter here; slicing the whole prefix for every
+    // marker made long replies quadratic.
+    const suffixStart = Math.max(0, index - 256);
+    return /<\/(?:fastcode_tool|tool_calls?|function_calls?|invoke)>[ \t]*$/i.test(raw.slice(suffixStart, index));
+}
+const UNEXECUTED_MARKER_RE = /<fastcode_tool\b|<tool_calls?\b|<function_calls?\b|<function\s*=|<invoke\s+name=["']?|<\|tool_call\|>|<\|python_tag\|>|\[TOOL_CALLS\]|<antml:invoke\b/i;
+/**
+ * True when the visible reply contains a tool-call marker outside Markdown
+ * fences. Fenced examples stay silent; an inline/list marker that was not
+ * executed still needs a visible hint so the reply is not a silent "complete".
+ */
+export function hasUnexecutedToolMarkup(text) {
+    return UNEXECUTED_MARKER_RE.test(maskFencedBlocks(canonicalizeDsml(String(text ?? ""))));
 }
 /**
  * A foreign marker only fails the turn when the reply is basically the markup
@@ -718,9 +730,10 @@ export function systemPromptForFallback(system) {
     if (!system)
         return system;
     const nativeBlock = agentSystemPrompt("native");
-    if (!system.endsWith(nativeBlock))
+    const index = system.lastIndexOf(nativeBlock);
+    if (index < 0)
         return system;
-    return system.slice(0, system.length - nativeBlock.length) + AGENT_SYSTEM_PROMPT;
+    return system.slice(0, index) + AGENT_SYSTEM_PROMPT + system.slice(index + nativeBlock.length);
 }
 function fence(text) {
     return `\`\`\`\n${text}\n\`\`\``;

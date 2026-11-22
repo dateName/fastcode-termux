@@ -16,9 +16,17 @@ export interface EgressAudit {
     reason: string;
 }
 import type { ApprovalResolver } from "../approval.js";
+import type { StructuredDiff } from "../../lib/values.js";
 export interface ToolCall {
     tool: string;
     [key: string]: any;
+}
+export interface ToolCheckResult {
+    ok: boolean;
+    output: string;
+    timedOut: boolean;
+    exitCode?: number | null;
+    files: string[];
 }
 export interface ToolResult {
     ok: boolean;
@@ -33,6 +41,17 @@ export interface ToolResult {
     filesRead?: number;
     filesSkipped?: number;
     matches?: number;
+    oldText?: string;
+    newText?: string;
+    changedStartLine?: number;
+    oldLineCount?: number;
+    newLineCount?: number;
+    diffTruncated?: boolean;
+    diffs?: Array<StructuredDiff & {
+        path: string;
+    }>;
+    atomic?: boolean;
+    check?: ToolCheckResult;
     egress?: EgressAudit;
     sideEffects?: SideEffects;
 }

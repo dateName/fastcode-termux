@@ -17,3 +17,4 @@ export declare const MAX_TIMEOUT_MS = 2147483647;
  */
 export declare function normalizeTimeoutMs(value: unknown, fallback?: number): number;
 export declare function preparePath(cwd: string, raw: string): Prepared;
+export declare function prepareWritePath(cwd: string, raw: string): Prepared;

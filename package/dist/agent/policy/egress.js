@@ -9,6 +9,7 @@
  */
 import { basename, relative, resolve } from "node:path";
 import { getPaths } from "../../config/paths.js";
+import { realpathOf } from "../../lib/realpath.js";
 import { isCriticalReadTarget, isSensitiveTarget, isSharedStoragePath } from "../guards.js";
 import { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG } from "./defaults.js";
 export { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG } from "./defaults.js";
@@ -112,7 +113,8 @@ function expandHome(target) {
     return target.replace(/^\$(?:HOME|\{HOME\})/i, home);
 }
 function normalizeTarget(target, cwd) {
-    return resolve(cwd, expandHome(target)).replace(/\\/g, "/");
+    const lexical = resolve(cwd, expandHome(target));
+    return (realpathOf(lexical) ?? lexical).replace(/\\/g, "/");
 }
 function isInside(child, parent) {
     const rel = relative(parent, child).replace(/\\/g, "/");

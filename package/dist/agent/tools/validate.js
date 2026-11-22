@@ -1,5 +1,5 @@
 import { debugLog } from "../../lib/debug.js";
-import { sandboxPath } from "./paths.js";
+import { sandboxPath, sandboxWritePath } from "./paths.js";
 export function invalid(output, code = "INVALID_ARGS", hint) {
     return { ok: false, output, code, ...(hint ? { hint } : {}) };
 }
@@ -80,8 +80,14 @@ function describeValue(value) {
     return String(value);
 }
 export function preparePath(cwd, raw) {
+    return prepareWith(cwd, raw, sandboxPath);
+}
+export function prepareWritePath(cwd, raw) {
+    return prepareWith(cwd, raw, sandboxWritePath);
+}
+function prepareWith(cwd, raw, resolve) {
     try {
-        sandboxPath(cwd, raw);
+        resolve(cwd, raw);
         return { ok: true };
     }
     catch (err) {

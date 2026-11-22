@@ -7,6 +7,7 @@
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { totalmem, freemem, tmpdir as osTmpdir } from "node:os";
+import { join } from "node:path";
 import { detectPlatform, platformLabel } from "./platform.js";
 import { readPackageMeta } from "./pkg.js";
 import { shouldUseStableTerminalUi } from "./uiMode.js";
@@ -22,11 +23,12 @@ import { isTrusted } from "../config/trust.js";
 import { DEFAULT_DENY_PATTERNS, loopExemptTools } from "../agent/guards.js";
 import { toolMessageLimit, toolOutputLimit } from "../agent/limits.js";
 import { grepMaxBytes, readManyMaxBytes, readMaxBytes, readScanMaxBytes } from "../agent/tools/readers.js";
+import { atomicFile } from "./atomic-file.js";
 import { normalizeEgressConfig } from "../agent/policy/egress.js";
 import { compactionConfigFromEnv, heapExceeded } from "../agent/compaction.js";
 import { shellPoolStats } from "../agent/shell-session.js";
 import { resolveToolProtocol, runtimeToolCapability } from "../agent/protocol-mode.js";
-import { getModelMeta, modelMetaOverridePath } from "./model-meta.js";
+import { MODEL_META_UPDATED, getModelMeta, modelMetaOverridePath, modelMetaSource } from "./model-meta.js";
 import { getLocale } from "../i18n/index.js";
 const NODE_REQUIRED = "18.17";
 function readVersion() {
@@ -193,11 +195,22 @@ export function collectDiagnostics() {
         customAuthExtraHeaders: Boolean((process.env["FASTCODE_EXTRA_HEADERS"] ?? "").trim()),
         toolProtocol: resolveToolProtocol(config, config.providerId, config.model),
         stdioBackend: process.env["FASTCODE_STDIO_COMMAND"] ? "configured" : "off",
+        checkCommand: config.checkCommand || "off",
+        checkTimeoutMs: Number(config.checkTimeoutMs) > 0 ? Number(config.checkTimeoutMs) : 15_000,
+        checkFiles: process.env["FASTCODE_CHECK_FILES"] ?? "",
+        checkMode: process.env["FASTCODE_CHECK_MODE"] ?? "",
+        worktreesRoot: process.env["FASTCODE_WORKTREES_ROOT"] ?? join(paths?.root ?? getPaths().root, "worktrees"),
+        atomicBackups: Array.from(new Set([
+            ...atomicFile.backups(process.cwd()),
+            ...atomicFile.backups(paths?.root ?? getPaths().root),
+        ])),
         toolProtocolMode: (process.env["FASTCODE_TOOL_PROTOCOL"] ?? "auto").trim().toLowerCase(),
         toolCapability: runtimeToolCapability(config.providerId, config.model) ?? "unknown",
         loopExempt: Array.from(loopExemptTools()),
         modelMetaFile: modelMetaOverridePath(),
         modelMeta: getModelMeta(config.providerId, config.model),
+        modelMetaSource: modelMetaSource(config.providerId, config.model),
+        modelMetaUpdated: MODEL_META_UPDATED,
         providers: PROVIDERS.map((p) => ({
             id: p.id,
             label: p.label,
@@ -243,10 +256,16 @@ export function formatDiagnostics(info) {
     lines.push(`  shell pool    ${info.shellActive} active · ${info.shellPool}/${info.shellPoolMax} resident · ${info.shellSpawns} spawns · cap ${info.shellMaxSpawn}/turn`);
     lines.push(`  loop exempt   ${info.loopExempt.length > 0 ? info.loopExempt.join(", ") : "(none)"}`);
     lines.push(`  model meta    ctx ${info.modelMeta.contextWindow} · ~${info.modelMeta.charsPerToken} chars/token · ${info.modelMeta.supportsTools ? "tools" : "no tools"} · ${info.modelMetaFile}`);
+    lines.push(`  model price   ${info.modelMeta.pricing ? `$${info.modelMeta.pricing.inputUsdPerM ?? 0}/$${info.modelMeta.pricing.outputUsdPerM ?? 0} per 1M tokens` : "pricing unknown"} · source ${info.modelMetaSource} · updated ${info.modelMetaUpdated}`);
     lines.push(`  sse timeout   ${info.requestIdleMs}ms request idle (config) · ${info.sseIdleMs}ms env fallback`);
     lines.push(`  tool protocol ${info.toolProtocol} (${info.toolProtocolMode}) · runtime ${info.toolCapability}`);
     lines.push(`  provider      ${info.providerId} · model ${info.model}`);
     lines.push(`  stdio backend ${info.stdioBackend}${info.stdioBackend === "configured" ? " (FASTCODE_STDIO_COMMAND)" : ""}`);
+    lines.push(`  post-write    ${info.checkCommand === "off" ? "off" : `${info.checkCommand} (${info.checkTimeoutMs}ms)`}`);
+    lines.push(`  check env     FILES=${info.checkFiles ? "set" : "off"} · MODE=${info.checkMode || "off"}`);
+    lines.push(`  worktrees     ${info.worktreesRoot}`);
+    if (info.atomicBackups.length > 0)
+        lines.push(`  backups       ${info.atomicBackups.length} residual atomic backup(s): ${info.atomicBackups.join(", ")}`);
     if (info.customAuthHeader || info.customAuthPrefix || info.customAuthExtraHeaders) {
         lines.push(`  custom auth   header ${info.customAuthHeader ?? "authorization"}` +
             `${info.customAuthPrefix ? " · prefix set" : ""}${info.customAuthExtraHeaders ? " · extra headers set" : ""}`);

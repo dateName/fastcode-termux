@@ -2,18 +2,114 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.8-beta.2（2026-11-17，工作树）
+## 0.1.8-beta.3（2026-11-21，工作树）
 
-> 状态：基于已发布的 0.1.8-beta.1；仅本地 build 与 PC 回归（Node 24，smoke 355/355），未提交、未发布。
+> 状态：基于已发布的 0.1.8-beta.2 + 2026-11-21 批次；Windows smoke **441/441**；已本地 build，但**未提交、未发布**；npm `beta` 仍为 0.1.8-beta.2，`latest` 仍为 0.1.6；`release/` 仍为 0.1.8-beta.2 已发布资产。
+
+### 安全与健壮性
+
+- B2-01 悬空 symlink、B2-01b 硬链接、B2-02 `resume` 任意文件覆盖修复。
+- `realpathOf` 逐组件解析；write/append/copy 使用 `sandboxWritePath` + `O_NOFOLLOW`；write/copy/replace 原子 tmp+rename；append 拒绝 `nlink>1`。
+- `/resume` 只接受 sessions 下 id/`.jsonl`；projection 拒绝覆盖源。
+
+### 协议 / 事件
+
+- 1.3 参数修复；B9/B10/B11/B12/B13/B14。
+- 统一事件流：`v:1` / `seq` / `ts` / `session_id` / `turn`；`reasoning` 帧；gate 帧统一 `v:1`。
+
+### 能力 / 编辑
+
+- model-meta pricing/source/updated、`estimateCostUsd`、OpenAI 兼容 `costUsd`；doctor 显示 price。
+- `write_file` / `replace_in_file` 返回 old/new 文本、首个变更行、行数与截断标记；headless JSON 同步 snake_case 字段。
+
+### 会话 / 扩展 / 工具
+
+- `/revert <n>` 消息级回滚（`--files` 未实现）。
+- `AGENTS.md` / `FASTCODE.md` 自动发现并注入 system。
+- `permissions.shell` 分层声明式权限（仅 Soft Gate；Hard Block 不变）。
+- `checkCommand` / `checkTimeoutMs` 写后检查。
+- 外置插件 `plugin.json` manifest（默认关，prompt/skills 能力校验）。
+- `/plan` / `/todo` / `/goal` 计划与目标（自动续跑未实现）。
+- `/worktree create/list/diff/apply/remove`（自动绑定 session 未实现）。
+- B7 CI 门禁 + 2.8 不变量（`verify.yml`、`verify-gate`）。
+
+## 0.1.8-beta.2（2026-11-17，已发布）
+
+> 状态：基于已发布的 0.1.8-beta.1；PC 回归（Node 24，smoke 355/355）；已本地 build/打包并发布到 npm `beta` 与 GitHub Release（`latest` 仍为 0.1.6；Release workflow #13 成功）。
 
 ### 修复（相对 0.1.8-beta.1）
 - native 降级：`system` 在 fallback 时把尾部 native agent 段换成 legacy 文本协议段，调用方自带的 system 前缀保留；降级后的请求重新包含 `<fastcode_tool>` 语法（#152）。
 - 可见文本：`stripUnfencedText` 每步 boundary 按“当前正在 replace 的字符串”计算 offset，混排 `ANCHOR→D4→D5` 也不再残留标记（#151）。
 - 错误文案：OpenAI 兼容 provider 的 400 message 不再重复 `400 Bad Request:` 前缀（#150）。
 
-## 0.1.8-beta.1（2026-11-15，工作树）
+### 后续安全修复（工作树，未发布）
 
-> 状态：工作树版本见 `package/package.json`；基于 0.1.8-beta.0 工作树；仅本地 build 与 PC 回归，未提交、未发布。来源：`yq.txt` 审计整合 + 本项目文档要求。
+- 悬空符号链接写入逃逸：`realpathOf` 逐组件解析（含悬空链接），写/追加/复制使用 `sandboxWritePath` + `O_NOFOLLOW`，egress 对真实路径评估（B2-01）。
+- 硬链接写入逃逸：write/copy(overwrite)/replace 使用同目录 tmp+rename 断开硬链接，append 拒绝 `nlink>1`（B2-01b）。
+- `resume` 覆盖任意文件：仅接受 `sessions/` 下的会话 id/`.jsonl`，`projectionPath` 大小写不敏感，`writeProjection` 拒绝覆盖源文件（B2-02）。
+- 验证：Windows smoke **369/369**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过；Termux/POSIX 待复验。
+
+### 后续协议/参数修复（工作树，未发布）
+
+- 参数修复：native `arguments` 在解析前做一次保守修复（尾逗号、未闭合字符串/括号、单元素数组、已知数值/布尔字符串）；仍失败不执行工具。
+- native 参数失败：回注 `INVALID_ARGS`，工具执行 0 次；连续 2 次失败停止 `protocol_error`。
+- 计数与归因：协议错误在合法轮清零；`max_turns` 仅在最后一轮失败时改判；`error` 事件带 `detail`；`protocol_error` 不再把错误文案重复进 `finalText`。
+- 未执行标记：0 调用但围栏外正文含工具标记时，在可见文本追加“未执行”提示；围栏示例不提示。
+- 验证：Windows smoke **381/381**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 后续 CI 门禁（工作树，未发布）
+
+- 新增 `.github/workflows/verify.yml`：push/PR、Node 24、`npm ci`、`npm run check`、`verify:artifacts`、`verify-gate` 自检、构建后 `dist` 无 diff。
+- 新增 `scripts/verify-gate.mjs` 与 `npm run verify:gate`：校验 workflow 关键项与 bundle 运行时字面量，`--self-test` 作为反证。
+- 验证：`npm run check`（381/381）、`verify-gate --self-test`、构建哈希稳定通过。
+
+### 后续统一事件流（工作树，未发布）
+
+- 新增 `agent/event-stream.ts`：`EventStream` 统一 `v:1/seq/ts/session_id/turn` 信封；`serializeAgentEvent` 成为 JSON 消费端唯一映射。
+- headless 改由该序列化器输出；新增 `reasoning` 帧；`gate:ask`/`gate:decision`/`gate:error` 统一 `v:1`（入站仍兼容旧 `version`）。
+- 验证：Windows smoke **385/385**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 后续能力目录与结构化 diff（工作树，未发布）
+
+- 能力目录：`lib/model-meta.ts` 新增 `pricing`、`modelMetaSource()`、`MODEL_META_UPDATED`、`estimateCostUsd()`；OpenAI 兼容 provider 的 usage 现在按 staticModels/model-meta 计算 `costUsd`；`doctor` 显示计价、来源与快照日期。
+- 结构化 diff：`write_file`/`replace_in_file` 返回 `oldText/newText/changedStartLine/oldLineCount/newLineCount/diffTruncated`；headless JSON 对应 snake_case 字段；TUI 显示 diff 摘要。
+- 验证：Windows smoke **390/390**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 后续回滚 / 指令 / 权限 / 诊断回路（工作树，未发布）
+
+- 1.1 回滚：新增 `revert` fact 与 `/revert <n>`，按 user 消息边界截断投影；JSONL 保持 append-only；`--files` 暂未实现。
+- 1.2 指令发现：`session/instructions.ts` 自动读取全局/项目根/cwd 链的 `AGENTS.md`/`FASTCODE.md`，注入 system（在 agent block 之前）；`/context` 显示来源。
+- 2.1 声明式权限：`permissions.shell.allow/deny` 分层 glob，只作用于 Soft Gate；未信任项目层忽略；Hard Block 不变。
+- 2.3 诊断回路：`checkCommand` + `checkTimeoutMs`，写类工具成功后检查改动文件；失败/超时不改变工具 ok。
+- 验证：Windows smoke **404/404**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 后续外置扩展 / plan-todo / worktree（工作树，未发布）
+
+- 2.7 外置插件：支持可选 `plugin.json` manifest（name/version/scope/capabilities）；导入默认关闭；只支持 prompt/skills，其他能力拒绝。
+- 2.6 plan/todo/goal：`plan` fact + `/plan`（`/todo` 别名）+ `/goal`；投影以受保护 `[plan]` system message 呈现；自动续跑未实现。
+- 3.3 工作树：`/worktree list/create/diff/apply/remove`；worktree 根在 `$FASTCODE_HOME/worktrees`；apply 只应用 tracked diff；dirty remove 需 `--force`。
+- 验证：Windows smoke **441/441**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 后续 code-review 修复（工作树，未发布）
+
+- `/revert` 连续回滚按当前可见事实逐次截断，后续 revert 不再复活更早已撤销事实。
+- 绝对路径 glob（如 `/tmp/*`）不再误判为正则；`permissions.read/edit` 仍未实现。
+- worktree `diff`/`apply` 改用 `git diff HEAD`，覆盖 staged + unstaged；`apply` 前要求目标 checkout 无未提交改动。
+- 新增 `lib/atomic-file.ts`：`atomicFile.write` + `atomicFile.temp`（Temp.write/fill/commit/discard）+ `atomicFile.backups`；temp 所有权、O_NOFOLLOW、结构错误分类、rename 失败 FUSE 覆盖、字节回读、失败还原；还原失败保留 backup，doctor 报告残留；fallback 成功在 ToolResult/event 标记 `atomic:false`。
+- post-write check 收窄到 write/append/replace/apply_patch/copy；move/delete/make_dir 不触发。
+- 插件 `scope:"project"` 安装到 `<cwd>/.fastcode/plugins`，仅信任项目加载并优先于同名全局插件。
+- `append_file` 返回结构化 diff；`apply_patch` 返回逐文件 `diffs`；TUI 收起时显示文件数，`/expand` 显示逐文件 old/new；同名指令文件近层覆盖远层，32KB 上限按 UTF-8 字节。
+- `/revert` 与 `/plan` 的重建收进 `session/actions.ts`，app 不再重复 `resumeSession → setHistory → setTranscript`。
+- glob 安全上限合并到 `lib/glob.ts`；`/tmp/foo`、`/usr/bin/git*` 等绝对路径不再被误判为正则。
+- B2-04 真实 SSE 缺终止标记抛 `IncompleteStreamError`；B2-05 glob/ignore 加长度、`**`、文件大小与规则数上限；B2-06 `read_many.maxBytes` 钳制并逐文件隔离错误。
+- B2-09 i18n 非法语言类型回退；B2-10 summaryRef 限 sessions 内且 ≤256KB；B2-11 进程组升级不再被直接子进程退出取消；B2-12 auth tmp/备份 0600；B2-13 provider 错误正文脱敏。
+- B2-08 短历史动态压缩、headless/剪枝 summary 清理、投影 `toolCalls[].arguments` 截断与 200KB 硬上限；B2-14 usage 告警去重、`isCallBoundary` 去 O(n²)、fallback 保留 caller 后缀、400 不再因 “tools are unsupported” 误重试。
+- 仍未完成：B2-03/B2-07（shell，按用户要求暂缓）、B2-15/B2-16 依赖项；`permissions.read/edit`、指令“本次输入”层、provider 能力表、StructuredDiff 到 event/TUI 的字段映射复用；`append_file` 保持 append 语义，不改写为 temp+rename。
+- 验证：Windows smoke **441/441**；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。
+
+## 0.1.8-beta.1（2026-11-15，已发布）
+
+> 状态：0.1.8-beta.1 发布记录；基于 0.1.8-beta.0 工作树；发布前完成本地 build 与 PC 回归。来源：`yq.txt` 审计整合 + 本项目文档要求。
 > `release/` 已生成当前版本资产；npm `beta` 已发布当前版本（`latest` 仍为 0.1.6）；GitHub Release 资产已上传（Release workflow 最后的 npm 步骤可能因版本已手动发布而失败，不影响资产）。
 
 ### 0.1.8-beta.1 后续修复（2026-11-16）

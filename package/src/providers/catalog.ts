@@ -54,7 +54,7 @@ function build(spec: CatalogSpec): Provider {
         baseUrl: spec.baseUrl,
         defaultModel: spec.defaultModel ?? "",
         listModels: (apiKey) => listModelsHttp({ ...opts, apiKey }),
-        stream: (req, apiKey) => streamChatCompletion(req, { ...opts, apiKey }),
+        stream: (req, apiKey) => streamChatCompletion(req, { ...opts, apiKey, providerId: spec.id }),
         ...(spec.modelsPath !== undefined ? { modelsPath: spec.modelsPath } : {}),
     };
 }

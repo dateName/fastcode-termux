@@ -11,5 +11,6 @@ export interface ApplyResult {
     touched: string[];
     removed: string[];
     warnings: string[];
+    atomic: boolean;
 }
-export declare function applyPatchPlan(plan: PatchPlan): ApplyResult;
+export declare function applyPatchPlan(plan: PatchPlan): Promise<ApplyResult>;

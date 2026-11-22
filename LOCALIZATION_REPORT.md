@@ -2,7 +2,7 @@
 
 > 文件名沿用历史；本文件实际是 **0.1.6-beta 交接/验收报告**，不是本地化（i18n）报告。
 
-> 历史快照：本报告对应 0.1.6-beta；当前工作树为 0.1.7，最新能力见 CHANGELOG/ARCHITECTURE。
+> 历史快照：本报告对应 0.1.6-beta；当前工作树版本见 `package/package.json`，最新能力见 CHANGELOG/ARCHITECTURE。
 
 > **版本标识**：0.1.6-beta（测试版）
 > **基线**：`43c8835`（0.1.6）

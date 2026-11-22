@@ -41,6 +41,16 @@ export declare const DEFAULT_CONFIG: {
         maxScanBytes: number;
         scanToolOutput: boolean;
     };
+    /** Declarative soft-gate permissions; hard_block is never overridden. */
+    permissions: {
+        shell: {
+            allow: string[];
+            deny: string[];
+        };
+    };
+    /** Optional post-write check command; empty means off. */
+    checkCommand: string;
+    checkTimeoutMs: number;
 };
 export interface StoredCredential {
     provider: string;

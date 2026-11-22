@@ -9,7 +9,7 @@ import type { ApprovalDecision, ApprovalRequest } from "./approval.js";
 export declare const GATE_PROTOCOL_VERSION = 1;
 export interface GateAskEvent {
     event: "gate:ask";
-    version: number;
+    v: number;
     id: string;
     tier: number;
     action: string;
@@ -33,7 +33,7 @@ export interface GateAskEvent {
 export declare function encodeGateAsk(request: ApprovalRequest): GateAskEvent;
 export interface GateDecisionEvent {
     event: "gate:decision";
-    version: number;
+    v: number;
     id: string;
     decision: {
         kind: string;

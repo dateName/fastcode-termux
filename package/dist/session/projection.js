@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, resolve, sep } from "node:path";
+import { getPaths } from "../config/paths.js";
 import { formatToolResults } from "../agent/protocol.js";
 import { toolCatalogHash } from "../agent/registry.js";
 import { projectionPath, readSession } from "./log.js";
+import { formatPlan, latestPlan } from "./plan.js";
 const READ_ONLY_TOOLS = new Set(["read_file", "read_many", "grep", "list_files", "stat_path", "pwd"]);
 const IDEMPOTENT_TOOLS = new Set(["write_file"]);
 const MAX_MESSAGE_CHARS = 8_000;
 const MAX_PROJECTION_BYTES = 200_000;
+const MAX_TOOL_ARGUMENT_CHARS = 8_000;
 const TOOL_FOLD_CHARS = 600;
 export function unpairedToolNotice(tool) {
     if (READ_ONLY_TOOLS.has(tool))
@@ -65,6 +69,41 @@ function factsAfterClear(facts) {
             return facts.slice(index + 1);
     }
     return facts;
+}
+/**
+ * Apply every revert fact in order on top of the latest clear boundary. Each
+ * revert removes the target user fact and everything after it from the current
+ * visible set, so a later revert cannot resurrect an earlier removal.
+ */
+export function factsAfterRevert(facts) {
+    const visible = [];
+    for (const fact of factsAfterClear(facts)) {
+        if (fact?.type === "revert") {
+            const cut = Number(fact.keepBeforeSeq);
+            if (Number.isFinite(cut))
+                visible.splice(0, visible.length, ...visible.filter((entry) => Number(entry?.seq ?? 0) < cut));
+            continue;
+        }
+        visible.push(fact);
+    }
+    return visible;
+}
+/** Resolve /revert <n>: remove the n-th user message and everything after it. */
+export function revertBoundary(facts, n) {
+    if (!Number.isInteger(n) || n < 1)
+        return undefined;
+    const visible = factsAfterRevert(facts);
+    const users = visible.filter((fact) => fact?.type === "user" && typeof fact.content === "string" && Number.isFinite(Number(fact.seq)));
+    if (n > users.length)
+        return undefined;
+    const target = users[n - 1];
+    const targetUserSeq = Number(target.seq);
+    return {
+        targetUserSeq,
+        keepBeforeSeq: targetUserSeq,
+        removed: visible.filter((fact) => Number(fact?.seq ?? 0) >= targetUserSeq).length,
+        userMessages: users.length,
+    };
 }
 export function sessionMetaFromFile(file) {
     return sessionMetaFromFacts(readSession(file));
@@ -155,11 +194,22 @@ function latestCompaction(facts) {
     }
     return undefined;
 }
+const MAX_SUMMARY_BYTES = 256 * 1024;
+function safeSummaryRef(ref) {
+    if (!/^summary-\d+.*\.md$/i.test(basename(ref)))
+        return false;
+    const sessions = resolve(getPaths().sessions) + sep;
+    return resolve(ref).startsWith(sessions);
+}
 function applySummary(messages, facts) {
     const latest = latestCompaction(facts);
     if (!latest || latest.source !== "local" || typeof latest.summaryRef !== "string")
         return messages;
+    if (!safeSummaryRef(latest.summaryRef))
+        return [...messages, { role: "system", content: "[projection] Summary path rejected; resumed without the summary marker." }];
     try {
+        if (statSync(latest.summaryRef).size > MAX_SUMMARY_BYTES)
+            return [...messages, { role: "system", content: "[projection] Summary file is too large; resumed without the summary marker." }];
         const summary = readFileSync(latest.summaryRef, "utf8");
         const keep = Number(latest.keepMessages);
         const tail = Number.isFinite(keep) && keep > 0 ? messages.slice(-keep) : messages;
@@ -262,8 +312,12 @@ export function buildProjection(facts, metaOverride) {
         providerId: metaOverride?.providerId || detected.providerId,
         model: metaOverride?.model || detected.model,
     };
-    const threadFacts = factsAfterClear(facts);
-    const folded = foldToolMessages(applySummary(factsToMessages(threadFacts), threadFacts));
+    const threadFacts = factsAfterRevert(facts);
+    const baseMessages = factsToMessages(threadFacts);
+    const plan = latestPlan(threadFacts);
+    if (plan)
+        baseMessages.push({ role: "system", content: formatPlan(plan) });
+    const folded = foldToolMessages(applySummary(baseMessages, threadFacts));
     const messages = pairToolMessages(clampMessages(folded)).messages;
     const source = compactionSourceFromFacts(threadFacts);
     let activeFiles = [];
@@ -376,18 +430,27 @@ function truncateMessageContent(content) {
     const tail = Math.max(0, MAX_MESSAGE_CHARS - head);
     return `${content.slice(0, head)}\n[...truncated in projection...]\n${content.slice(-tail)}`;
 }
+function truncateToolArguments(args) {
+    if (args.length <= MAX_TOOL_ARGUMENT_CHARS)
+        return args;
+    return JSON.stringify({
+        _truncated: true,
+        originalChars: args.length,
+        preview: args.slice(0, Math.floor(MAX_TOOL_ARGUMENT_CHARS / 2)),
+    });
+}
 function protectedMessage(message) {
-    return message.role === "system" && /^\[(context summary|context compacted|projection)/.test(message.content);
+    return message.role === "system" && /^\[(context summary|context compacted|projection|plan)/.test(message.content);
 }
 function clampMessages(messages) {
     const list = messages.map((message) => ({
         role: message.role,
         content: truncateMessageContent(message.content),
-        ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+        ...(message.toolCalls ? { toolCalls: message.toolCalls.map((call) => ({ ...call, arguments: truncateToolArguments(call.arguments) })) } : {}),
         ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
     }));
     let dropped = 0;
-    const overBudget = () => list.length > 1 && Buffer.byteLength(JSON.stringify(list), "utf8") > MAX_PROJECTION_BYTES;
+    const overBudget = () => Buffer.byteLength(JSON.stringify(list), "utf8") > MAX_PROJECTION_BYTES;
     const dropOldest = (marker) => {
         for (let index = 0; index < list.length; index += 1) {
             const message = list[index];
@@ -442,6 +505,8 @@ export function readProjection(file) {
 }
 export function writeProjection(file, projection, facts) {
     const target = projectionPath(file);
+    if (resolve(target) === resolve(file))
+        throw new Error("refusing to overwrite the session source with a projection: " + file);
     const tmp = target + "." + process.pid + ".tmp";
     try {
         writeFileSync(tmp, JSON.stringify(withManifest(projection, facts), null, 2), "utf8");
@@ -468,7 +533,7 @@ export function resumeSession(file, currentCwd = process.cwd()) {
         providerId: detected.providerId || stored?.providerId || "",
         model: detected.model || stored?.model || "",
     };
-    const expected = projectionFingerprint(meta, hasFacts ? compactionSourceFromFacts(factsAfterClear(facts)) : (stored?.fingerprint.compactionSource ?? "none"));
+    const expected = projectionFingerprint(meta, hasFacts ? compactionSourceFromFacts(factsAfterRevert(facts)) : (stored?.fingerprint.compactionSource ?? "none"));
     const warnings = [];
     let projection;
     let rebuilt = false;

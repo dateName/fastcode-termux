@@ -48,6 +48,9 @@
 | shellPoolSize | **resident** shell 池并发数；安全默认 2，最大 6；`/threads <1-6>` 修改；不限制 one-shot 路径 | 2 |
 | capabilities | 旧版缓存字段，仅为兼容保留；自 0.1.8-beta.1 起**不再参与** native/pseudo 判定（能力只记在进程内） | `{ "toolCalling": {} }` |
 | egress | 应用层 egress 策略；见 §2.1 | `{ "enabled": true, "mode": "block", ... }` |
+| permissions | 声明式 shell 权限；只作用于 Soft Gate，见 §2.2 | `{ "shell": { "allow": [], "deny": [] } }` |
+| checkCommand | 写类工具成功后的检查命令；空为关闭，见 §2.3 | "" |
+| checkTimeoutMs | 后置检查超时（毫秒） | 15000 |
 
 ### 2.1 egress 策略
 
@@ -72,7 +75,7 @@
 - `maxScanBytes`：outbound 内容/工具输出扫描预算；block 态超预算返回 `EGRESS_DENY`（`scan_budget_exceeded`），audit 态只记录。
 - `scanToolOutput`：是否在工具输出返回模型前扫描内容标记。
 - block 拒绝返回 `code:"EGRESS_DENY"`，不生成审批请求，不写 `trusted.json`；`FASTCODE_ALLOW_DANGEROUS`、`FASTCODE_TRUST_ALL`、`sharedDirs` 不能覆盖。
-- 配置变更通过 config 指纹缓存即时生效。默认即阻断（`auth.json` + `sessions/` 恒拦截）；如需先观察，可临时改为 `mode:"audit"`。
+- 配置变更通过 config 指纹缓存即时生效。默认即阻断；工具路径对 `auth.json` + `sessions/` 恒拦截，但 `shell` 命令内嵌的文件路径仍按启发式处理、不走 `denyPaths`（见 `ARCHITECTURE.md` §5.1 与 `AUDIT.md` §八）。如需先观察，可临时改为 `mode:"audit"`。
 
 流式空闲超时以 `config.json` 的 `requestIdleTimeoutMs` 为唯一准绳（默认 60000ms），
 SSE 解析层与外层重试层共用同一个值，不会再出现 25s 先于 60s 触发的双计时。
@@ -82,6 +85,7 @@ SSE 解析层与外层重试层共用同一个值，不会再出现 25s 先于 6
 
 流式请求中断后会重试一次，并用最长公共前缀跳过已收到的文本；若新流内容不一致，
 丢弃旧前缀、以新流为准（不会拼接）。连接级 429 连续失败到上限时抛 `QuotaError`。
+HTTP SSE 正常结束但未收到 `[DONE]` / `finish_reason`（Anthropic 为 `message_stop`）时按 `incomplete` 处理，保留已生成文本但不会当作完整回复执行最后一次工具调用。
 
 ### 本地压缩
 
@@ -103,6 +107,74 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
       "providerId": "deepseek",
       "model": "deepseek-flash"
     }
+
+### 2.2 声明式权限
+
+`permissions.shell.allow` / `deny` 只影响 Soft Gate；Hard Block 永远优先。匹配为 glob（`*`/`?`），也可写成 `/regex/`；`/tmp/*` 这类以 `/` 开头的绝对 glob 不再被误判为正则。层顺序：
+
+1. 全局 `config.json` 的 `permissions`
+2. 已信任项目的 `.fastcode/permissions.json`
+3. 已信任项目的 `.fastcode/permissions.local.json`
+
+未信任项目的项目/本地层会被忽略。`deny` 命中优先于 `allow`；`allow` 命中直接执行，不再弹审批。
+当前只实现 `permissions.shell`；`permissions.read` / `permissions.edit` 尚未实现，文件工具仍走信任 + 沙箱检查。
+
+```json
+{
+  "permissions": {
+    "shell": {
+      "allow": ["git status*", "git diff*"],
+      "deny": ["*reset --hard*"]
+    }
+  }
+}
+```
+
+### 2.3 后置检查
+
+设置 `checkCommand` 后，写类工具成功且产生文件 sideEffects 时会运行一次检查（默认关闭；Termux 未单独开启）。触发工具限定为 `write_file`、`append_file`、`replace_in_file`、`apply_patch`、`copy_file`；`move_path`、`delete_file`、`make_dir` 等不触发，避免误报和额外延迟。命令是静态配置，不拼接模型输出；改动文件通过环境变量 `FASTCODE_CHECK_FILES`（换行分隔）传入，并设置 `FASTCODE_CHECK_MODE=post-write`。检查失败/超时只追加到 tool_result，不改变工具本身的 `ok`。
+
+```json
+{
+  "checkCommand": "npm test -- --runInBand",
+  "checkTimeoutMs": 15000
+}
+```
+
+### 2.4 指令自动发现与回滚
+
+- 启动/每次运行从全局数据目录、项目根（`.git`/`package.json`）到 cwd 链读取 `AGENTS.md` / `FASTCODE.md`；按 global → project → local 注入 system（agent block 之前），每文件 32KB（按 UTF-8 字节）、总量 96KB 上限。`/context` 显示来源。
+- 同名文件按“近层覆盖远层”：子目录的 `AGENTS.md` 会替换根目录同名文件；不同名文件（`AGENTS.md` + `FASTCODE.md`）仍同时保留。本次输入层尚未单独建模。
+- `/revert <n>` 删除第 n 条可见 user 消息及之后并重建投影；连续 revert 不会复活更早已撤销的事实。`--files` 文件还原尚未实现。
+- 结构化 `oldText/newText` 目前覆盖 `write_file` / `append_file` / `replace_in_file`；`apply_patch` 仍返回 per-file 文本 diff，TUI 仍只显示摘要。
+
+### 2.5 会话计划 / 目标
+
+- `/plan` / `/todo`：`show`、`set a; b`、`add <text>`、`start <n>`、`done <n>`、`remove <n>`、`clear`。
+- `/goal <text>` / `/goal off`：设置或清除会话目标。
+- 计划落 `plan` fact，投影以受保护的 `[plan]` system message 呈现；自动续跑尚未实现，需手动继续。
+
+### 2.6 Git worktree 隔离
+
+- `/worktree list|create <slug>|diff <path>|apply <path>|remove <path> [--force]`。
+- worktree 默认创建在 `$FASTCODE_HOME/worktrees/<repo>/<slug>`，可用 `FASTCODE_WORKTREES_ROOT` 覆盖根目录；分支 `wt/<slug>`，基于当前 HEAD。
+- `diff` / `apply` 使用 `git diff HEAD`，包含已 staged 与未 staged 的 tracked 改动；已提交到 worktree 分支的改动不会进入 apply，需手动 merge/cherry-pick。`apply` 要求目标 checkout 无未提交改动，否则拒绝并列出 `git status`。未跟踪文件只在输出中提示，不自动复制。
+- 非 git 目录明确报错；dirty worktree 的 remove 需要 `--force` 或先 apply。
+
+### 2.7 外置插件 manifest
+
+插件默认安装在 `$FASTCODE_HOME/plugins/<name>/`；`plugin.json` 的 `scope:"project"` 会安装到 `<cwd>/.fastcode/plugins/<name>/`，仅在项目已信任时加载，并在项目内优先于同名全局插件。可选 `plugin.json`：
+
+```json
+{
+  "name": "my-pack",
+  "version": "1.0.0",
+  "scope": "global",
+  "capabilities": ["prompt", "skills"]
+}
+```
+
+仅支持 `prompt` / `skills` 能力；声明其他能力会在导入时拒绝。导入后默认**不启用**，需 `/plugin enable <name>`；核心升级不会覆盖该目录。
 
 ## 3. auth.json：Key 绑定到「服务商」
 
@@ -236,12 +308,15 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_RESTRICT_TO_WORKSPACE | 设为 1 额外拒绝 ../ 路径穿越 |
 | FASTCODE_READ_MAX_BYTES | read_file 单次读取上限；read_many 的单文件读取上限，默认 200000 |
 | FASTCODE_READ_SCAN_MAX_BYTES | read_file offset/limit 统计总行数时的扫描上限，默认 8000000；超出时 totalLines 为下界并标记 truncated |
-| FASTCODE_READ_MANY_MAX_BYTES | read_many 的总输出字节预算，默认 400000；超出后跳过剩余文件并给出 hint |
+| FASTCODE_READ_MANY_MAX_BYTES | read_many 的总输出字节预算，默认 400000；超出后跳过剩余文件并给出 hint。单次调用的 `maxBytes` 会被钳制到该值；单文件错误只标记 skipped，不再丢弃整次结果 |
 | FASTCODE_GREP_MAX_BYTES | grep 单文件上限，默认 1000000 |
 | FASTCODE_SPINNER_MS | spinner 帧间隔（毫秒，≥60）；默认 stable 120 / 普通 80 |
 | FASTCODE_TOKEN_BUDGET | 单次用户请求累计输入 token 预算；耗尽时返回错误并保留已生成文本；不设或 0 关闭 |
 | FASTCODE_COST_BUDGET_USD | 单次用户请求累计费用预算（USD，按 provider 返回的 usage 计）；不设或 0 关闭 |
 | FASTCODE_LOOP_EXEMPT | 逗号分隔的工具名，完全跳过循环检测（例如 `shell,apply_patch`） |
+| FASTCODE_WORKTREES_ROOT | 覆盖 `/worktree` 的 worktree 根目录；默认 `$FASTCODE_HOME/worktrees` |
+| FASTCODE_CHECK_FILES | 内部变量：后置检查子进程收到的改动文件列表（换行分隔），通常不手动设置 |
+| FASTCODE_CHECK_MODE | 内部变量：后置检查子进程设为 `post-write`，通常不手动设置 |
 | RUNPOD_ENDPOINT_ID | catalog `runpod` 的 `{endpoint_id}` 占位符 |
 | AZURE_OPENAI_RESOURCE / AZURE_OPENAI_DEPLOYMENT | catalog `azure` 的 `{resource}` / `{deployment}` 占位符；key 用 `AZURE_OPENAI_API_KEY` |
 | CLOUDFLARE_ACCOUNT_ID | catalog `cloudflare` 的 `{account_id}`；token 用 `CLOUDFLARE_API_TOKEN` 或 `CF_API_TOKEN` |
@@ -250,18 +325,26 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 
 ### 模型元数据与循环检测
 
-`lib/model-meta.ts` 内置 13 个核心 provider 默认模型的上下文窗口与 `charsPerToken`；
+`lib/model-meta.ts` 内置 13 个核心 provider 默认模型的上下文窗口、`charsPerToken`、`supportsTools` 与已知模型的 `pricing`；
 catalog provider 未提供已验证默认模型时使用通用回退值，可在 `~/.fastcode/model-meta.json` 覆盖。
-OpenAI 兼容端点通常不返回窗口大小，因此静态表是压缩与 `/context` 的依据。
+OpenAI 兼容端点通常不返回窗口大小/计价，因此静态表是压缩、`/context` 与 cost budget 的依据。
 可用 `~/.fastcode/model-meta.json`（或 `$FASTCODE_HOME/model-meta.json`）覆盖：
 
     {
       "deepseek/deepseek-v4-pro": { "contextWindow": 131072, "charsPerToken": 1.7 },
-      "my-local-model": { "contextWindow": 32768, "charsPerToken": 2.5, "supportsTools": true }
+      "my-local-model": {
+        "contextWindow": 32768,
+        "charsPerToken": 2.5,
+        "supportsTools": true,
+        "pricing": { "inputUsdPerM": 1, "outputUsdPerM": 2 }
+      }
     }
 
 键可以是 `provider/model`、旧的 `provider::model` 或裸模型 id；用户覆盖优先于内置表。
 未知模型回退到 `contextWindow: 32768`、`charsPerToken: 2.5`，不抛错。
+`doctor` 的 `model price` 行显示计价、`source`（override/built-in/default）与内置快照日期；
+未配置 pricing 的模型仍不会累计 `costUsd`，`FASTCODE_COST_BUDGET_USD` 需要已知或覆盖 pricing 才会触发。
+`replace_in_file`/`write_file` 的 tool_result 额外带 `oldText/newText/changedStartLine/oldLineCount/newLineCount/diffTruncated`；`--ui json` 对应 `old_text/new_text/changed_start_line/old_line_count/new_line_count/diff_truncated`，文本上限约 16KB。
 
 循环检测按工具副作用分阈值（D-02）：只读工具 6 次、副作用工具 3 次（最近 5 次调用窗口）。
 首次命中只注入提醒并清零计数；再次累计到阈值才终止。`FASTCODE_LOOP_EXEMPT` 可豁免指定工具。
@@ -291,6 +374,7 @@ OpenAI 兼容端点通常不返回窗口大小，因此静态表是压缩与 `/c
 符号链接拒绝；`move_path` 拒绝已存在目标；返回逐文件 diff。
 
 已知限制：tmp+rename 会**改变 inode**，且**不保留 xattr / ACL**；文件 watcher 可能需要重启。
+FUSE/shared storage 上 rename 失败时回退为备份→覆盖→回读校验；还原失败保留 `.fastcode-backup-*`，`doctor` 的 `backups` 行会列出残留。fallback 成功时 tool_result 标记 `atomic:false`，TUI/headless 都会提示这是 best-effort 写入。
 命中敏感路径或 >200 行 diff 的 patch 需要 approval；本构建尚无 approval resolver，按 fail closed
 拒绝且零落盘（UI 在阶段 8）。
 
@@ -306,7 +390,7 @@ OpenAI 兼容端点通常不返回窗口大小，因此静态表是压缩与 `/c
 trusted.json 当前为 **version 1**：`paths` 的 key 是 realpath 绝对路径，`tools` 预留给工具级永久批准。
 旧的 `{ "trusted": [{ "path", "addedAt" }] }` 结构会在首次读取时自动迁移，不会丢目录。
 阶段 1 的 `registry.approve()` 只启用 allow/deny 二元判定；pending 审批与 UI 在阶段 5/8 启用。
-每个副作用工具在执行前都会重新读取 trust（按 mtime+size memo），不跨调用缓存。
+声明 `requiresTrust` 的副作用工具会在执行前重新读取 trust（按 mtime+size memo），不跨调用缓存；但 `shell` 的 `soft_gate` 审批分支当前先返回 pending/allow，早于 trust 检查（见 `AUDIT.md` §八 B2-03）。
 
 shell 工具在执行前先过三态判定：`allow` / `soft_gate` / `hard_block`。
 
@@ -340,9 +424,9 @@ catalogHash 变化后失效。`fastcode trusted` 列出，`fastcode trust --forg
     fastcode --ui tty "prompt"       Ink Picker（默认）
     fastcode --ui native "prompt"    Termux:API termux-dialog sheet；缺失/超时回落 tty
     fastcode --ui plain "prompt"     纯文本编号选择（非 TTY 时走 headless）
-    fastcode --ui json "prompt"      NDJSON gate:ask/decision，stdout 只输出协议
+    fastcode --ui json "prompt"      NDJSON gate:ask/decision/error，stdout 只输出协议
 
-`--ui json` 还输出 `loop_detected` / `compaction` / `checkpoint` / `summary`（含 `tool_call_count`、`http_request_count`、`last_turn`）帧，均带 `v/seq/ts`。`stream_error` / `incomplete` / `protocol_error` / `loop_detected` 以非 0 退出；`max_turns` 仍为 0。正常结束后 headless 会回收 resident shell，不会因残留会话挂住进程。
+`--ui json` 还输出 `reasoning` / `loop_detected` / `compaction` / `checkpoint` / `summary`（含 `tool_call_count`、`http_request_count`、`last_turn`）帧，均由 `agent/event-stream.ts` 统一带上 `v:1`、`seq`、`ts`、`session_id`、`turn`；gate 帧同样使用 `v:1`。`stream_error` / `incomplete` / `protocol_error` / `loop_detected` 以非 0 退出；`max_turns` 仍为 0。正常结束后 headless 会回收 resident shell，不会因残留会话挂住进程。
 
 Tier 3 不给默认 yes；本批未接备份，因此 Tier 3 破坏性动作 fail-closed。Hard Block 不生成审批请求。
 
@@ -491,6 +575,8 @@ shell 工具有两条执行路径，预算互不共享：
 | one-shot | Windows，或命令命中交互/REPL 判定 | `FASTCODE_MAX_SPAWN_PER_TURN`：默认 **8/轮**（每轮新建速率，不是全局并发上限） | 立即返回 `spawn limit reached`，**不排队** |
 
 - 每个 shell job 只保留最近 **256KB** 输出窗口；更早的内容会被丢弃。runner 另有单条 tool 消息硬上限（`FASTCODE_TOOL_MESSAGE_LIMIT`，默认 1MB）。
+- `shell` 与 FastCode 同用户、同 OS 权限，并继承完整 `process.env`（可能含用户导出的 API key）；`FASTCODE_SANDBOX`/`FASTCODE_SANDBOX_ROOT` 只是标记，不是隔离。完整权限模型见 `AUDIT.md` §8.9。
+- `FASTCODE_SHELL_ALLOWLIST` 是 Soft Gate（可审批/可被 `FASTCODE_ALLOW_DANGEROUS` 绕过），不是硬白名单；Hard Block 仍优先。
 - `/threads` 只调整 resident 池，不影响 one-shot，也不构成“全局最多 2/6 个进程”的承诺。
 - `FASTCODE_MAX_SPAWN_PER_TURN` 同时计入新建 resident 和 one-shot；同一轮若新建 2 个 resident，本轮只剩 6 次 one-shot 配额。
 - `shellPoolStats().active` 和 `doctor` 的 `active` 统计所有仍在运行的 shell job（resident + one-shot）；`pool/maxPool` 只统计 resident。二者会不一致。
@@ -553,7 +639,11 @@ API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`�
 | `/skills [...]` | 技能：`list/search/install/uninstall/enable/disable/info/verify/registry`；`enable/disable/info` 省略名字时打开选择器 | `/skills info` |
 | `/clear` (`cls`) | 清空当前会话历史并写 `cleared` fact | `/clear` |
 | `/compact` | 强制压缩历史并写 `compacted` fact | `/compact` |
-| `/context` | 当前 token 估算、压缩阈值、heap | `/context` |
+| `/context` | 当前 token 估算、压缩阈值、heap、指令来源 | `/context` |
+| `/revert <n>` | 删除第 n 条 user 消息及之后并重建投影；`--files` 未实现 | `/revert 2` |
+| `/plan` (`/todo`) | 查看/编辑会话计划 | `/plan set a; b` |
+| `/goal` | 设置会话目标 | `/goal ship it` |
+| `/worktree` | git worktree list/create/diff/apply/remove | `/worktree create fix-ui` |
 | `/cost` | 本会话 token 与费用 | `/cost` |
 | `/expand` | 切换工具输出展开/折叠 | `/expand` |
 | `/cancel` | 取消当前 run（保留部分输出） | `/cancel` |

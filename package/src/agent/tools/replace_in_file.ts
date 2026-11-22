@@ -1,7 +1,9 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { resolvePath } from "./paths.js";
+import { readFile } from "node:fs/promises";
+import { atomicFile } from "../../lib/atomic-file.js";
+import { buildStructuredDiff, structuredDiffFields } from "../../lib/values.js";
+import { existingMode, sandboxWritePath } from "./paths.js";
 import type { Tool } from "./types.js";
-import { invalid, optionalNumber, preparePath, requiredString } from "./validate.js";
+import { invalid, optionalNumber, prepareWritePath, requiredString } from "./validate.js";
 
 function countOccurrences(source: string, find: string): number {
     if (!find)
@@ -28,10 +30,10 @@ export const replaceInFileTool: Tool = {
         catch (err: any) {
             return invalid(err.message);
         }
-        return preparePath(ctx.cwd, requiredString(call, "path"));
+        return prepareWritePath(ctx.cwd, requiredString(call, "path"));
     },
     async execute(call, ctx) {
-        const file = resolvePath(ctx.cwd, call);
+        const file = sandboxWritePath(ctx.cwd, requiredString(call, "path"));
         const find = requiredString(call, "find");
         const replacement = requiredString(call, "replace");
         const expected = optionalNumber(call, "expectedMatches");
@@ -55,12 +57,17 @@ export const replaceInFileTool: Tool = {
                 matches: count,
             };
         }
-        await writeFile(file, source.split(find).join(replacement), "utf8");
+        const next = source.split(find).join(replacement);
+        const diff = buildStructuredDiff(source, next);
+        const mode = await existingMode(file);
+        const written = await atomicFile.write(file, next, { mode: mode ?? 0o666 });
         return {
             ok: true,
             output: `replaced ${count} occurrence(s) in ${file}`,
+            ...(written.atomic === false ? { atomic: false, hint: "atomic rename unavailable; fallback copy used" } : {}),
             matches: count,
             sideEffects: { touched: [file] },
+            ...structuredDiffFields(diff),
         };
     },
 };

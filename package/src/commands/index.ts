@@ -29,6 +29,9 @@ import { attachCommand } from "./attach.js";
 import { bgCommand } from "./bg.js";
 import { editCommand } from "./edit.js";
 import { threadsCommand } from "./threads.js";
+import { revertCommand } from "./revert.js";
+import { goalCommand, planCommand } from "./plan.js";
+import { worktreeCommand } from "./worktree.js";
 export const COMMANDS = [
     helpCommand,
     agentCommand,
@@ -61,6 +64,10 @@ export const COMMANDS = [
     bgCommand,
     editCommand,
     threadsCommand,
+    revertCommand,
+    planCommand,
+    goalCommand,
+    worktreeCommand,
 ];
 export function findCommand(name) {
     const lower = name.toLowerCase();

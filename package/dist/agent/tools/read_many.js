@@ -1,4 +1,4 @@
-import { readManyResult } from "./readers.js";
+import { readManyMaxBytes, readManyResult } from "./readers.js";
 import { invalid, optionalNumber, preparePath, stringArray } from "./validate.js";
 export const readManyTool = {
     name: "read_many",
@@ -27,7 +27,9 @@ export const readManyTool = {
     async execute(call, ctx) {
         const paths = stringArray(call, "paths");
         const requested = optionalNumber(call, "maxBytes");
-        const maxBytes = requested === undefined ? undefined : Math.max(1, Math.floor(requested));
+        const maxBytes = requested === undefined
+            ? undefined
+            : Math.min(readManyMaxBytes(), Math.max(1, Math.floor(requested)));
         const result = await readManyResult(ctx.cwd, paths, maxBytes);
         return {
             ok: true,
@@ -37,7 +39,7 @@ export const readManyTool = {
             returnedBytes: result.returnedBytes,
             filesRead: result.filesRead,
             filesSkipped: result.filesSkipped,
-            hint: result.filesSkipped > 0 ? `${result.filesSkipped} file(s) skipped by the read_many byte budget.` : undefined,
+            hint: result.filesSkipped > 0 ? `${result.filesSkipped} file(s) skipped by the read_many byte budget or an error.` : undefined,
         };
     },
 };

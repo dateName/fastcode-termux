@@ -1,3 +1,4 @@
+import { type PermissionPolicy } from "./policy/permissions.js";
 /**
  * Dangerous-command guard.
  *
@@ -14,6 +15,10 @@
 export declare const DEFAULT_DENY_PATTERNS: string[];
 export declare const FORK_BOMB_MARKERS: string[];
 export type ShellGuardAction = "allow" | "hard_block" | "soft_gate";
+export interface ShellGuardOptions {
+    cwd?: string;
+    permissions?: PermissionPolicy;
+}
 export interface ShellGuardVerdict {
     allow: boolean;
     action: ShellGuardAction;
@@ -29,7 +34,7 @@ export interface ShellGuardVerdict {
  * Decide whether a shell command may run.
  * Returns { allow: true } or { allow: false, output: explanation }.
  */
-export declare function evaluateShellCommand(command: any): ShellGuardVerdict;
+export declare function evaluateShellCommand(command: any, options?: ShellGuardOptions): ShellGuardVerdict;
 export declare const READ_ONLY_TOOLS: Set<string>;
 export declare function splitCommandSegments(command: any): any[];
 export declare function isSharedStoragePath(target: string): boolean;

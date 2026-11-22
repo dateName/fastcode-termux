@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { normalize, resolve } from "node:path";
 import { analyzeShellAst } from "./shell-ast.js";
+import { evaluateShellPermission, loadPermissionPolicy, type PermissionPolicy } from "./policy/permissions.js";
 
 /**
  * Dangerous-command guard.
@@ -27,6 +28,11 @@ export const DEFAULT_DENY_PATTERNS = [
 export const FORK_BOMB_MARKERS = [":(){", ":|:&"];
 
 export type ShellGuardAction = "allow" | "hard_block" | "soft_gate";
+
+export interface ShellGuardOptions {
+    cwd?: string;
+    permissions?: PermissionPolicy;
+}
 
 export interface ShellGuardVerdict {
     allow: boolean;
@@ -69,7 +75,7 @@ function matches(lower, pattern) {
  * Decide whether a shell command may run.
  * Returns { allow: true } or { allow: false, output: explanation }.
  */
-export function evaluateShellCommand(command): ShellGuardVerdict {
+export function evaluateShellCommand(command, options: ShellGuardOptions = {}): ShellGuardVerdict {
     const cmd = String(command ?? "").trim();
     const destructive = classifyDestructiveCommand(cmd);
     if (destructive?.kind === "hard") {
@@ -105,6 +111,28 @@ export function evaluateShellCommand(command): ShellGuardVerdict {
                 target: soft.target,
                 output: "Soft gate bypassed by FASTCODE_ALLOW_DANGEROUS=1.",
                 bypassed: true,
+            };
+        }
+        const permission = evaluateShellPermission(cmd, options.permissions ?? loadPermissionPolicy(options.cwd));
+        if (permission === "allow") {
+            return {
+                allow: true,
+                action: "allow",
+                code: "permission_allow",
+                target: soft.target,
+                output: "Allowed by declarative shell permissions.",
+            };
+        }
+        if (permission === "deny") {
+            const denied = { ...soft, code: "permission_deny", reason: "declared deny" };
+            return {
+                allow: false,
+                action: "soft_gate",
+                code: "permission_deny",
+                target: soft.target,
+                reason: "declared deny",
+                alternatives: soft.alternatives,
+                output: formatSoftGate(denied),
             };
         }
         return {

@@ -1,4 +1,5 @@
 import { streamSSE } from "../lib/http.js";
+import { IncompleteStreamError } from "../lib/net.js";
 const STATIC_MODELS = [
     { id: "claude-sonnet-5.5", label: "Claude Sonnet 5.5", contextWindow: 1000000, pricing: { inputUsdPerM: 3, outputUsdPerM: 15 } },
     { id: "claude-opus-5.5", label: "Claude Opus 5.5", contextWindow: 1000000, pricing: { inputUsdPerM: 15, outputUsdPerM: 75 } },
@@ -78,6 +79,8 @@ export const anthropicProvider = {
         });
         let usageInput = 0;
         let usageOutput = 0;
+        let partialText = "";
+        let sawStop = false;
         for await (const ev of streamSSE(res, { idleTimeoutMs: req.idleTimeoutMs })) {
             let data;
             try {
@@ -89,8 +92,10 @@ export const anthropicProvider = {
             const t = data.type;
             if (t === "content_block_delta") {
                 const delta = data.delta?.text;
-                if (delta)
+                if (delta) {
+                    partialText += delta;
                     yield { delta, done: false };
+                }
             }
             else if (t === "message_start") {
                 const u = data.message?.usage;
@@ -103,9 +108,12 @@ export const anthropicProvider = {
                     usageOutput = u.output_tokens;
             }
             else if (t === "message_stop") {
+                sawStop = true;
                 break;
             }
         }
+        if (!sawStop)
+            throw new IncompleteStreamError("Anthropic stream ended without message_stop", partialText);
         const cost = priceFor(req.model, usageInput, usageOutput);
         yield { delta: "", done: true, usage: { inputTokens: usageInput, outputTokens: usageOutput, costUsd: cost } };
     },

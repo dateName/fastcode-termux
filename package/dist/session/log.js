@@ -11,8 +11,10 @@
  *   FASTCODE_FSYNC=0|1            force checkpoint fsync off/on
  */
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { getPaths } from "../config/paths.js";
+import { removeSummaryFile } from "../agent/compaction.js";
+import { realpathOf } from "../lib/realpath.js";
 import { buildProjection, writeProjection } from "./projection.js";
 const NL = String.fromCharCode(10);
 export function sessionCacheLimitBytes() {
@@ -23,7 +25,7 @@ export function loggingEnabled() {
     return process.env["FASTCODE_SESSION_LOG"] !== "0";
 }
 export function projectionPath(file) {
-    return file.replace(/[.]jsonl$/, ".projection.json");
+    return file.replace(/[.]jsonl$/i, ".projection.json");
 }
 export function fsyncMode() {
     const raw = (process.env["FASTCODE_FSYNC"] ?? "").trim().toLowerCase();
@@ -234,6 +236,26 @@ export function resolveSessionFile(idOrFile) {
     const looksLikePath = idOrFile.includes("/") || idOrFile.includes(String.fromCharCode(92)) || idOrFile.endsWith(".jsonl");
     return looksLikePath ? idOrFile : join(sessions, idOrFile + ".jsonl");
 }
+/**
+ * Resolve a `resume` target without accepting arbitrary files. Only a bare
+ * session id (under the sessions directory) or an existing `.jsonl` path inside
+ * that directory is allowed; anything else returns undefined.
+ */
+export function resolveResumeFile(idOrFile) {
+    const { sessions } = getPaths();
+    const jsonl = /[.]jsonl$/i.test(idOrFile);
+    const looksLikePath = idOrFile.includes("/") || idOrFile.includes(String.fromCharCode(92)) || jsonl;
+    if (!looksLikePath)
+        return join(sessions, idOrFile + ".jsonl");
+    if (!jsonl)
+        return undefined;
+    const root = realpathOf(resolve(sessions)) ?? resolve(sessions);
+    const file = realpathOf(resolve(idOrFile)) ?? resolve(idOrFile);
+    const rel = relative(root, file);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel))
+        return undefined;
+    return file;
+}
 export function readSession(idOrFile) {
     const file = resolveSessionFile(idOrFile);
     if (!existsSync(file))
@@ -380,6 +402,8 @@ export function pruneSessions(limit = sessionCacheLimitBytes()) {
     for (let i = all.length - 1; i >= 0 && total > limit; i -= 1) {
         try {
             ensureProjection(all[i].file);
+            for (const ref of summaryRefsForFile(all[i].file))
+                removeSummaryFile(ref);
             rmSync(all[i].file, { force: true });
             total -= all[i].bytes;
         }
@@ -388,4 +412,15 @@ export function pruneSessions(limit = sessionCacheLimitBytes()) {
         }
     }
     return total;
+}
+function summaryRefsForFile(file) {
+    try {
+        return Array.from(new Set(readSession(file)
+            .filter((fact) => fact?.type === "compacted")
+            .map((fact) => fact.summaryRef)
+            .filter((ref) => typeof ref === "string" && ref.length > 0)));
+    }
+    catch {
+        return [];
+    }
 }

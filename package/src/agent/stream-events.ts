@@ -105,7 +105,7 @@ export class StreamAssembler {
                 // Some gateways send usage twice (stream frame + final frame).
                 // Keep the latest values but surface the duplicate instead of
                 // silently overwriting the first report.
-                if (this._usage)
+                if (this._usage && !this._warnings.includes("Stream reported usage more than once; the latest values were kept."))
                     this._warnings.push("Stream reported usage more than once; the latest values were kept.");
                 this._usage = event.usage;
                 return;

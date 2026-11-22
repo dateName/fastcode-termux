@@ -15,9 +15,10 @@ export declare const openaiProvider: {
     } | {
         toolCalls?: import("../types.js").NativeToolCall[];
         usage?: {
-            inputTokens: any;
-            outputTokens: any;
-            totalTokens: any;
+            inputTokens?: number;
+            outputTokens?: number;
+            totalTokens?: number;
+            costUsd?: number;
         };
         delta: string;
         done: boolean;

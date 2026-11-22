@@ -18,6 +18,6 @@ export const moonshotProvider = {
     },
     defaultModel: "kimi-k3",
     listModels: (apiKey) => listModelsHttp({ baseUrl: baseUrl(), apiKey, staticModels: STATIC }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: baseUrl(), apiKey, staticModels: STATIC, reasoning: "openai" }),
+    stream: (req, apiKey) => streamChatCompletion(req, { providerId: "moonshot", baseUrl: baseUrl(), apiKey, staticModels: STATIC, reasoning: "openai" }),
     supportsReasoning: () => true,
 };

@@ -3,6 +3,7 @@ import { planPatch, reviewPatchPlan } from "../../patch/plan.js";
 import { applyPatchPlan } from "../../patch/apply.js";
 import { DEFAULT_ALLOW_OPTIONS, approvalRequestId, type ApprovalOption, type ApprovalRequest } from "../approval.js";
 import { approvalKey, isPreApproved, rememberApproval } from "../approval-store.js";
+import { buildStructuredDiff } from "../../lib/values.js";
 import type { Tool } from "./types.js";
 import { invalid, requiredString } from "./validate.js";
 
@@ -64,12 +65,20 @@ export const applyPatchTool: Tool = {
                 rememberApproval(key, catalogHash, decision.scope);
             }
         }
-        const applied = applyPatchPlan(planned.plan);
+        const applied = await applyPatchPlan(planned.plan);
         const warnings = applied.warnings.length > 0 ? "\n\nwarnings:\n" + applied.warnings.map((line) => "- " + line).join("\n") : "";
+        const diffs = applied.ok
+            ? planned.plan.files.map((file) => ({
+                path: file.moveTo ?? file.path,
+                ...buildStructuredDiff(file.oldContent ?? "", file.newContent ?? ""),
+            }))
+            : undefined;
         return {
             ok: applied.ok,
             output: applied.output + warnings,
             sideEffects: { touched: applied.touched, removed: applied.removed },
+            ...(diffs ? { diffs } : {}),
+            ...(applied.atomic === false ? { atomic: false, hint: "atomic rename unavailable; fallback copy used" } : {}),
         };
     },
 };

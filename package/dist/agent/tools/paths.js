@@ -1,7 +1,10 @@
-import { existsSync, realpathSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, lstatSync } from "node:fs";
+import { stat } from "node:fs/promises";
+import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
+import { realpathOf } from "../../lib/realpath.js";
 import { detectPlatform, safeHome } from "../../lib/platform.js";
 import { loadConfig } from "../../config/store.js";
+export { realpathOf } from "../../lib/realpath.js";
 export function allowedRoots(cwd) {
     const roots = [resolve(cwd)];
     const configured = (process.env["FASTCODE_ALLOW_PATHS"] ?? "")
@@ -54,31 +57,41 @@ export function sandboxPath(cwd, raw) {
     const roots = allowedRoots(cwd);
     const realRoots = roots.map((root) => realpathOf(root)).filter(Boolean);
     const realTarget = realpathOf(target);
-    if (realTarget) {
-        if (isInsideAny(realTarget, realRoots))
-            return target;
-        throw new Error("path outside sandbox: " + raw);
-    }
-    if (isInsideAny(target, roots))
+    if (realTarget && isInsideAny(realTarget, realRoots))
         return target;
     throw new Error("path outside sandbox: " + raw);
 }
-export function realpathOf(input) {
-    let current = resolve(input);
-    const missing = [];
-    for (;;) {
-        if (existsSync(current)) {
-            try {
-                return join(realpathSync(current), ...missing.slice().reverse());
-            }
-            catch {
-                return undefined;
-            }
-        }
-        const parent = dirname(current);
-        if (parent === current)
-            return undefined;
-        missing.push(basename(current));
-        current = parent;
+/**
+ * Resolve a write target through symlinks and return the real path that will be
+ * written. A dangling symlink resolves to its (possibly outside) target, so it
+ * is rejected instead of being mistaken for a missing in-sandbox path.
+ */
+export function sandboxWritePath(cwd, raw) {
+    const target = resolve(cwd, raw);
+    const roots = allowedRoots(cwd);
+    const realRoots = roots.map((root) => realpathOf(root)).filter(Boolean);
+    const realTarget = realpathOf(target);
+    if (realTarget && isInsideAny(realTarget, realRoots))
+        return realTarget;
+    throw new Error("path outside sandbox: " + raw);
+}
+/** Reject a symlink at the final component before opening it for writing. */
+export function assertNotSymlink(file) {
+    try {
+        if (lstatSync(file).isSymbolicLink())
+            throw new Error("refusing to write through a symbolic link: " + file);
+    }
+    catch (err) {
+        if (err?.code === "ENOENT")
+            return;
+        throw err;
+    }
+}
+export async function existingMode(file) {
+    try {
+        return (await stat(file)).mode & 0o777;
+    }
+    catch {
+        return undefined;
     }
 }

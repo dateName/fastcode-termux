@@ -53,6 +53,13 @@ export const DEFAULT_CONFIG = {
      * (fail-closed). See agent/policy/defaults.ts and docs/CONFIGURATION.md.
      */
     egress: { ...DEFAULT_EGRESS_CONFIG },
+    /** Declarative soft-gate permissions; hard_block is never overridden. */
+    permissions: {
+        shell: { allow: [] as string[], deny: [] as string[] },
+    },
+    /** Optional post-write check command; empty means off. */
+    checkCommand: "",
+    checkTimeoutMs: 15_000,
 };
 export interface StoredCredential {
     provider: string;
@@ -177,8 +184,10 @@ export function loadAuth(): AuthStore {
         // not silently pretend the user never stored any credentials.
         try {
             const backup = auth + ".corrupt.bak";
-            if (!existsSync(backup))
+            if (!existsSync(backup)) {
                 copyFileSync(auth, backup);
+                lockdown(backup);
+            }
         }
         catch {
             // Best effort; the warning below still fires.
@@ -232,8 +241,10 @@ export function loadAuth(): AuthStore {
             // Keep the pre-migration file so a user with several old model
             // keys can recover a credential we had to collapse.
             const backup = auth + ".v2.bak";
-            if (!existsSync(backup))
+            if (!existsSync(backup)) {
                 copyFileSync(auth, backup);
+                lockdown(backup);
+            }
             writeAuth({ version: AUTH_VERSION, keys, legacy });
         }
         catch {
@@ -245,7 +256,7 @@ export function loadAuth(): AuthStore {
 }
 function writeAuth(store: AuthStore) {
     const { auth } = getPaths();
-    atomicWrite(auth, JSON.stringify({ version: AUTH_VERSION, keys: store.keys }, null, 2));
+    atomicWrite(auth, JSON.stringify({ version: AUTH_VERSION, keys: store.keys }, null, 2), 0o600);
     lockdown(auth);
 }
 export function saveAuth(store: AuthStore) {
@@ -357,10 +368,10 @@ export function resolveProviderKey(providerId, envVars): {
  * is a same-filesystem operation. On many Linux distros `/tmp` is a tmpfs
  * mount, which would make `renameSync` throw EXDEV across filesystems.
  */
-function atomicWrite(target, contents) {
+function atomicWrite(target, contents, mode = 0o666) {
     const dir = dirname(target);
     ensureDir(dir);
     const tmp = join(dir, `.fastcode-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
-    writeFileSync(tmp, contents, { encoding: "utf8" });
+    writeFileSync(tmp, contents, { encoding: "utf8", mode });
     renameSync(tmp, target);
 }

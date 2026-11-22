@@ -59,6 +59,12 @@ export declare function listSessions(): {
     messages: number;
 }[];
 export declare function resolveSessionFile(idOrFile: string): string;
+/**
+ * Resolve a `resume` target without accepting arbitrary files. Only a bare
+ * session id (under the sessions directory) or an existing `.jsonl` path inside
+ * that directory is allowed; anything else returns undefined.
+ */
+export declare function resolveResumeFile(idOrFile: string): string | undefined;
 export declare function readSession(idOrFile: string): any[];
 export declare function loadSessionMessages(idOrFile: string): {
     role: any;

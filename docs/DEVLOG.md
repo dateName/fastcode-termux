@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前工作树：**0.1.8-beta.2**（基于 0.1.8-beta.1 + 2026-11-17 降级 system/混排剥离/400 文案修复；已本地 build，尚未发布）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 保持不变
+> 当前工作树：**0.1.8-beta.3**（基于 0.1.8-beta.2 + 2026-11-21 安全/协议/事件/能力/会话/扩展批次 + 2026-11-22 B2 修复批次；已本地 build，尚未发布；npm `beta` 仍为 0.1.8-beta.2）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 / 0.1.8-beta.1 / 0.1.8-beta.2 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -592,7 +592,7 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 
 ---
 
-## 审计修复（2026-11-15，未提交/未发布）
+## 审计修复（2026-11-15，已随当前版本发布）
 
 ### 背景
 
@@ -708,13 +708,13 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 
 ---
 
-## 结构治理 L0–L2（2026-11-15，未提交）
+## 结构治理 L0–L2（2026-11-15，已随当前版本发布）
 
 ### L0：目录契约
 
 - `docs/MODULES.md` 增加「目录契约」：新增/删除 `src/**/*.ts` 必须登记；每行写依赖方向；允许层级为入口 → 编排 → 领域 → 基础；新增跨层依赖必须说明理由。
 - 标注两处已知受控上行：`config/store → agent/policy/defaults`（零依赖 defaults）与 `lib/diagnostics → 各层`（诊断探针）。
-- 基线核对：本地 HEAD `70eaea9`（origin/main ahead 1）；yq 提到的 `4d2e1c3b` 本地不存在；工作树有未提交改动，**未执行 pull/sync**。
+- 基线核对（当时）：本地 HEAD `70eaea9`（origin/main ahead 1）；yq 提到的 `4d2e1c3b` 本地不存在；工作树有未提交改动，**未执行 pull/sync**（后续已随发布同步）。
 
 ### L1：文档补漏（不动目录）
 
@@ -734,3 +734,152 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 
 - `typecheck` / `lint` / `build` / `smoke` / `verify:artifacts` 通过。
 - 未做目录搬迁；回滚：`git checkout -- package/src package/dist docs scripts`，或按本批单 commit revert。
+
+---
+
+## 当前版本收尾（2026-11-17，已发布）
+
+### 变更
+
+- native 降级：`system` 尾部 native agent 段切回 legacy 文本协议段，保留调用方自带的前缀（#152）。
+- 可见文本：`stripUnfencedText` 按当前正在 replace 的字符串计算 boundary offset，混排 `ANCHOR→D4→D5` 不再残留可见标记（#151）。
+- 错误文案：OpenAI 兼容 provider 的 400 message 不再重复 `400 Bad Request:` 前缀（#150）。
+
+### 验证与发布
+
+- `typecheck` / `lint` / `build` / `verify:artifacts` 通过；Windows smoke **355/355**（Node 24，2026-11-17）。
+- `release/` 三份归档 + `SHA256SUMS`；npm `beta` 与 GitHub Release 已发布；Release workflow #13 成功。
+- Termux 真机与真实 provider 端到端仍待复跑。
+
+### 回滚
+
+- 按 bump / assets / fix 单 commit revert；代码回滚：`git checkout -- package/src package/dist scripts/smoke-test.mjs`。
+
+---
+
+## 安全修复：悬空链接与 resume（2026-11-21，工作树，未发布）
+
+### 变更
+
+- 新增 `src/lib/realpath.ts`：逐组件解析符号链接（含悬空链接），缺失尾部按词法拼接，循环/深度上限返回 undefined。
+- `agent/tools/paths.ts`：`sandboxPath` 使用新解析；新增 `sandboxWritePath`、`assertNotSymlink`、`atomicWriteFile`、`tempSibling`/`commitTemp`。
+- `write_file` / `append_file` / `copy_file`：写入解析后的真实目标，使用 `O_NOFOLLOW`；write/copy(overwrite)/replace 用同目录 tmp+rename 断开硬链接，append 拒绝 `nlink>1`。
+- `agent/policy/egress.ts`：路径目标 `normalizeTarget` 走 `realpathOf`。
+- `session/log.ts`：新增 `resolveResumeFile`（仅 sessions 下 id/`.jsonl`）；`projectionPath` 大小写不敏感。
+- `session/projection.ts`：`writeProjection` 拒绝 `target === source`。
+- `cli-main.ts`：`resume` 使用 `resolveResumeFile`，非法路径明确报错。
+
+### 验证
+
+- `scripts/smoke-test.mjs` 新增 B2-01/B2-01b/B2-02 用例；Windows **ALL PASS (369/369)**（最终文件 symlink 用例因 `EPERM` 跳过，悬空目录 junction 祖先与硬链接用例通过）。
+- `typecheck` / `lint` / `build` / `verify:artifacts` 通过；Termux/POSIX 真机待复验。
+
+### 回滚
+
+- G-A1 与 G-A2 分开提交/回滚；代码回滚：`git checkout -- package/src package/dist scripts/smoke-test.mjs`。
+
+---
+
+## 协议/参数修复（2026-11-21，工作树，未发布）
+
+### 变更
+
+- `lib/values.ts`：新增 `parseJsonObjectWithRepair`（尾逗号/未闭合字符串/缺括号/单元素数组/已知数值布尔字符串）。
+- `agent/runner.ts`：native 参数解析失败不再执行无参工具；连续协议错误在合法轮清零；`max_turns` 仅在最后一轮失败时改判；`protocol_error` 不再重复错误文案；`error` 事件带 `detail`。
+- `agent/protocol.ts`：新增 `hasUnexecutedToolMarkup`（围栏外未执行标记检测）。
+- `headless.ts`：JSON/plain 错误帧同步 `detail`。
+
+### 验证
+
+- 新增 1.3/B9/B10/B11/B12/B13 回归；Windows **ALL PASS (381/381)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 回滚
+
+- 单 commit revert；代码回滚：`git checkout -- package/src package/dist scripts/smoke-test.mjs`。
+
+---
+
+## CI 门禁 B7（2026-11-21，工作树，未发布）
+
+### 变更
+
+- 新增 `.github/workflows/verify.yml`：push/PR、Node 24、`npm ci`、`npm run check`、`verify:artifacts`、`verify-gate` 自检、构建后 `git diff --exit-code -- package/dist`。
+- 新增 `scripts/verify-gate.mjs`：检查 workflow 关键项、`dist` 运行时字面量；`--self-test` 删除临时副本中的字面量并断言门禁失败。
+- `package.json` 注册 `npm run verify:gate`。
+
+### 验证
+
+- `npm run check`：ALL PASS (381/381) + typecheck/lint/build。
+- `node scripts/verify-gate.mjs --self-test`：PASS。
+- `dist/cli.js` 构建哈希稳定；提交后 CI 的 `dist` diff 应为空。
+
+### 回滚
+
+- 删除 workflow/脚本/脚本注册即可；单 commit revert。
+
+---
+
+## 统一事件流（2026-11-21，工作树，未发布）
+
+### 变更
+
+- 新增 `src/agent/event-stream.ts`：`EventStream` 统一 `v/seq/ts/session_id/turn` 信封；`serializeAgentEvent` 集中 AgentEvent→JSON 映射。
+- `headless.ts` 改为只消费该序列化器；新增 reasoning 帧；gate 帧统一 `v:1`（入站兼容旧 `version`）。
+- `approval-json.ts` 输出字段由 `version` 改为 `v`；`parseGateDecision` 兼容旧字段。
+
+### 验证
+
+- 新增 session_id/turn、reasoning、事件信封、gate v 断言；Windows **ALL PASS (385/385)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 回滚
+
+- 单 commit revert；代码回滚：`git checkout -- package/src package/dist scripts/smoke-test.mjs`。
+
+---
+
+## 能力目录与结构化 diff（2026-11-21，工作树，未发布）
+
+### 变更
+
+- `lib/model-meta.ts`：`pricing`、`modelMetaSource`、`MODEL_META_UPDATED`、`estimateCostUsd`；已知 OpenAI/Anthropic 模型内置计价；用户覆盖支持 pricing。
+- `providers/openaiCompatible.ts`：usage 按 staticModels/model-meta pricing 计算 `costUsd`。
+- `lib/diagnostics.ts`：doctor 增加 `model price` 行（计价、来源、快照日期）。
+- `lib/values.ts` + `write_file`/`replace_in_file`：`buildStructuredDiff` 与 oldText/newText/行号/行数/diffTruncated。
+- `agent/event-stream.ts`：tool_result 增加结构化 diff 字段；`app.ts` 显示 diff 摘要。
+
+### 验证
+
+- 新增 pricing/source/override/costUsd、结构化 diff 断言；Windows **ALL PASS (390/390)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 回滚与后续批次（2026-11-21）
+
+- 1.1：`revert` fact + `factsAfterRevert` + `/revert <n>`；消息级回滚，`--files` 未实现。
+- 1.2：`session/instructions.ts` 指令发现；app/headless system 注入；`/context` 来源。
+- 2.1：`agent/policy/permissions.ts` + guards Soft Gate 分层 allow/deny；未信任项目层忽略。
+- 2.3：`agent/check-loop.ts` + `checkCommand/checkTimeoutMs`；写类工具后置检查。
+- 验证：Windows **ALL PASS (404/404)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 外置扩展 / plan-todo / worktree（2026-11-21）
+
+- 2.7：`plugin.json` manifest + capabilities/scope/version；默认关闭；prompt/skills 之外拒绝。
+- 2.6：`session/plan.ts` + `/plan`/`/todo`/`/goal`；`[plan]` 投影保护。
+- 3.3：`session/worktree.ts` + `/worktree` create/list/diff/apply/remove。
+- 验证：Windows **ALL PASS (441/441)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+### 回滚
+
+- 单 commit revert；代码回滚：`git checkout -- package/src package/dist scripts/smoke-test.mjs`。
+
+---
+
+## B2 修复批次（2026-11-22）
+
+- B2-04：真实 SSE 缺 `[DONE]`/`finish_reason`、Anthropic 缺 `message_stop` 抛 `IncompleteStreamError`；HTTP SSE 回归覆盖。
+- B2-05：grep glob 与 `.fastcodeignore` 限制长度/`**`/文件大小/规则数。
+- B2-06：`read_many.maxBytes` 钳制；单文件异常标 skipped 并继续。
+- B2-09/10/12/13：i18n 类型安全；summaryRef 限 sessions 内且 ≤256KB；auth tmp/备份 0600；provider 错误正文脱敏。
+- B2-11：进程组组长退出但组仍存活时继续 SIGKILL 升级（POSIX 回归）。
+- B2-08/B2-14：短历史动态压缩、headless/prune 清理 summary、投影 arguments 截断与 200KB 硬上限；usage 告警去重、fallback caller 后缀、400 不再误重试。
+- yq 维护：新增 `lib/atomic-file.ts` 原子写 seam；patch/apply 全 async；write/replace/copy/patch 共用 O_NOFOLLOW/回读/backup；fallback 成功标记 `atomic:false`；apply_patch 逐文件 `diffs`；post-write 收窄；glob 边界修复；worktree apply clean；revert/plan 进 `session/actions.ts`；doctor 报告残留 backup。
+- B2-03/B2-07（shell）按用户要求暂缓。
+- 验证：Windows **ALL PASS (441/441)**（POSIX 442）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。

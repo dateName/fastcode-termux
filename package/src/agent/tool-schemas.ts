@@ -18,7 +18,7 @@ export function toolSchemas(): ToolSchema[] {
         }, ["path"]),
         schema("read_many", "Read several files under a shared byte budget.", {
             paths: { type: "array", items: { type: "string" } },
-            maxBytes: { type: "number", minimum: 1, description: "Total output budget across all files." },
+            maxBytes: { type: "number", minimum: 1, maximum: 400000, description: "Total output budget across all files (clamped to FASTCODE_READ_MANY_MAX_BYTES)." },
         }, ["paths"]),
         schema("write_file", "Replace a file with full contents.", {
             path: { type: "string" },

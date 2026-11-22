@@ -56,6 +56,7 @@ export const customProvider = {
     stream: (req) => {
         const headers = extraHeaders();
         return streamChatCompletion(req, {
+            providerId: "custom",
             baseUrl: requireBaseUrl(),
             apiKey: process.env["FASTCODE_API_KEY"],
             staticModels: [],

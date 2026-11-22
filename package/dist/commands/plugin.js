@@ -24,8 +24,7 @@ export const pluginCommand = {
             if (!source)
                 return { message: "Usage: /plugin import <folder-path> [name]" };
             const plugin = importPlugin(source, args[2]);
-            actions.enablePlugin(plugin.name);
-            return { message: `Imported and enabled plugin ${plugin.name}.` };
+            return { message: `Imported plugin ${plugin.name} (disabled). Enable it with /plugin enable ${plugin.name}.` };
         }
         if (sub === "enable") {
             const name = args[1];
@@ -116,6 +115,9 @@ function pluginInfoText(plugin) {
         `Plugin: ${plugin.name}`,
         `Path: ${plugin.path}`,
         `Description: ${plugin.description}`,
+        `Version: ${plugin.version ?? "unversioned"}`,
+        `Scope: ${plugin.scope ?? "global"}`,
+        `Capabilities: ${plugin.capabilities?.join(", ") || "none"}${plugin.unsupported?.length ? `  [UNSUPPORTED: ${plugin.unsupported.join(", ")}]` : ""}`,
         `Skills: ${plugin.skills.map((s) => s.name).join(", ") || "none"}`,
         "",
         plugin.body.slice(0, 4000),

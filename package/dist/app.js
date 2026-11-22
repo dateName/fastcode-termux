@@ -37,8 +37,11 @@ import { createStartupTranscript } from "./lib/startup.js";
 import { shouldUseLiveStreamingUi, shouldUseStableTerminalUi } from "./lib/uiMode.js";
 import { buildPluginsPrompt } from "./plugins/manager.js";
 import { buildSkillsPrompt } from "./skills/manager.js";
-import { createSessionLog, latestUnclosedSession, loggingEnabled, openSessionLog, staleSummaryRefs } from "./session/log.js";
+import { createSessionLog, latestUnclosedSession, loggingEnabled, openSessionLog, readSession, staleSummaryRefs } from "./session/log.js";
 import { resumeSession } from "./session/projection.js";
+import { applyPlan, applyRevert } from "./session/actions.js";
+import { discoverInstructions, formatInstructionPrompt } from "./session/instructions.js";
+import { formatPlan, latestPlan } from "./session/plan.js";
 import { isTrusted, trustProject } from "./config/trust.js";
 import { TrustGate } from "./ui/TrustGate.js";
 function positiveInt(value, fallback) {
@@ -789,6 +792,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                     expanded,
                     busy,
                     draft: input,
+                    plan: sessionRef.current?.file ? latestPlan(readSession(sessionRef.current.file)) : undefined,
                 },
                 actions,
             });
@@ -804,6 +808,42 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 appendCompactionFact(res.compacted);
             if (res?.cleared)
                 sessionRef.current.append({ type: "cleared" });
+            if (typeof res?.revert === "number") {
+                const action = sessionRef.current ? applyRevert(sessionRef.current, res.revert) : undefined;
+                if (!action) {
+                    pushSystem(`Cannot revert to user message ${res.revert}; no active session log.`);
+                }
+                else if (action.ok) {
+                    setHistory(action.messages);
+                    idRef.current += 1;
+                    setTranscript([{
+                            id: idRef.current,
+                            role: "system",
+                            content: action.notice,
+                            markdown: true,
+                        }]);
+                }
+                else {
+                    pushSystem(action.message ?? "Revert failed.");
+                }
+            }
+            if (res?.plan) {
+                const action = sessionRef.current ? applyPlan(sessionRef.current, res.plan) : undefined;
+                if (!action) {
+                    pushSystem("Could not persist the plan; no active session log.");
+                }
+                else if (action.ok) {
+                    setHistory(action.messages);
+                    idRef.current += 1;
+                    setTranscript((prev) => [
+                        ...prev,
+                        { id: idRef.current, role: "system", content: formatPlan(action.plan), markdown: true },
+                    ]);
+                }
+                else {
+                    pushSystem(action.message ?? "Plan update failed.");
+                }
+            }
             if (res?.quit)
                 void quitCleanly();
         }
@@ -896,7 +936,8 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             const pluginsBlock = buildPluginsPrompt(config.enabledPlugins);
             const protocol = config.agentMode ? resolveToolProtocol(config, config.providerId, config.model) : "legacy";
             const agentBlock = config.agentMode ? agentSystemPrompt(protocol) : "";
-            const fullSystem = [config.systemPrompt, skillsBlock, pluginsBlock, agentBlock]
+            const instructionsBlock = formatInstructionPrompt(discoverInstructions(process.cwd()).entries);
+            const fullSystem = [config.systemPrompt, skillsBlock, pluginsBlock, instructionsBlock, agentBlock]
                 .filter((part) => part.trim())
                 .join("\n\n");
             let compactionNotified = false;
@@ -1005,11 +1046,33 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                             ...(ev.filesRead !== undefined ? { filesRead: ev.filesRead } : {}),
                             ...(ev.filesSkipped !== undefined ? { filesSkipped: ev.filesSkipped } : {}),
                             ...(ev.matches !== undefined ? { matches: ev.matches } : {}),
+                            ...(ev.oldText !== undefined ? { oldText: ev.oldText } : {}),
+                            ...(ev.newText !== undefined ? { newText: ev.newText } : {}),
+                            ...(ev.changedStartLine !== undefined ? { changedStartLine: ev.changedStartLine } : {}),
+                            ...(ev.oldLineCount !== undefined ? { oldLineCount: ev.oldLineCount } : {}),
+                            ...(ev.newLineCount !== undefined ? { newLineCount: ev.newLineCount } : {}),
+                            ...(ev.diffTruncated !== undefined ? { diffTruncated: ev.diffTruncated } : {}),
+                            ...(ev.diffs ? { diffs: ev.diffs } : {}),
+                            ...(ev.atomic === false ? { atomic: false } : {}),
+                            ...(ev.check ? { check: ev.check } : {}),
                         });
                         const collapsed = stableUi && !expanded;
                         const body = collapsed ? collapseToolOutput(ev.output) : ev.output;
                         const hint = collapsed ? "\n\n_(output collapsed; /expand to show full output)_" : "";
-                        pushSystem(`Tool ${ev.ok ? "completed" : "failed"}: \`${ev.call.tool}\`\n\n\`\`\`\n${body}\n\`\`\`${hint}`);
+                        const clipDiff = (text) => {
+                            const value = String(text ?? "");
+                            return value.length > 2_000 ? value.slice(0, 2_000) + "\n[... diff text truncated ...]" : value;
+                        };
+                        const diffDetail = expanded && ev.diffs?.length
+                            ? ev.diffs.map((diff) => `### ${diff.path}\n- old:\n\`\`\`\n${clipDiff(diff.oldText)}\n\`\`\`\n+ new:\n\`\`\`\n${clipDiff(diff.newText)}\n\`\`\``).join("\n\n")
+                            : "";
+                        const diffInfo = ev.diffs?.length
+                            ? `\n\n_diff: ${ev.diffs.length} file(s)${diffDetail ? `\n\n${diffDetail}` : ""}_`
+                            : ev.oldText !== undefined && ev.newText !== undefined
+                                ? `\n\n_diff: line ${ev.changedStartLine ?? "?"} · ${ev.oldLineCount ?? "?"} → ${ev.newLineCount ?? "?"} line(s)${ev.diffTruncated ? " (truncated)" : ""}_`
+                                : "";
+                        const atomicInfo = ev.atomic === false ? "\n\n_[atomic] rename unavailable; fallback copy used (best-effort)_" : "";
+                        pushSystem(`Tool ${ev.ok ? "completed" : "failed"}: \`${ev.call.tool}\`\n\n\`\`\`\n${body}\n\`\`\`${hint}${diffInfo}${atomicInfo}`);
                         break;
                     }
                     case "usage":

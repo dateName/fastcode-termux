@@ -3,21 +3,44 @@ import { open, readdir, stat } from "node:fs/promises";
 import { basename, extname, join, relative } from "node:path";
 import readline from "node:readline";
 import { createIgnore, isBinaryName } from "../ignore.js";
+import { globSafetyError } from "../../lib/glob.js";
 import { createOutputBuffer } from "../limits.js";
+export { globSafetyError };
 import { allowedRoots, isInsideAny, realpathOf, sandboxPath } from "./paths.js";
 export async function readManyResult(cwd, paths, maxBytes = readManyMaxBytes()) {
     const blocks = [];
     let used = 0;
     let totalBytes = 0;
     let filesRead = 0;
+    let filesSkipped = 0;
     let truncated = false;
     for (const path of paths) {
         if (used >= maxBytes) {
             truncated = true;
             break;
         }
-        const file = sandboxPath(cwd, path);
-        const result = await readTextFileResult(file, maxBytes - used);
+        let file;
+        let result;
+        try {
+            file = sandboxPath(cwd, path);
+            result = await readTextFileResult(file, maxBytes - used);
+        }
+        catch (err) {
+            if (err?.code === "ABORTED")
+                throw err;
+            const detail = String(err?.message ?? err).slice(0, 300);
+            const block = `### ${path}\n[skipped: ${detail}]`;
+            const blockBytes = Buffer.byteLength(block, "utf8");
+            if (used + blockBytes > maxBytes) {
+                truncated = true;
+                break;
+            }
+            blocks.push(block);
+            used += blockBytes;
+            filesSkipped += 1;
+            truncated = true;
+            continue;
+        }
         totalBytes += result.totalBytes;
         const block = `### ${file}\n${result.text}`;
         const blockBytes = Buffer.byteLength(block, "utf8");
@@ -36,7 +59,8 @@ export async function readManyResult(cwd, paths, maxBytes = readManyMaxBytes()) 
         if (result.truncated)
             truncated = true;
     }
-    if (filesRead < paths.length)
+    filesSkipped += Math.max(0, paths.length - filesRead - filesSkipped);
+    if (filesSkipped > 0)
         truncated = true;
     return {
         text: blocks.join("\n\n"),
@@ -44,7 +68,7 @@ export async function readManyResult(cwd, paths, maxBytes = readManyMaxBytes()) 
         totalBytes,
         returnedBytes: used,
         filesRead,
-        filesSkipped: Math.max(0, paths.length - filesRead),
+        filesSkipped,
     };
 }
 export async function readMany(cwd, paths) {
@@ -210,6 +234,9 @@ export async function grepFiles(sandbox, root, options) {
     return { text: out.value(), truncated, matchCount, filesScanned };
 }
 function globToRegExp(glob) {
+    const unsafe = globSafetyError(glob);
+    if (unsafe)
+        throw new Error(unsafe);
     let source = "^";
     for (let i = 0; i < glob.length; i += 1) {
         const char = glob[i];

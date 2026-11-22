@@ -1,3 +1,5 @@
+import { globSafetyError } from "../../lib/glob.js";
+export { globSafetyError };
 export interface ReadManyResult {
     text: string;
     truncated: boolean;

@@ -1,5 +1,5 @@
 import { debugLog } from "../../lib/debug.js";
-import { sandboxPath } from "./paths.js";
+import { sandboxPath, sandboxWritePath } from "./paths.js";
 import type { Prepared, ToolCall, ToolErrorCode } from "./types.js";
 
 export function invalid(output: string, code: ToolErrorCode = "INVALID_ARGS", hint?: string): Prepared {
@@ -92,8 +92,16 @@ function describeValue(value: unknown): string {
 }
 
 export function preparePath(cwd: string, raw: string): Prepared {
+    return prepareWith(cwd, raw, sandboxPath);
+}
+
+export function prepareWritePath(cwd: string, raw: string): Prepared {
+    return prepareWith(cwd, raw, sandboxWritePath);
+}
+
+function prepareWith(cwd: string, raw: string, resolve: (cwd: string, raw: string) => string): Prepared {
     try {
-        sandboxPath(cwd, raw);
+        resolve(cwd, raw);
         return { ok: true };
     }
     catch (err: any) {

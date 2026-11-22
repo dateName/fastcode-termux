@@ -1,4 +1,4 @@
-import { grepFiles } from "./readers.js";
+import { globSafetyError, grepFiles } from "./readers.js";
 import { resolvePath } from "./paths.js";
 import type { Tool } from "./types.js";
 import { booleanOption, clampInt, invalid, optionalNumber, preparePath, requiredString } from "./validate.js";
@@ -28,6 +28,11 @@ export const grepTool: Tool = {
                 return invalid("maxDepth must be between 1 and 20");
             if (call.glob !== undefined && typeof call.glob !== "string")
                 return invalid("glob must be a string");
+            if (typeof call.glob === "string") {
+                const unsafe = globSafetyError(call.glob);
+                if (unsafe)
+                    return invalid(unsafe);
+            }
         }
         catch (err: any) {
             return invalid(`invalid regular expression: ${err?.message ?? String(err)}`, "INVALID_ARGS", "pattern must be a valid regular expression");

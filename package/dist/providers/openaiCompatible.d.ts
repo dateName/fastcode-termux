@@ -6,6 +6,7 @@ export interface ModelInfo {
     [key: string]: any;
 }
 export interface StreamOptions {
+    providerId?: string;
     baseUrl: string;
     apiKey?: string;
     chatPath?: string;
@@ -31,9 +32,10 @@ export declare function streamChatCompletion(req: any, opts: StreamOptions): Asy
 } | {
     toolCalls?: NativeToolCall[];
     usage?: {
-        inputTokens: any;
-        outputTokens: any;
-        totalTokens: any;
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+        costUsd?: number;
     };
     delta: string;
     done: boolean;

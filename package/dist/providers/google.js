@@ -15,5 +15,5 @@ export const googleProvider = {
     baseUrl: BASE,
     defaultModel: "gemini-3.8-flash",
     listModels: (apiKey) => listModelsHttp({ baseUrl: BASE, apiKey, staticModels: STATIC }),
-    stream: (req, apiKey) => streamChatCompletion(req, { baseUrl: BASE, apiKey, staticModels: STATIC }),
+    stream: (req, apiKey) => streamChatCompletion(req, { providerId: "google", baseUrl: BASE, apiKey, staticModels: STATIC }),
 };

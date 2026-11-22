@@ -28,12 +28,10 @@ Short alias included:
 fc
 ```
 
-This tree is **0.1.8-beta.1**, based on 0.1.8-beta.0 plus the 2026-11-15
-audit/backend/failure/structure batch. It is built and packaged locally and
-published to npm under the `beta` tag; GitHub Release assets are published
-too. The Release workflow's final npm step may fail because this beta was
-already published manually; the uploaded assets are unaffected. The tracked
-`release/` contains the current version assets.
+This tree is **0.1.8-beta.3**, based on 0.1.8-beta.2 plus the 2026-11-21
+security/protocol/event/capability/session/extension batches. It is built locally
+(PC smoke 441/441) but **not yet published**; npm `beta` still points at
+0.1.8-beta.2. The tracked `release/` still contains the 0.1.8-beta.2 assets.
 
 ---
 

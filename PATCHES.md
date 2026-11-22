@@ -1,6 +1,6 @@
-# FastCode 0.1.3 → 0.1.8-beta.1 修复清单
+# FastCode 0.1.3 → 0.1.8-beta.3 修复清单
 
-> 本版 = 0.1.8-beta.0 工作树 + 2026-11-15 审计/执行后端/失败语义/结构治理；`release/` 与 npm `beta` 仍是上一批资产。
+> 本版 = 0.1.8-beta.2 + 2026-11-21 安全/协议/事件/能力/回滚/扩展/CI 批次；当前工作树 **未提交、未发布**；`release/`、npm `beta` 与 GitHub Release 仍为已发布的 0.1.8-beta.2。
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
@@ -236,7 +236,7 @@
 - 验证：`typecheck` / `lint` / `build` 通过；Windows `npm test` **282/282**；`verify-artifacts` 通过；`release/` 已生成 0.1.8-beta.0 tar.gz/zip/tgz 与 `SHA256SUMS`；npm `beta=0.1.8-beta.0`。
 - 额外手工核对：审批 feedback 源码逻辑、压缩/投影（`/compact` 元数据、摘要顺序、cleared、工具折叠、summary 安全删除）、`session_end` 保存口、Windows one-shot 异步停止、one-shot `active=1/pool=0/maxPool=2/maxSpawnPerTurn=8`、第 9 个 one-shot spawn limit、msys `sh -s` 的 `exit 0`/状态隔离/`set -e`。Termux 真机待复跑。
 
-## 审计修复（2026-11-15，未提交/未发布）
+## 审计修复（2026-11-15，已随当前版本发布）
 
 > 依据 `yq.txt` 的 A–D 缺陷线与 F/J/G/C/A/K/B/D/E/H 审计项；详见 `docs/DEVLOG.md` 同名小节与方案 §4 #94–#103。
 
@@ -313,5 +313,74 @@
 - `CONTRIBUTING.md`（新增）：内联 AGENTS 关键约束（clone 后可见）。
 - `docs/CONFIGURATION.md`：移除 `contextBudgetChars` 行，标注内部 env `FASTCODE_SANDBOX`/`ROOT`。
 - 死代码：删除 `src/agent/context.ts`、`contextBudgetChars`（store/runner）及对应 dist 文件。
-- 基线：未执行 pull/sync；本地 HEAD `70eaea9`，`4d2e1c3b` 本地不存在，工作树未提交改动较多。
+- 基线（当时）：未执行 pull/sync；本地 HEAD `70eaea9`，`4d2e1c3b` 本地不存在，工作树未提交改动较多。
 - 验证：`typecheck` / `lint` / `build` / `smoke` / `verify:artifacts` 通过。
+
+## 当前版本追加（2026-11-17，已发布）
+
+- `src/agent/runner.ts`：native 降级时只替换尾部 native agent 段为 legacy 文本协议段，保留调用方 system 前缀，降级请求重新包含 `<fastcode_tool>` 语法（#152）。
+- `src/agent/protocol.ts`：`stripUnfencedText` 每步 boundary 按当前正在 replace 的字符串计算 offset，混排 `ANCHOR→D4→D5` 不再残留可见标记（#151）。
+- `src/providers/openaiCompatible.ts`：400 message 去掉重复的 `400 Bad Request:` 前缀（#150）。
+- 验证：`typecheck` / `lint` / `build` 通过；Windows smoke **355/355**；`verify:artifacts` 通过；npm `beta` 与 GitHub Release 已发布。
+
+## 安全修复（2026-11-21，工作树，未发布）
+
+- **G-A1 / B2-01**：新增 `src/lib/realpath.ts` 逐组件解析符号链接（含悬空链接）；`tools/paths.ts` 增加 `sandboxWritePath`/`assertNotSymlink`/`atomicWriteFile`；`write_file`/`append_file`/`copy_file` 使用 `O_NOFOLLOW`；`policy/egress.ts` 的路径目标走 `realpathOf`。
+- **G-A1 / B2-01b**：write/copy(overwrite)/replace 改为同目录 tmp+rename（断开硬链接）；append 在 open 后检查 `nlink>1` 并拒绝；Windows `fs.linkSync` 4 项 + 普通追加回归通过。
+- **G-A2 / B2-02**：`session/log.ts` 新增 `resolveResumeFile`（仅 sessions 下 id/`.jsonl`）；`projectionPath` 改为大小写不敏感；`session/projection.ts` 的 `writeProjection` 拒绝 `target === source`；`cli-main.ts` 的 `resume` 改用新校验。
+- 回归：`scripts/smoke-test.mjs` 新增 B2-01/B2-01b/B2-02 用例；Windows **ALL PASS (369/369)**（最终文件 symlink 用例因本机 `EPERM` 跳过，悬空目录 junction 祖先与硬链接用例通过）；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。Termux/POSIX 待复验。
+
+## 协议/参数修复（2026-11-21，工作树，未发布）
+
+- **1.3 参数修复**：新增 `lib/values.ts` 的 `parseJsonObjectWithRepair`；尾逗号、未闭合字符串/括号、单元素数组、已知数值/布尔字符串一次修复；未知字段仍由工具校验失败。
+- **B10**：native `arguments` 解析失败不再构造无参调用；回注 `tool_result{code:"INVALID_ARGS"}`，工具执行 0 次。
+- **B9/B14**：`consecutiveProtocolErrors` 在合法轮清零；连续 2 次 native 参数失败停止；`max_turns` 仅在最后一轮失败时改判 `protocol_error`。
+- **B11/B12**：`error` 事件新增 `detail`（最后一次具体错误）；`protocol_error` 的 `finalText` 不再重复错误文案；headless JSON 同步 `detail`。
+- **B13**：`protocol.ts` 新增 `hasUnexecutedToolMarkup`（围栏外）；0 调用但正文含标记时在可见文本追加“未执行”提示；围栏示例不提示。
+- 回归：Windows **ALL PASS (381/381)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+## CI 门禁 B7（2026-11-21，工作树，未发布）
+
+- 新增 `.github/workflows/verify.yml`：push/PR、Node 24、`npm ci`、`npm run check`、`verify:artifacts`、`verify-gate`、`git diff --exit-code -- package/dist`。
+- 新增 `scripts/verify-gate.mjs`：workflow 关键项、`dist` 运行时字面量、`--self-test` 反证；`package.json` 注册 `verify:gate`。
+- 验证：`npm run check`（381/381）、`node scripts/verify-gate.mjs --self-test`、构建哈希稳定。
+
+## 统一事件流（2026-11-21，工作树，未发布）
+
+- 新增 `src/agent/event-stream.ts`：`EventStream` 信封（`v:1/seq/ts/session_id/turn`）与 `serializeAgentEvent`；headless JSON 只消费该序列化器。
+- `assistant_raw.reasoning` 单独成 `reasoning` 帧；`gate:ask`/`gate:decision`/`gate:error` 统一 `v:1`，入站兼容旧 `version`。
+- 回归：Windows **ALL PASS (385/385)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+## 能力目录与结构化 diff（2026-11-21，工作树，未发布）
+
+- **2.2 能力目录**：`lib/model-meta.ts` 增加 `pricing`、`modelMetaSource`、`MODEL_META_UPDATED`、`estimateCostUsd`；内置已知模型 pricing；用户 `model-meta.json` 可覆盖；`openaiCompatible` 的 usage 计算 `costUsd`；doctor 显示 price/source/updated。
+- **2.4 结构化 diff**：`write_file`/`replace_in_file` 返回 `oldText/newText/changedStartLine/oldLineCount/newLineCount/diffTruncated`；headless JSON 输出 `old_text/new_text/...`；TUI 显示 diff 摘要。
+- 回归：Windows **ALL PASS (390/390)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+## 回滚 / 指令 / 权限 / 诊断回路（2026-11-21，工作树，未发布）
+
+- **1.1**：`session/projection.ts` 增加 `factsAfterRevert`/`revertBoundary`；`commands/revert.ts` + `/revert <n>`；`--files` 暂未实现。
+- **1.2**：新增 `session/instructions.ts`；app/headless 在 agent block 前注入指令；`/context` 显示来源。
+- **2.1**：新增 `agent/policy/permissions.ts`；guards Soft Gate 接入分层 allow/deny；未信任项目层忽略；Hard Block 不变。
+- **2.3**：新增 `agent/check-loop.ts` 与 `checkCommand/checkTimeoutMs`；registry 在写类工具后运行检查，失败/超时只报告。
+- 回归：Windows **ALL PASS (404/404)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+## 外置扩展 / plan-todo / worktree（2026-11-21，工作树，未发布）
+
+- **2.7**：`plugins/manager.ts` 支持 `plugin.json` manifest、capabilities/scope/version；导入默认关闭；prompt/skills 之外拒绝。
+- **2.6**：`session/plan.ts` + `/plan`/`/todo`/`/goal`；`plan` fact；投影 `[plan]` 保护；自动续跑未实现。
+- **3.3**：`session/worktree.ts` + `/worktree`；create/list/diff/apply/remove；dirty remove 需 force。
+- 回归：Windows **ALL PASS (441/441)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+
+## B2 修复批次（2026-11-22，工作树，未发布）
+
+- **B2-04**：OpenAI 兼容流要求 `[DONE]`/`finish_reason`，Anthropic 要求 `message_stop`；缺失抛 `IncompleteStreamError`。
+- **B2-05**：grep glob 长度 ≤256、`**` ≤8；`.fastcodeignore` ≤256KB / ≤2000 条 / 单条同上。
+- **B2-06**：`read_many.maxBytes` 钳制到 `FASTCODE_READ_MANY_MAX_BYTES`；单文件错误标 skipped 并继续。
+- **B2-09/10/12/13**：i18n 类型安全；summaryRef 限 sessions 内且 ≤256KB；auth tmp/备份 0600；HTTP/provider 错误正文脱敏。
+- **B2-11**：进程组组长退出但组仍存活时继续 SIGKILL 升级（POSIX 回归）。
+- **B2-08/B2-14**：短历史动态压缩、headless/prune 清理 summary、投影 arguments 截断与 200KB 硬上限；usage 告警去重、`isCallBoundary` 256 字符后缀、fallback 保留 caller 后缀、400 不再误重试。
+- **yq 维护**：`apply_patch` 返回逐文件 `diffs`；post-write 收窄到 write/append/replace/apply_patch/copy；绝对路径 glob 边界修复并合并到 `lib/glob.ts`；FUSE 回读校验/还原失败保留 backup/doctor 显示残留；worktree apply 前要求目标 clean；revert/plan 重建收进 `session/actions.ts`。
+- **Atomic seam**：新增 `lib/atomic-file.ts`；write/replace 走 `atomicFile.write`，copy/patch 走 `atomicFile.temp` 句柄；patch 全 async；fallback 成功标记 `atomic:false`；测试覆盖 fallback 成功、restore 成功、restore 失败保留 backup。
+- **B2-03/B2-07**：shell 相关项按用户要求暂缓。
+- 回归：Windows **ALL PASS (441/441)**（POSIX 442）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。

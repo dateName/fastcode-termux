@@ -1,3 +1,9 @@
+/**
+ * True when the visible reply contains a tool-call marker outside Markdown
+ * fences. Fenced examples stay silent; an inline/list marker that was not
+ * executed still needs a visible hint so the reply is not a silent "complete".
+ */
+export declare function hasUnexecutedToolMarkup(text: string): boolean;
 export interface ToolCallRecord {
     tool: string;
     [key: string]: any;

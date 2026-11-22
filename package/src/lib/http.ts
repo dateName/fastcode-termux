@@ -5,6 +5,8 @@
  * the OpenAI-style `data: {...}\n\n` chunk format. Non-SSE providers (e.g.
  * Anthropic's older streaming) handle their own parsing.
  */
+import { redactSecrets } from "./child-env.js";
+
 export async function fetchJson(url: string, init: any = {}): Promise<any> {
     const res = await fetch(url, {
         ...init,
@@ -12,7 +14,7 @@ export async function fetchJson(url: string, init: any = {}): Promise<any> {
     });
     if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 500)}`);
+        throw new Error(`${res.status} ${res.statusText}: ${redactSecrets(body.slice(0, 500))}`);
     }
     return (await res.json());
 }
@@ -33,7 +35,7 @@ export interface StreamSseOptions {
 export async function* streamSSE(res, options: StreamSseOptions = {}) {
     if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 500)}`);
+        throw new Error(`${res.status} ${res.statusText}: ${redactSecrets(body.slice(0, 500))}`);
     }
     if (!res.body)
         throw new Error("Empty response body");

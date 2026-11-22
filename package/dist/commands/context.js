@@ -1,5 +1,6 @@
 import { compactionConfigFromEnv, heapExceeded, localThresholdTokens } from "../agent/compaction.js";
 import { estMessagesTokens, getModelMeta } from "../lib/model-meta.js";
+import { discoverInstructions } from "../session/instructions.js";
 export const contextCommand = {
     name: "context",
     description: "Show estimated context tokens, compaction threshold, and heap usage",
@@ -13,12 +14,14 @@ export const contextCommand = {
         const threshold = localThresholdTokens(config, meta.contextWindow);
         const percent = meta.contextWindow > 0 ? (tokens / meta.contextWindow) * 100 : 0;
         const heapMb = process.memoryUsage().heapUsed / 1024 / 1024;
+        const instructions = discoverInstructions(process.cwd());
         return {
             message: [
                 `Context: ~${tokens.toLocaleString()} / ${meta.contextWindow.toLocaleString()} tokens (${percent.toFixed(1)}%)`,
                 `Compaction threshold: ${threshold.toLocaleString()} tokens (${Math.round(config.localThresholdRatio * 100)}%)${config.enabled ? "" : "  [disabled]"}`,
                 `Heap: ${heapMb.toFixed(1)} MB / ${config.heapLimitMb} MB${heapExceeded(config) ? "  [forced compaction]" : ""}`,
                 `Messages: ${ctx.state.history.length}  ·  chars/token: ~${meta.charsPerToken}`,
+                `Instructions: ${instructions.entries.length} file(s)${instructions.entries.length > 0 ? " · " + instructions.entries.map((entry) => `${entry.scope}:${entry.path}`).join(", ") : ""}`,
             ].join("\n"),
         };
     },

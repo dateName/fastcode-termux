@@ -123,8 +123,15 @@ export function compactMessages(messages: ChatMessage[], config: CompactionConfi
         };
     }
     const headCount = messages[0]?.role === "user" ? 1 : 0;
-    const keep = Math.max(2, Math.floor(config.keepTurns * 2));
-    const tailStart = Math.max(headCount, messages.length - keep);
+    let keep = Math.max(2, Math.floor(config.keepTurns * 2));
+    let tailStart = Math.max(headCount, messages.length - keep);
+    if (tailStart <= headCount && messages.length >= headCount + 3) {
+        // Short histories still need to converge: retain fewer tail messages
+        // so at least one middle message can be summarized. Two messages are
+        // already the minimum (head + current turn) and stay untouched.
+        keep = Math.min(keep, Math.max(2, messages.length - headCount - 1));
+        tailStart = Math.max(headCount + 1, messages.length - keep);
+    }
     if (tailStart <= headCount)
         return noop;
     const middle = messages.slice(headCount, tailStart);

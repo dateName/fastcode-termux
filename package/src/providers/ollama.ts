@@ -18,5 +18,5 @@ export const ollamaProvider = {
     },
     defaultModel: "qwen3-coder",
     listModels: () => listModelsHttp({ baseUrl: baseUrl(), apiKey: undefined, staticModels: STATIC }),
-    stream: (req) => streamChatCompletion(req, { baseUrl: baseUrl(), apiKey: undefined, staticModels: STATIC }),
+    stream: (req) => streamChatCompletion(req, { providerId: "ollama", baseUrl: baseUrl(), apiKey: undefined, staticModels: STATIC }),
 };
