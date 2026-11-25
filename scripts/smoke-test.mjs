@@ -3144,6 +3144,7 @@ for (const ref of p7Stale)
     rmSync(ref, { force: true });
 const cleanRef = join(paths.getPaths().sessions, "summary-777777-p9-clean.md");
 writeFileSync(cleanRef, "clean", "utf8");
+await new Promise((resolve) => setTimeout(resolve, 25));
 const cleanLog = slog.createSessionLog({ providerId: "deepseek", model: "deepseek-v4-pro", cwd: stage0 });
 cleanLog.append({ type: "compacted", source: "local", summaryRef: cleanRef, keepMessages: 1, droppedFromSeq: 2, droppedToSeq: 3, droppedCount: 2 });
 const cleanResult = (await load("commands/compact.js")).compactCommand.run({ args: ["clean", "2"], state: { history: [] }, actions: {} });
@@ -4023,9 +4024,9 @@ if (process.platform !== "win32") {
     const threadsModule = await load("commands/threads.js");
     const threadsActions = { setShellPoolSize: (size) => shells.setShellPoolSize(size) };
     const threadsShow = threadsModule.threadsCommand.run({ args: [], actions: threadsActions });
-    const threadsSet = threadsModule.threadsCommand.run({ args: ["9"], actions: threadsActions });
-    ok("/threads shows the safe default and clamps the maximum to six",
-        /2/.test(threadsShow.message) && shells.shellPoolSize() === 6 && /clamped/.test(threadsSet.message),
+    const threadsSet = threadsModule.threadsCommand.run({ args: ["200"], actions: threadsActions });
+    ok("/threads shows the safe default and clamps the maximum to 128",
+        /2/.test(threadsShow.message) && shells.shellPoolSize() === 128 && /clamped/.test(threadsSet.message),
         JSON.stringify({ show: threadsShow.message, set: threadsSet.message }));
     shells.setShellPoolSize(2);
 }
