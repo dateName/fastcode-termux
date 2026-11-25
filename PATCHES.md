@@ -1,6 +1,6 @@
-# FastCode 0.1.3 → 0.1.8 修复清单（正式版，已发布）
+# FastCode 0.1.3 → 0.1.9-beta.1 修复清单（工作树，未发布）
 
-> 本版 = 0.1.8-beta.4 + 2026-11-21 安全/协议/事件/能力/回滚/扩展/CI 批次 + 2026-11-22 yq 第二轮修复；已发布到 GitHub Release 与 npm `latest`；`beta` 仍保留 0.1.8-beta.4。
+> 本版 = 0.1.8 + P4–P9 harness 工作；当前工作树 **未提交、未发布**；npm `latest` 仍为 0.1.8，`beta` 仍为 0.1.8-beta.4。
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
@@ -370,7 +370,7 @@
 - **2.7**：`plugins/manager.ts` 支持 `plugin.json` manifest、capabilities/scope/version；导入默认关闭；prompt/skills 之外拒绝。
 - **2.6**：`session/plan.ts` + `/plan`/`/todo`/`/goal`；`plan` fact；投影 `[plan]` 保护；自动续跑未实现。
 - **3.3**：`session/worktree.ts` + `/worktree`；create/list/diff/apply/remove；dirty remove 需 force。
-- 回归：Windows **ALL PASS (447/447)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+- 回归：Windows **ALL PASS (479/479)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
 
 ## B2 修复批次（2026-11-22，工作树，未发布）
 
@@ -383,5 +383,7 @@
 - **yq 维护**：`apply_patch` 返回逐文件 `diffs`；post-write 收窄到 write/append/replace/apply_patch/copy；绝对路径 glob 边界修复并合并到 `lib/glob.ts`；FUSE 回读校验/还原失败保留 backup/doctor 显示残留；worktree apply 前要求目标 clean；revert/plan 重建收进 `session/actions.ts`。
 - **Atomic seam**：新增 `lib/atomic-file.ts`；write/replace 走 `atomicFile.write`，copy/patch 走 `atomicFile.temp` 句柄；patch 全 async；fallback 成功标记 `atomic:false`；测试覆盖 fallback 成功、restore 成功、restore 失败保留 backup。
 - **B2-03**：shell soft-gate 在 Hard Block 后、审批前检查 trust；未信任目录批准一次也不能执行。**B2-07 精确化**：敏感文件本地读取允许，外传由 egress/Hard Block 处理；`sh -c`/`bash -c` 引号路径已覆盖。
+- **D1/P2（工作树）**：`ApprovalRequest.patchDiffs` + `plan.files[].diff`；执行 `diffs[].unified` 来自 `applied.files[].diff`；TUI 默认真 diff、gate diffstat 真计数、native/plain 同步。
+- **P2**：permission regex 锚定、`*` 不跨目录、连续星号拒绝、项目层 catch-all allow 收窄；atomic restore 安全写、backup `COPYFILE_EXCL`、精确 backup 匹配、Q14 保留 backup、`O_NOFOLLOW` fail closed、native 合法调用清零错误。
 - **yq 第二轮**：permissions/grep regex 长度与嵌套量词防护；`**` 上限 4；read_many UTF-8 码点/预算一致；grep 行上限按字节；apply_patch SANDBOX_DENY；worktree recorded base + binary + `--commit` 增量 apply。
-- 回归：Windows **ALL PASS (447/447)**（POSIX 448）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。
+- 回归：Windows **ALL PASS (479/479)**（POSIX 480）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。

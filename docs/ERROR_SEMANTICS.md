@@ -40,7 +40,8 @@
 
 - `headless.ts` 注册 `SIGINT`/`SIGTERM`/`SIGHUP` 的 abort；但 `index.ts` 先安装 `lib/lifecycle.ts` 的进程守卫，信号可能先以 143 退出、headless 的 abort 处理器来不及运行（见 `AUDIT.md` §八 B2-11）。
 - `--ui json` 由 `agent/event-stream.ts` 统一信封：`v:1`、`seq`、`ts`、`session_id`、`turn`；新增 `reasoning` 帧；保留 `loop_detected`（fingerprint/occurrences/warned）、`compaction`、`checkpoint`（turn/cwd/provider_id/model/active_files）与收尾 `summary`（tool_call_count/http_request_count/last_turn）（方案 §4 #138、#141）。`gate:ask`/`gate:decision`/`gate:error` 统一 `v:1`，入站仍兼容旧 `version`。
-- `session_id` 目前是本次 headless run 的标识（`resume` 时取会话文件名）；headless 仍不写 session log，跨调用持久化留待后续批次。
+- `gate:ask` 的审批 diff：`diffs?: Array<{path,unified}>` 来自 `plan.files[].diff`；`diffstat` 为 `{files,lines,added,removed}`，旧消费端可忽略新增字段。
+- `session_id` 契约：`FASTCODE_HEADLESS_SESSION_LOG=1` 时与 session log 的 id 同源；否则是本次 run 的临时 id。`resume` 且未开启 log 时取会话文件名。`last_fact_seq` 仅是本 run 的本地 checkpoint 序号，不宣称跨调用持久。
 - `summary.http_request_count` 统计成功返回的模型请求轮数（`assistant_raw` 事件），不含 provider 内部 400 重发。
 - 如果以后要把 SIGINT 映射为 130，必须在 headless 记录中断来源，而不是给所有 `aborted` 加 130。
 
@@ -79,6 +80,6 @@
 
 ## 7. 验收
 
-- Windows smoke **447/447**（2026-11-22，Node 24；POSIX 448）；用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）、400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（#139–#142）、双协议互斥/行内可见/跨方言保序/旧 capabilities 忽略（#143–#146）、headless 回收/shell 退出码与 cwd/stdio 注册（#147–#149）、400 前缀去重/混排剥离无残留/降级 system 同步（#150–#152）、参数修复/native 无参不执行/连续失败计数/错误 detail/未执行标记提示、统一事件信封/session_id/turn/reasoning/gate v:1、pricing/source/costUsd、结构化 diff、指令发现/声明式权限/回滚边界/后置检查、外置插件 manifest/plan-todo/worktree。
+- Windows smoke **479/479**（2026-11-22，Node 24；POSIX 480）；用例覆盖 degraded 会话、幂等 close、审批决策帧、probe 错误归因、incomplete error 事件、terminal latch、五种方言、`protocol_error` 熔断、只读 loop 终止（方案 §4 #123–#126）、围栏/行内示例、非流式 JSON、边界调用（方案 §4 #127–#130）、配对 400/native 结构判定/进程级能力缓存（方案 §4 #131–#133）、headless 不落盘/累计参数/非终块调用/usage 告警/汇总帧（方案 §4 #134–#138）、400 重发上限/doctor 重复计数/summary 请求数/方言比例与稳定码（#139–#142）、双协议互斥/行内可见/跨方言保序/旧 capabilities 忽略（#143–#146）、headless 回收/shell 退出码与 cwd/stdio 注册（#147–#149）、400 前缀去重/混排剥离无残留/降级 system 同步（#150–#152）、参数修复/native 无参不执行/连续失败计数/错误 detail/未执行标记提示、统一事件信封/session_id/turn/reasoning/gate v:1、pricing/source/costUsd、结构化 diff、指令发现/声明式权限/回滚边界/后置检查、外置插件 manifest/plan-todo/worktree。
 - `typecheck` / `lint` / `build` / `verify:artifacts` 通过。
 - Termux 真机与真实 provider 端到端仍待复跑。

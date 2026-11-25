@@ -14,6 +14,7 @@ import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, 
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { getPaths } from "../config/paths.js";
 import { removeSummaryFile } from "../agent/compaction.js";
+import { removeRawOutputsForSession } from "./raw-output.js";
 import { realpathOf } from "../lib/realpath.js";
 import { buildProjection, writeProjection } from "./projection.js";
 const NL = String.fromCharCode(10);
@@ -134,12 +135,27 @@ function openLog(id, file, meta) {
         count() {
             return seq;
         },
+        nextSeq() {
+            return seq + 1;
+        },
         /** True after at least one write failed (or the log is otherwise unreliable). */
         degraded() {
             return degraded;
         },
         lastError() {
             return lastError;
+        },
+        checkpoint() {
+            if (degraded || !loggingEnabled())
+                return;
+            try {
+                ensureProjection(file);
+                fsyncPath(file);
+                fsyncPath(projectionPath(file));
+            }
+            catch {
+                // checkpoint is best effort; the fact stream remains authoritative
+            }
         },
         close(info = {}) {
             if (closed)
@@ -404,6 +420,7 @@ export function pruneSessions(limit = sessionCacheLimitBytes()) {
             ensureProjection(all[i].file);
             for (const ref of summaryRefsForFile(all[i].file))
                 removeSummaryFile(ref);
+            removeRawOutputsForSession(all[i].file);
             rmSync(all[i].file, { force: true });
             total -= all[i].bytes;
         }

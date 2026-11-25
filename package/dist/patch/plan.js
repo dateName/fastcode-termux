@@ -2,6 +2,7 @@ import { closeSync, constants as fsConstants, lstatSync, openSync, readFileSync 
 import { basename } from "node:path";
 import { sandboxPath } from "../agent/tools/paths.js";
 import { parsePatch } from "./parse.js";
+import { countChangedLines, unifiedDiff } from "../lib/diff.js";
 export function planPatch(patch, cwd) {
     const parsed = parsePatch(patch);
     if (parsed.ok === false)
@@ -220,54 +221,5 @@ function normalizeLine(line, level) {
     return line.replace(/\s+/g, " ").trim();
 }
 export function makeDiff(oldPath, newPath, oldContent, newContent, kind) {
-    const oldLines = splitDiffLines(oldContent);
-    const newLines = splitDiffLines(newContent);
-    let prefix = 0;
-    while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix])
-        prefix += 1;
-    let suffix = 0;
-    while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix &&
-        oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix])
-        suffix += 1;
-    const oldMiddle = oldLines.slice(prefix, oldLines.length - suffix);
-    const newMiddle = newLines.slice(prefix, newLines.length - suffix);
-    const oldStart = prefix + 1;
-    const newStart = prefix + 1;
-    const header = kind === "add"
-        ? `--- /dev/null\n+++ b/${newPath ?? ""}`
-        : kind === "delete"
-            ? `--- a/${oldPath ?? ""}\n+++ /dev/null`
-            : `--- a/${oldPath ?? ""}\n+++ b/${newPath ?? oldPath ?? ""}`;
-    const body = [
-        `@@ -${oldStart},${oldMiddle.length} +${newStart},${newMiddle.length} @@`,
-        ...oldMiddle.map((line) => "-" + line),
-        ...newMiddle.map((line) => "+" + line),
-    ];
-    return [header, ...body].join("\n");
-}
-function splitDiffLines(content) {
-    if (content === "")
-        return [];
-    const lines = content.split(/\r?\n/);
-    if (lines.length > 0 && lines[lines.length - 1] === "")
-        lines.pop();
-    return lines;
-}
-function countChangedLines(oldContent, newContent) {
-    const oldLines = oldContent.split(/\r?\n/);
-    const newLines = newContent.split(/\r?\n/);
-    let changed = 0;
-    let i = 0;
-    let j = 0;
-    while (i < oldLines.length && j < newLines.length) {
-        if (oldLines[i] === newLines[j]) {
-            i += 1;
-            j += 1;
-            continue;
-        }
-        changed += 1;
-        i += 1;
-        j += 1;
-    }
-    return changed + Math.abs(oldLines.length - newLines.length);
+    return unifiedDiff(oldPath, newPath, oldContent, newContent, kind);
 }

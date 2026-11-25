@@ -12,6 +12,7 @@ import { getPaths } from "../../config/paths.js";
 import { realpathOf } from "../../lib/realpath.js";
 import { isCriticalReadTarget, isSensitiveTarget, isSharedStoragePath } from "../guards.js";
 import { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG } from "./defaults.js";
+import { detect } from "./sensitive.js";
 export { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG } from "./defaults.js";
 function strings(value) {
     return Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()) : [];
@@ -52,14 +53,6 @@ function builtinDenyPaths() {
     }
 }
 const compileCache = new Map();
-function safeRegExp(pattern) {
-    try {
-        return new RegExp(pattern, "i");
-    }
-    catch {
-        return undefined;
-    }
-}
 function globToRegExp(glob) {
     let source = "^";
     for (let index = 0; index < glob.length; index += 1) {
@@ -93,7 +86,6 @@ function compile(config) {
     if (cached)
         return cached;
     const compiled = {
-        markers: config.denyContentMarkers.map(safeRegExp).filter(Boolean),
         globs: config.denyGlobs.map(globToRegExp),
         denyPaths: config.denyPaths.map((entry) => resolve(entry).replace(/\\/g, "/")),
     };
@@ -120,12 +112,8 @@ function isInside(child, parent) {
     const rel = relative(parent, child).replace(/\\/g, "/");
     return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
-function markerHit(payload, compiled) {
-    for (const marker of compiled.markers) {
-        if (marker.test(payload))
-            return marker.source;
-    }
-    return undefined;
+function markerHit(payload, config) {
+    return detect(payload, config.denyContentMarkers)[0]?.ruleId;
 }
 function scanWindow(payload, maxBytes) {
     if (Buffer.byteLength(payload, "utf8") <= maxBytes)
@@ -151,7 +139,7 @@ function evaluateSubject(subject, cwd, config, compiled) {
         const overBudget = Buffer.byteLength(payload, "utf8") > config.maxScanBytes;
         if (overBudget && subject.outbound)
             return decide("scan_budget_exceeded", `payload exceeds the ${config.maxScanBytes}-byte egress scan budget`);
-        const marker = markerHit(scanWindow(payload, config.maxScanBytes), compiled);
+        const marker = markerHit(scanWindow(payload, config.maxScanBytes), config);
         if (marker)
             return decide("content_marker", `payload matched denyContentMarkers (${marker})`);
         return undefined;

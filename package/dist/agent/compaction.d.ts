@@ -8,6 +8,8 @@ export interface CompactionConfig {
     clampAboveServerByTokens: number;
     maxSummaryTokens: number;
     heapLimitMb: number;
+    anchorChars: number;
+    anchorCooldownTurns: number;
 }
 export declare const DEFAULT_COMPACTION_CONFIG: CompactionConfig;
 export interface CompactionOptions {
@@ -15,18 +17,23 @@ export interface CompactionOptions {
     providerId?: string;
     model?: string;
     force?: boolean;
+    forceReason?: "anchor";
     serverOpaqueState?: string;
 }
 export interface CompactionResult {
     messages: ChatMessage[];
     compacted: boolean;
-    reason?: "threshold" | "heap";
+    reason?: "threshold" | "heap" | "anchor";
     source: "local" | "server" | "none";
     beforeTokens: number;
     afterTokens: number;
     beforeChars: number;
     afterChars: number;
     droppedMessages: number;
+    droppedFromSeq?: number;
+    droppedToSeq?: number;
+    droppedCount?: number;
+    droppedSeqUnmapped?: boolean;
     keptMessages: number;
     summary?: string;
     summaryFile?: string;

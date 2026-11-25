@@ -49,6 +49,7 @@ export interface ToolResult {
     diffTruncated?: boolean;
     diffs?: Array<StructuredDiff & {
         path: string;
+        unified?: string;
     }>;
     atomic?: boolean;
     check?: ToolCheckResult;

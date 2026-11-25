@@ -14,6 +14,8 @@ export interface CompactionConfig {
     clampAboveServerByTokens: number;
     maxSummaryTokens: number;
     heapLimitMb: number;
+    anchorChars: number;
+    anchorCooldownTurns: number;
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
@@ -24,6 +26,8 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
     clampAboveServerByTokens: 8192,
     maxSummaryTokens: 1500,
     heapLimitMb: 220,
+    anchorChars: 0,
+    anchorCooldownTurns: 3,
 };
 
 export interface CompactionOptions {
@@ -31,19 +35,24 @@ export interface CompactionOptions {
     providerId?: string;
     model?: string;
     force?: boolean;
+    forceReason?: "anchor";
     serverOpaqueState?: string;
 }
 
 export interface CompactionResult {
     messages: ChatMessage[];
     compacted: boolean;
-    reason?: "threshold" | "heap";
+    reason?: "threshold" | "heap" | "anchor";
     source: "local" | "server" | "none";
     beforeTokens: number;
     afterTokens: number;
     beforeChars: number;
     afterChars: number;
     droppedMessages: number;
+    droppedFromSeq?: number;
+    droppedToSeq?: number;
+    droppedCount?: number;
+    droppedSeqUnmapped?: boolean;
     keptMessages: number;
     summary?: string;
     summaryFile?: string;
@@ -66,6 +75,12 @@ export function compactionConfigFromEnv(): CompactionConfig {
     const summaryTokens = Number(process.env["FASTCODE_COMPACTION_SUMMARY_TOKENS"]);
     if (Number.isFinite(summaryTokens) && summaryTokens > 0)
         config.maxSummaryTokens = Math.floor(summaryTokens);
+    const anchorChars = Number(process.env["FASTCODE_ANCHOR_CHARS"]);
+    if (Number.isFinite(anchorChars) && anchorChars >= 0)
+        config.anchorChars = Math.floor(anchorChars);
+    const anchorCooldown = Number(process.env["FASTCODE_ANCHOR_COOLDOWN_TURNS"]);
+    if (Number.isFinite(anchorCooldown) && anchorCooldown >= 0)
+        config.anchorCooldownTurns = Math.floor(anchorCooldown);
     const server = (process.env["FASTCODE_SERVER_COMPACTION"] ?? "").trim().toLowerCase();
     if (["1", "true", "yes", "on"].includes(server))
         config.serverCompactionAware = true;
@@ -113,7 +128,7 @@ export function compactMessages(messages: ChatMessage[], config: CompactionConfi
     const threshold = localThresholdTokens(config, options.contextWindow);
     if (!options.force && !heap && beforeTokens <= threshold)
         return noop;
-    const reason: "threshold" | "heap" = heap && beforeTokens <= threshold ? "heap" : "threshold";
+    const reason: "threshold" | "heap" | "anchor" = options.forceReason === "anchor" ? "anchor" : heap && beforeTokens <= threshold ? "heap" : "threshold";
     if (config.serverCompactionAware && options.serverOpaqueState) {
         return {
             ...noop,
@@ -135,6 +150,7 @@ export function compactMessages(messages: ChatMessage[], config: CompactionConfi
     if (tailStart <= headCount)
         return noop;
     const middle = messages.slice(headCount, tailStart);
+    const middleSeqs = middle.map((message) => message.seq).filter((seq): seq is number => typeof seq === "number" && Number.isFinite(seq));
     const summary = buildSummary(middle, config, options);
     const summaryFile = writeSummaryFile(summary);
     const marker: ChatMessage = {
@@ -173,6 +189,9 @@ export function compactMessages(messages: ChatMessage[], config: CompactionConfi
         beforeChars,
         afterChars: messageChars(next),
         droppedMessages: middle.length,
+        ...(middleSeqs.length > 0 ? { droppedFromSeq: Math.min(...middleSeqs), droppedToSeq: Math.max(...middleSeqs) } : {}),
+        droppedCount: middle.length,
+        ...(middleSeqs.length !== middle.length ? { droppedSeqUnmapped: true } : {}),
         keptMessages: next.length - headCount - 1,
         summary,
         summaryFile,
@@ -214,7 +233,7 @@ export function buildSummary(messages: ChatMessage[], config: CompactionConfig, 
                 }
             }
             else {
-                requests.push(clip(content, 300));
+                requests.push(clip(`${message.seq ? `[seq=${message.seq}] ` : ""}${content}`, 300));
             }
             collectFiles(content, files);
             continue;

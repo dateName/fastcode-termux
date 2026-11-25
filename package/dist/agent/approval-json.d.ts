@@ -5,7 +5,7 @@
  * time. A headless transport can consume it without leaking TUI output to
  * stdout. Hard Block requests never reach this code.
  */
-import type { ApprovalDecision, ApprovalRequest } from "./approval.js";
+import type { ApprovalDecision, ApprovalRequest, PatchDiff } from "./approval.js";
 export declare const GATE_PROTOCOL_VERSION = 1;
 export interface GateAskEvent {
     event: "gate:ask";
@@ -20,7 +20,10 @@ export interface GateAskEvent {
     diffstat: {
         files: number;
         lines: number;
+        added: number;
+        removed: number;
     };
+    diffs?: PatchDiff[];
     options: Array<{
         id: string;
         label: string;
@@ -30,7 +33,9 @@ export interface GateAskEvent {
     default: string;
     require_input?: string;
 }
-export declare function encodeGateAsk(request: ApprovalRequest): GateAskEvent;
+export declare function encodeGateAsk(request: ApprovalRequest, viewOptions?: {
+    diffPreview?: boolean;
+}): GateAskEvent;
 export interface GateDecisionEvent {
     event: "gate:decision";
     v: number;

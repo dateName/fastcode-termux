@@ -26,6 +26,7 @@
 | src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发；统一 provider → model → key 配置流程并暂存至确认；审批 feedback 文本等待与 Esc 取消 | runner, session, commands, providers, config/store, ui |
 | src/ui/Banner.ts | 启动横幅（稳定 UI 下不动画） | 无 |
 | src/ui/Message.ts | 消息气泡；Markdown 渲染缓存（不 memo，避免终端 resize 后宽度不更新） | lib/markdown |
+| src/ui/DiffPreview.ts | D1 ??/???? unified diff ???????????????? | ? |
 | src/ui/Prompt.ts | 输入框与斜杠自动补全；`showCursor` 常开 | ink-text-input, commands/index |
 | src/ui/Spinner.ts | 思考动画（stable 模式低频） | 无 |
 | src/ui/Picker.ts | 模型/服务商/effort 选择器 | ui/picker-window |
@@ -53,7 +54,7 @@
 | src/agent/tools/readers.ts | read/list/grep/walk；行区间读取先按字节预算裁剪、read_many 总预算/逐文件错误隔离/UTF-8 码点边界/提示计入预算、grep glob 与 regex 安全上限/context/maxResults、超长命中行裁剪 500 字节、读取上限 | ignore, limits, lib/glob |
 | src/agent/tools/validate.ts | 参数校验、preparePath、prepareWritePath | paths |
 | src/agent/tools/shell.ts | shell 工具 + 后台 session 轮询 | shell-session |
-| src/agent/tools/apply_patch.ts | 调用 patch 三阶段（async）；review pending 时 fail closed；成功时返回逐文件 `diffs`，fallback 写标记 `atomic:false` | patch/*, lib/values, lib/atomic-file |
+| src/agent/tools/apply_patch.ts | ?? patch ????async??review pending ? fail closed????????? `diffs`?? `unified`??? `applied.files[].diff`??fallback ??? `atomic:false` | patch/*, lib/values, lib/atomic-file |
 | src/agent/tools/{read_file,read_many,write_file,append_file,copy_file,delete_file,list_files,make_dir,move_path,grep,replace_in_file,stat_path,pwd}.ts | 单工具实现；声明 stateScope/revalidate；结构化错误码与 sideEffects；read_file offset/limit、read_many 预算、grep 过滤、replace 计数、copy overwrite、delete recursive、move EXDEV 回退；write/append/copy/replace 目标用 `sandboxWritePath`；write/copy/replace 经 `lib/atomic-file` 原子写（O_NOFOLLOW、FUSE 回读/backup、断开硬链接），append 保持 append 语义并拒绝 `nlink>1`；write/append/replace 返回 oldText/newText/changedStartLine/行数/diffTruncated | paths/readers/validate, lib/values |
 | src/agent/protocol.ts | `<fastcode_tool>`/DSML/Hermes-Qwen/Mistral/Kimi/Llama 解析与剥离；`isCallBoundary` 只检查 256 字符后缀；`detectedDialects`；`hasUnexecutedToolMarkup`（围栏外未执行标记）；formatToolResults；AGENT_SYSTEM_PROMPT；检测到标记但 0 调用返回 errors，strip 只删已识别的良构块 | 无 |
 | src/agent/protocol-mode.ts | legacy/native/auto 选择；能力缓存；400/422/501 + tool/function 结构降级判定 | model-meta |
@@ -62,7 +63,7 @@
 | src/agent/policy/permissions.ts | 声明式 shell 权限：全局 config + trusted 项目 `.fastcode/permissions{,.local}.json`；allow/deny glob（`/.../` 可选 regex，绝对 glob 不误判，regex 512 字符/嵌套量词上限），只作用于 Soft Gate；read/edit 尚未实现 | config/store, config/trust, lib/glob |
 | src/agent/check-loop.ts | post-write check：静态命令、`FASTCODE_CHECK_FILES`、超时进程树终止、redact、8KB 输出 | process-tree, child-env, tools/types |
 | src/agent/shell-ast.ts | 纯 JS `bash-parser` 第二意见；只做 hard 升级；`-c`/`find -exec`/`eval/source/.`/同段赋值 | bash-parser |
-| src/agent/approval.ts | ApprovalRequest/Decision、稳定 option id、默认选项、plain 编号解析；feedback 必须有用户文本，否则 fail-closed | 无 |
+| src/agent/approval.ts | ApprovalRequest/Decision?? `patchDiffs` ??? unified diff???? option id??????plain ?????feedback ?????????? fail-closed | ? |
 | src/agent/approval-store.ts | once/session/always 作用域；session 内存；always 绑 catalogHash | approval, trust, guards |
 | src/agent/approval-native.ts | termux-dialog sheet resolver；feedback 用 termux-dialog text 收集原因；code/index 严格映射，缺失/超时回落 | approval |
 | src/agent/approval-json.ts | NDJSON gate:ask/decision schema、`v:1` 版本与错 id/畸形校验（入站兼容旧 `version`）；feedback 要求 input 并回传用户文本 | approval |
@@ -190,7 +191,7 @@
 | scripts/install.sh / install-termux.sh | 软链 dist/cli.js 到 $PREFIX/bin |
 | scripts/build-portable.sh | release/ tar.gz/zip + npm pack + SHA256SUMS |
 | scripts/update-termux.sh | 目录/git/npm 更新 |
-| scripts/smoke-test.mjs | 回归（当前 PC 447 项 / POSIX 448；Termux 281 项为历史，待复跑） |
+| scripts/smoke-test.mjs | 回归（当前 PC 450 项 / POSIX 480；Termux 281 项为历史，待复跑） |
 | scripts/version-anchors.mjs | 只读扫描当前 package 版本的所有文本锚点；升级版本后用它核对 |
 | .github/workflows/release.yml | v* tag：构建资产、GitHub Release、npm publish |
 | .github/workflows/verify.yml | push/PR：Node 24、npm ci、npm run check、verify:artifacts、verify-gate、dist 无 modified/untracked |
@@ -199,7 +200,7 @@
 ## 测试与验证
 
 - `npm run typecheck` / `npm run lint` / `npm run build`
-- `node scripts/smoke-test.mjs`：当前 **447** 项（Windows；POSIX 448）行为断言（runner、预算、循环、工具契约、
+- `node scripts/smoke-test.mjs`：当前 **479** 项（Windows；POSIX 480）行为断言（runner、预算、循环、工具契约、
   retry/SSE、checkpoint/projection、compaction、patch、shell、native tools、命令、doctor、错误语义、方言）。
 - `node scripts/version-anchors.mjs`：列出当前版本的文本锚点；版本升级后核对是否只改允许位置。
 - Termux 真机额外验证：进程组 kill、/sdcard fsync、#50/#51/#54、TUI `/context`、`/edit`。

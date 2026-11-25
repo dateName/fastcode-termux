@@ -21,6 +21,8 @@ export const DEFAULT_CONFIG = {
     theme: DEFAULT_THEME,
     /** UI language: "en" (default) or "zh". Overridden by FASTCODE_LANG. */
     language: "en",
+    /** Persisted diff approval/output preview; defaults on. */
+    diffPreview: true,
     agentMode: true,
     systemPrompt: "You are FastCode, a fast, friendly coding assistant in a terminal UI. " +
         "Prefer concise responses. Use markdown when helpful (especially fenced " +
@@ -42,7 +44,7 @@ export const DEFAULT_CONFIG = {
     requestIdleTimeoutMs: 60_000,
     /** Thinking depth: auto = send nothing, provider default. */
     reasoningEffort: "auto",
-    /** Resident shell concurrency: safe default 2, max 6. `/threads` changes it. */
+    /** Resident shell concurrency: safe default 2, max 128. `/threads` changes it. */
     shellPoolSize: 2,
     /** Cached per-provider/model capabilities (native vs pseudo tool calling). */
     capabilities: {

@@ -24,6 +24,7 @@ import { Banner } from "./ui/Banner.js";
 import { Spinner } from "./ui/Spinner.js";
 import { StatusBar } from "./ui/StatusBar.js";
 import { MessageBubble } from "./ui/Message.js";
+import { DiffPreview, formatDiffPreview } from "./ui/DiffPreview.js";
 import { Prompt } from "./ui/Prompt.js";
 import { Picker } from "./ui/Picker.js";
 import { pickerWindowStart } from "./ui/picker-window.js";
@@ -38,6 +39,7 @@ import { shouldUseLiveStreamingUi, shouldUseStableTerminalUi } from "./lib/uiMod
 import { buildPluginsPrompt } from "./plugins/manager.js";
 import { buildSkillsPrompt } from "./skills/manager.js";
 import { createSessionLog, latestUnclosedSession, loggingEnabled, openSessionLog, readSession, staleSummaryRefs } from "./session/log.js";
+import { saveRawOutput } from "./session/raw-output.js";
 import { resumeSession } from "./session/projection.js";
 import { applyPlan, applyRevert } from "./session/actions.js";
 import { discoverInstructions, formatInstructionPrompt } from "./session/instructions.js";
@@ -93,7 +95,7 @@ function streamErrorMessage(message, provider, model) {
     }
     return `Error: ${message}`;
 }
-export const App = ({ initialPrompt, resume, ui = "tty" }) => {
+export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
     const { exit } = useApp();
     const startupRef = useRef(null);
     if (!startupRef.current) {
@@ -182,6 +184,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
     const [agentActivity, setAgentActivity] = useState(null);
     const idRef = useRef(startup.transcript.length);
     const abortRef = useRef(null);
+    const lastCompactionRef = useRef(null);
     const sawDeltaRef = useRef(false);
     const lastStreamFlushRef = useRef(0);
     const ctrlCRef = useRef(0);
@@ -209,7 +212,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             shutdownShells();
         }
         try {
-            sessionRef.current?.close?.({ reason: "exit" });
+            sessionRef.current?.close?.({ reason: "exit", ...(lastCompactionRef.current ? { compaction: lastCompactionRef.current } : {}) });
         }
         catch {
             // Session close is best effort during exit.
@@ -333,6 +336,29 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             { id: idRef.current, role: "system", content: text, markdown: true },
         ]);
     }, []);
+    const pushVisualSystem = useCallback((text) => {
+        idRef.current += 1;
+        setTranscript((prev) => [
+            ...prev,
+            { id: idRef.current, role: "system", content: text, markdown: true },
+        ]);
+    }, []);
+    const pushDiffVisual = useCallback((diffs) => {
+        idRef.current += 1;
+        setTranscript((prev) => [
+            ...prev,
+            { id: idRef.current, role: "diff", diffs },
+        ]);
+    }, []);
+    const longRunNoticeRef = useRef(false);
+    useEffect(() => {
+        if (!longRun || longRunNoticeRef.current)
+            return;
+        longRunNoticeRef.current = true;
+        pushSystem("[LONG-RUN] turn cap is 9999; anchor threshold is 30000 chars. Egress, trust, Hard Block, sandbox and approval stay enabled.");
+        if (!process.env["FASTCODE_TOKEN_BUDGET"] && !process.env["FASTCODE_COST_BUDGET_USD"])
+            pushSystem("[LONG-RUN] no token/cost budget is set; the run is uncapped until manually stopped.");
+    }, [longRun, pushSystem]);
     const pushUser = useCallback((text, recordFact = true) => {
         idRef.current += 1;
         sessionRef.current.append(recordFact
@@ -534,14 +560,17 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             return decisionForOption(option);
         };
         if (ui === "native" && process.platform !== "win32") {
-            const native = await nativeApproval(request, abortRef.current?.signal);
+            const native = await nativeApproval(request, abortRef.current?.signal, { diffPreview: config.diffPreview !== false });
             if (native)
                 return native;
         }
-        const preview = request.preview?.kind === "diff" && request.preview.text
-            ? `\n\n${request.preview.text.slice(0, 4000)}`
+        const patchPreview = config.diffPreview !== false ? formatDiffPreview(request.patchDiffs, 60) : "";
+        const preview = !patchPreview && request.preview?.kind === "diff" && request.preview.text
+            ? `\n\n${request.preview.text}`
             : "";
         pushSystem(`[approval] Tier ${request.tier ?? 2} · ${request.tool}\n${request.prompt ?? "Approval required"}${preview}`);
+        if (patchPreview)
+            pushDiffVisual(request.patchDiffs);
         if (ui === "json") {
             return { kind: "deny", reason: "JSON approval mode requires the headless protocol channel (not wired in this build)" };
         }
@@ -808,6 +837,8 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 appendCompactionFact(res.compacted);
             if (res?.cleared)
                 sessionRef.current.append({ type: "cleared" });
+            if (res?.compactionCleaned)
+                sessionRef.current.append({ type: "compaction_cleaned", refs: res.compactionCleaned.refs });
             if (typeof res?.revert === "number") {
                 const action = sessionRef.current ? applyRevert(sessionRef.current, res.revert) : undefined;
                 if (!action) {
@@ -931,7 +962,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         setBusy(true);
         let receivedDone = false;
         try {
-            const maxTurns = config.agentMode ? positiveInt(config.maxAgentTurns, 24) : 1;
+            const maxTurns = config.agentMode ? (longRun ? Math.max(9999, positiveInt(config.maxAgentTurns, 24)) : positiveInt(config.maxAgentTurns, 24)) : 1;
             const skillsBlock = buildSkillsPrompt(config.enabledSkills);
             const pluginsBlock = buildPluginsPrompt(config.enabledPlugins);
             const protocol = config.agentMode ? resolveToolProtocol(config, config.providerId, config.model) : "legacy";
@@ -940,7 +971,6 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
             const fullSystem = [config.systemPrompt, skillsBlock, pluginsBlock, instructionsBlock, agentBlock]
                 .filter((part) => part.trim())
                 .join("\n\n");
-            let compactionNotified = false;
             let lastRawFact = "";
             sawDeltaRef.current = false;
             for await (const ev of runAgent({
@@ -957,7 +987,8 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                 signal: ctrl.signal,
                 cwd: process.cwd(),
                 idleTimeoutMs: config.requestIdleTimeoutMs,
-                compaction: compactionConfigFromEnv(),
+                compaction: (() => { const value = compactionConfigFromEnv(); if (longRun)
+                    value.anchorChars = 30_000; return value; })(),
                 reasoningEffort: config.reasoningEffort,
                 protocol,
                 tools: protocol === "native" ? toolSchemas() : undefined,
@@ -1001,14 +1032,18 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                             beforeTokens: ev.beforeTokens,
                             afterTokens: ev.afterTokens,
                             droppedMessages: ev.droppedMessages,
+                            ...(ev.droppedFromSeq !== undefined ? { droppedFromSeq: ev.droppedFromSeq } : {}),
+                            ...(ev.droppedToSeq !== undefined ? { droppedToSeq: ev.droppedToSeq } : {}),
+                            ...(ev.droppedCount !== undefined ? { droppedCount: ev.droppedCount } : {}),
+                            ...(ev.droppedSeqUnmapped ? { droppedSeqUnmapped: true } : {}),
                             keepMessages: ev.keptMessages,
-                            reason: ev.reason === "heap" ? "heap" : "threshold",
+                            reason: ev.reason === "heap" ? "heap" : ev.reason === "anchor" ? "anchor" : "threshold",
                         });
-                        if (!compactionNotified) {
-                            compactionNotified = true;
-                            pushSystem(`[context compacted] ${ev.beforeTokens} → ${ev.afterTokens} tokens (${ev.reason}); recent turns kept.` +
-                                (ev.summaryFile ? `\nSummary: ${ev.summaryFile}` : ""));
-                        }
+                        if (ev.reason === "anchor")
+                            sessionRef.current?.checkpoint?.();
+                        lastCompactionRef.current = { source: ev.source, summaryRef: ev.summaryFile ?? null };
+                        pushSystem(`[context compacted] ${ev.beforeTokens} → ${ev.afterTokens} tokens (${ev.reason}); recent turns kept.` +
+                            (ev.summaryFile ? `\nSummary: ${ev.summaryFile}` : ""));
                         break;
                     case "assistant_raw":
                         lastRawFact = ev.text;
@@ -1029,6 +1064,9 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                         pushSystem(`Running tool: \`${ev.call.tool}\`\n\n\`\`\`json\n${JSON.stringify(ev.call, null, 2)}\n\`\`\``);
                         break;
                     case "tool_result": {
+                        const collection = ev.rawOutput && sessionRef.current?.file
+                            ? saveRawOutput(sessionRef.current.file, sessionRef.current.nextSeq(), ev.rawOutput)
+                            : undefined;
                         sessionRef.current.append({
                             type: "tool_result",
                             id: ev.id,
@@ -1055,24 +1093,26 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
                             ...(ev.diffs ? { diffs: ev.diffs } : {}),
                             ...(ev.atomic === false ? { atomic: false } : {}),
                             ...(ev.check ? { check: ev.check } : {}),
+                            ...(collection ? { collection } : {}),
                         });
                         const collapsed = stableUi && !expanded;
                         const body = collapsed ? collapseToolOutput(ev.output) : ev.output;
                         const hint = collapsed ? "\n\n_(output collapsed; /expand to show full output)_" : "";
-                        const clipDiff = (text) => {
-                            const value = String(text ?? "");
-                            return value.length > 2_000 ? value.slice(0, 2_000) + "\n[... diff text truncated ...]" : value;
-                        };
-                        const diffDetail = expanded && ev.diffs?.length
-                            ? ev.diffs.map((diff) => `### ${diff.path}\n- old:\n\`\`\`\n${clipDiff(diff.oldText)}\n\`\`\`\n+ new:\n\`\`\`\n${clipDiff(diff.newText)}\n\`\`\``).join("\n\n")
+                        const diffDetail = config.diffPreview !== false && ev.diffs?.length
+                            ? formatDiffPreview(ev.diffs.map((diff) => ({
+                                path: diff.path,
+                                unified: diff.unified ?? `--- a/${diff.path}\n+++ b/${diff.path}\n@@\n-${diff.oldText}\n+${diff.newText}`,
+                            })), 80)
                             : "";
-                        const diffInfo = ev.diffs?.length
-                            ? `\n\n_diff: ${ev.diffs.length} file(s)${diffDetail ? `\n\n${diffDetail}` : ""}_`
+                        const diffInfo = config.diffPreview !== false && ev.diffs?.length
+                            ? `\n\n_diff: ${ev.diffs.length} file(s)_`
                             : ev.oldText !== undefined && ev.newText !== undefined
                                 ? `\n\n_diff: line ${ev.changedStartLine ?? "?"} · ${ev.oldLineCount ?? "?"} → ${ev.newLineCount ?? "?"} line(s)${ev.diffTruncated ? " (truncated)" : ""}_`
                                 : "";
                         const atomicInfo = ev.atomic === false ? "\n\n_[atomic] rename unavailable; fallback copy used (best-effort)_" : "";
                         pushSystem(`Tool ${ev.ok ? "completed" : "failed"}: \`${ev.call.tool}\`\n\n\`\`\`\n${body}\n\`\`\`${hint}${diffInfo}${atomicInfo}`);
+                        if (diffDetail)
+                            pushDiffVisual(ev.diffs);
                         break;
                     }
                     case "usage":
@@ -1233,7 +1273,7 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
     useEffect(() => () => {
         shutdownShells();
         if (sessionRef.current)
-            sessionRef.current.close();
+            sessionRef.current.close(lastCompactionRef.current ? { compaction: lastCompactionRef.current } : {});
     }, []);
     if (config.agentMode && !trusted) {
         const decide = (allow) => {
@@ -1248,5 +1288,5 @@ export const App = ({ initialPrompt, resume, ui = "tty" }) => {
         };
         return _jsx(TrustGate, { theme: theme, cwd: process.cwd(), onDecision: decide });
     }
-    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingTail(streamingText, 6), markdown: false, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamPhase === "streaming" ? "Streaming" : streamPhase === "tool" ? "Waiting for tool" : "Thinking"), stable: stableUi }) })) : null, picker ? _jsx(Picker, { theme: theme, title: picker.title, items: picker.items, index: pickerIndex, current: picker.current }) : _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: pendingLogin ? handleWizardSubmit : handleSubmit, disabled: false, placeholder: promptPlaceholder, mask: promptMask }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length, reasoningEffort: config.reasoningEffort }), _jsxs(Text, { color: theme.muted, children: [COMMANDS.length, " commands \u00B7 ", config.enabledSkills.length, " skill(s) active"] })] })] }));
+    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: entry.role === "diff" ? _jsx(DiffPreview, { diffs: entry.diffs, theme }) : _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingTail(streamingText, 6), markdown: false, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamPhase === "streaming" ? "Streaming" : streamPhase === "tool" ? "Waiting for tool" : "Thinking"), stable: stableUi }) })) : null, picker ? _jsx(Picker, { theme: theme, title: picker.title, items: picker.items, index: pickerIndex, current: picker.current }) : _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: pendingLogin ? handleWizardSubmit : handleSubmit, disabled: false, placeholder: promptPlaceholder, mask: promptMask }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, longRun, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length, reasoningEffort: config.reasoningEffort }), _jsxs(Text, { color: theme.muted, children: [COMMANDS.length, " commands \u00B7 ", config.enabledSkills.length, " skill(s) active"] })] })] }));
 };

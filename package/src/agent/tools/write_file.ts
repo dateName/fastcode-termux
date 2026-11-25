@@ -3,6 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { atomicFile } from "../../lib/atomic-file.js";
 import { buildStructuredDiff, structuredDiffFields } from "../../lib/values.js";
+import { countChangedLines, unifiedDiff } from "../../lib/diff.js";
+import { approveLargeEdit } from "./edit-approval.js";
 import { assertNotSymlink, existingMode, sandboxWritePath } from "./paths.js";
 import { readTextFileResult } from "./readers.js";
 import type { Tool } from "./types.js";
@@ -11,6 +13,7 @@ import { invalid, prepareWritePath, requiredString } from "./validate.js";
 export const writeFileTool: Tool = {
     name: "write_file",
     requiresTrust: true,
+    approvalHints: { mayRequireApproval: true },
     stateScope: "turn",
     revalidate: ["trust", "sandboxRoots"],
     prepare(call, ctx) {
@@ -42,7 +45,11 @@ export const writeFileTool: Tool = {
             }
         }
         const diff = buildStructuredDiff(beforeText, content);
+        const unified = unifiedDiff(file, file, beforeText, content, existed ? "update" : "add");
         diff.truncated = diff.truncated || beforeTruncated;
+        const approvalDenied = await approveLargeEdit("write_file", call, ctx, file, unified, countChangedLines(beforeText, content));
+        if (approvalDenied)
+            return approvalDenied;
         const mode = existed ? await existingMode(file) : 0o666;
         await mkdir(dirname(file), { recursive: true });
         assertNotSymlink(file);
@@ -53,6 +60,7 @@ export const writeFileTool: Tool = {
             sideEffects: existed ? { touched: [file] } : { created: [file] },
             ...(written.atomic === false ? { atomic: false, hint: "atomic rename unavailable; fallback copy used" } : {}),
             ...structuredDiffFields(diff),
+            diffs: [{ path: file, unified, ...diff }],
         };
     },
 };

@@ -1,3 +1,4 @@
+import { createReadStream, lstatSync } from "node:fs";
 import { chmod, copyFile, lstat, open, rename, rm, stat } from "node:fs/promises";
 import type { Readable } from "node:stream";
 export declare const TEMP_WRITE_FLAGS: number;
@@ -21,6 +22,8 @@ export interface AtomicIo {
     rm: typeof rm;
     lstat: typeof lstat;
     stat: typeof stat;
+    createReadStream: typeof createReadStream;
+    lstatSync: typeof lstatSync;
 }
 export interface AtomicTemp {
     readonly path: string;

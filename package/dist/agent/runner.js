@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { estMessagesTokens, estTokens, getModelMeta } from "../lib/model-meta.js";
+import { estMessagesTokens, estTokens, estimateCostUsd, getModelMeta } from "../lib/model-meta.js";
 import { parseJsonObjectWithRepair } from "../lib/values.js";
 import { compactMessages, DEFAULT_COMPACTION_CONFIG } from "./compaction.js";
 import { isLoopExempt, isReadOnlyToolCall, toolCallFingerprint } from "./guards.js";
@@ -87,6 +87,9 @@ export async function* runAgent(options) {
     let naturalFinish = false;
     let toolCallSeq = 0;
     let protocol = options.protocol ?? "legacy";
+    let anchorChars = 0;
+    let lastAnchorTurn = -1;
+    let forceAnchorPending = options.forceAnchor === true || ["1", "true", "yes", "on"].includes((process.env["FASTCODE_FORCE_ANCHOR"] ?? "").trim().toLowerCase());
     let fellBack = false;
     let pairRetried = false;
     let activeSystem = options.system;
@@ -108,14 +111,24 @@ export async function* runAgent(options) {
         if (paired.repaired)
             history = paired.messages;
         const contextWindow = options.contextWindow ?? getModelMeta(provider.id, model).contextWindow;
+        const anchorLimit = Math.max(0, Math.floor(options.compaction?.anchorChars ?? 0));
+        const anchorCooldown = Math.max(0, Math.floor(options.compaction?.anchorCooldownTurns ?? 3));
+        const anchorDue = (forceAnchorPending || (anchorLimit > 0 && anchorChars >= anchorLimit)) && (lastAnchorTurn < 0 || turn - lastAnchorTurn >= anchorCooldown);
         const compacted = compactMessages(history, options.compaction ?? DEFAULT_COMPACTION_CONFIG, {
             contextWindow,
             providerId: provider.id,
             model,
             serverOpaqueState: options.serverOpaqueState,
+            force: anchorDue,
+            ...(anchorDue ? { forceReason: "anchor" } : {}),
         });
         if (compacted.compacted) {
             history = compacted.messages;
+            if (compacted.reason === "anchor") {
+                anchorChars = 0;
+                lastAnchorTurn = turn;
+                forceAnchorPending = false;
+            }
             yield {
                 type: "compaction",
                 beforeChars: compacted.beforeChars,
@@ -123,6 +136,10 @@ export async function* runAgent(options) {
                 beforeTokens: compacted.beforeTokens,
                 afterTokens: compacted.afterTokens,
                 droppedMessages: compacted.droppedMessages,
+                ...(compacted.droppedFromSeq !== undefined ? { droppedFromSeq: compacted.droppedFromSeq } : {}),
+                ...(compacted.droppedToSeq !== undefined ? { droppedToSeq: compacted.droppedToSeq } : {}),
+                ...(compacted.droppedCount !== undefined ? { droppedCount: compacted.droppedCount } : {}),
+                ...(compacted.droppedSeqUnmapped ? { droppedSeqUnmapped: true } : {}),
                 keptMessages: compacted.keptMessages,
                 reason: compacted.reason ?? "threshold",
                 source: compacted.source === "server" ? "server" : "local",
@@ -205,6 +222,11 @@ export async function* runAgent(options) {
             yield { type: "notice", text: warning };
         if (streamed.usage) {
             consumedInput += streamed.usage.inputTokens ?? promptTokens;
+            if (streamed.usage.costUsd === undefined) {
+                const estimated = estimateCostUsd(streamed.usage.inputTokens ?? promptTokens, streamed.usage.outputTokens ?? 0, getModelMeta(provider.id, model).pricing);
+                if (estimated !== undefined)
+                    streamed.usage.costUsd = estimated;
+            }
             spentCost += streamed.usage.costUsd ?? 0;
             yield { type: "usage", usage: streamed.usage };
         }
@@ -238,6 +260,7 @@ export async function* runAgent(options) {
             yield { type: "assistant_raw", text: streamed.text, toolCalls: nativeCalls, ...(streamed.reasoning ? { reasoning: streamed.reasoning } : {}) };
             if (visibleText)
                 yield { type: "assistant_text", text: visibleText };
+            anchorChars += visibleText.length;
             history = [...history, { role: "assistant", content: streamed.text, toolCalls: nativeCalls }];
             const nativeIds = nativeCalls.map((native) => native.id || `tc_${++toolCallSeq}`);
             const executed = new Set();
@@ -297,14 +320,18 @@ export async function* runAgent(options) {
                 }
                 yield { type: "tool_call", id, call, native: true };
                 const result = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
+                const rawOutput = String(result.output ?? "");
                 if (typeof result.output === "string")
                     result.output = boundToolMessage(result.output);
                 trackSideEffects(activeFiles, result.sideEffects);
                 if (result.egress)
                     yield { type: "egress_denied", ...result.egress };
-                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result) };
+                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result), ...(rawOutput.length > 30_000 ? { rawOutput } : {}) };
+                anchorChars += String(result.output ?? "").length;
                 history = [...history, { role: "tool", toolCallId: id, content: String(result.output ?? "") }];
                 executed.add(id);
+                consecutiveProtocolErrors = 0;
+                lastProtocolError = "";
             }
             // Aborted or loop-stopped mid-batch: every tool_call_id still needs
             // a matching tool message, or the next request is invalid.
@@ -421,13 +448,15 @@ export async function* runAgent(options) {
             const id = `tc_${++toolCallSeq}`;
             yield { type: "tool_call", id, call };
             const result = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
+            const rawOutput = String(result.output ?? "");
             if (typeof result.output === "string")
                 result.output = boundToolMessage(result.output);
             results.push({ call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects });
             trackSideEffects(activeFiles, result.sideEffects);
             if (result.egress)
                 yield { type: "egress_denied", ...result.egress };
-            yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result) };
+            yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result), ...(rawOutput.length > 30_000 ? { rawOutput } : {}) };
+            anchorChars += String(result.output ?? "").length;
         }
         if (results.length > 0)
             history = [...history, { role: "user", content: formatToolResults(results) }];

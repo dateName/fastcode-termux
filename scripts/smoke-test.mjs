@@ -875,11 +875,14 @@ ok("atomic-file fallback succeeds and marks atomic:false",
     JSON.stringify(fallbackWrite));
 const restoreTarget = join(atomicRoot, "restore.txt");
 writeFileSync(restoreTarget, "before", "utf8");
+let restoreOpenFailures = 1;
 const restoreAtomic = atomicModule.createAtomicFile({
     rename: async () => { throw Object.assign(new Error("cross-device rename"), { code: "EXDEV" }); },
     open: async (path, flags, mode) => {
-        if (path === restoreTarget)
+        if (path === restoreTarget && restoreOpenFailures > 0) {
+            restoreOpenFailures -= 1;
             throw Object.assign(new Error("simulated target write failure"), { code: "EIO" });
+        }
         return fsOpen(path, flags, mode);
     },
 });
@@ -892,8 +895,10 @@ catch (err) {
 }
 ok("atomic-file restores the original bytes after fallback failure",
     restoreError && readFileSync(restoreTarget, "utf8") === "before" &&
-        restoreAtomic.backups(atomicRoot).length === 0,
+        restoreAtomic.backups(atomicRoot).length === 1,
     JSON.stringify({ message: restoreError?.message, backups: restoreAtomic.backups(atomicRoot) }));
+for (const backup of restoreAtomic.backups(atomicRoot))
+    rmSync(backup, { force: true });
 const keepTarget = join(atomicRoot, "keep.txt");
 writeFileSync(keepTarget, "keep-before", "utf8");
 const keepAtomic = atomicModule.createAtomicFile({
@@ -1030,12 +1035,23 @@ rmSync(extraDir, { recursive: true, force: true });
 const store = await load("config/store.js");
 const paths = await load("config/paths.js");
 const cfg = store.loadConfig();
-store.saveConfig({ ...cfg, providerId: "deepseek", model: "deepseek-chat" });
+ok("diff preview defaults on", cfg.diffPreview === true, JSON.stringify(cfg.diffPreview));
+store.saveConfig({ ...cfg, diffPreview: false });
+ok("diff preview persists as a config flag", store.loadConfig().diffPreview === false);
+store.saveConfig({ ...cfg, providerId: "deepseek", model: "deepseek-chat", diffPreview: true });
 ok("saveConfig writes config.json", existsSync(paths.getPaths().config));
 ok("config and keys stay in separate files", !existsSync(paths.getPaths().auth));
 
 // API keys are provider-scoped: every model of a provider reuses one key.
 store.setCredential("deepseek", "deepseek-chat", "sk-1234567890abcd");
+const configExport = await load("config/export.js");
+const redactedExport = configExport.buildConfigExport(paths.getPaths());
+const keyedExport = configExport.buildConfigExport(paths.getPaths(), { withKeys: true });
+ok("P4 config export excludes raw outputs and redacts keys by default",
+    redactedExport.excluded.includes("sessions/outputs/") &&
+        redactedExport.auth?.keys?.deepseek?.key === "[REDACTED]" &&
+        keyedExport.auth?.keys?.deepseek?.key !== "[REDACTED]",
+    JSON.stringify({ excluded: redactedExport.excluded, redacted: redactedExport.auth?.keys?.deepseek?.key }));
 const authFile = join(process.env.FASTCODE_HOME, "auth.json");
 const authFileMode = statSync(authFile).mode & 0o777;
 ok("B2-12 auth.json is written with 0600 permissions",
@@ -2085,6 +2101,12 @@ ok("absolute path globs are not mistaken for regexes",
         permissionsModule.evaluateShellPermission("/usr/bin/git status", { shell: { allow: ["/usr/bin/git*"] } }) === "allow" &&
         permissionsModule.evaluateShellPermission("git status", { shell: { allow: ["/git status/"] } }) === "allow",
     "absolute glob or regex permission mismatch");
+ok("permission glob * does not cross directories",
+    permissionsModule.evaluateShellPermission("/tmp/a/b", { shell: { allow: ["/tmp/*"] } }) === "none");
+ok("permission regex is anchored to the whole command",
+    permissionsModule.evaluateShellPermission("git status && rm -rf /", { shell: { allow: ["/git status/"] } }) === "none");
+ok("permission glob rejects three consecutive stars",
+    permissionsModule.evaluateShellPermission("echo hi", { shell: { allow: ["echo ***"] } }) === "none");
 const allowedVerdict = guards.evaluateShellCommand("git reset --hard", {
     cwd: process.cwd(),
     permissions: { shell: { allow: ["git reset*"] } },
@@ -2129,6 +2151,11 @@ const trustedPolicy = permissionsModule.loadPermissionPolicy(untrustedPermission
 ok("trusted project permission files apply",
     permissionsModule.evaluateShellPermission("git reset --hard", trustedPolicy) === "allow",
     JSON.stringify(trustedPolicy));
+writeFileSync(join(untrustedPermissionRoot, ".fastcode", "permissions.json"), JSON.stringify({ shell: { allow: ["/.*/", "**"] } }), "utf8");
+const broadPolicy = permissionsModule.loadPermissionPolicy(untrustedPermissionRoot);
+ok("trusted project catch-all allow is dropped",
+    permissionsModule.evaluateShellPermission("rm -rf ./build", broadPolicy) === "none",
+    JSON.stringify(broadPolicy));
 trust.untrustProject(untrustedPermissionRoot);
 rmSync(untrustedPermissionRoot, { recursive: true, force: true });
 
@@ -2198,6 +2225,22 @@ async function collect(gen) {
         events.push(event);
     return events;
 }
+const pricedProvider = scriptedProvider([
+    { text: '<fastcode_tool>{"tool":"pwd"}</fastcode_tool>', usage: { inputTokens: 1000, outputTokens: 1000 } },
+    { text: "second", usage: { inputTokens: 1000, outputTokens: 1000 } },
+]);
+pricedProvider.id = "deepseek";
+const pricedRun = await collect(runner.runAgent({
+    provider: pricedProvider,
+    model: "gpt-4o",
+    prompt: "cost",
+    maxTurns: 3,
+    cwd: stage0,
+    costBudgetUsd: 0.0001,
+}));
+ok("P6 cost cap falls back to model-meta pricing",
+    pricedRun.some((event) => event.type === "error" && event.kind === "cost_budget"),
+    JSON.stringify(pricedRun.filter((event) => event.type === "error")));
 const runnerSource = readFileSync(join(distDir, "agent", "runner.js"), "utf8");
 ok("runner has no React dependency", !/["']react(-|\/|["'])/.test(runnerSource));
 
@@ -2751,6 +2794,45 @@ const exampleWrite = await agentTools.runAgentTool({ tool: "write_file", path: "
 ok("egress allows the .env.example whitelist", exampleWrite.ok === true && !exampleWrite.egress, JSON.stringify(exampleWrite));
 
 const markerWrite = await agentTools.runAgentTool({ tool: "write_file", path: "marker.txt", content: "AKIAIOSFODNN7EXAMPLE" }, stage0);
+const rawOutput = await load("session/raw-output.js");
+const rawSessionFile = join(stage0, "raw-session.jsonl");
+writeFileSync(rawSessionFile, "", "utf8");
+const rawSaved = rawOutput.saveRawOutput(rawSessionFile, 1, "sk-" + "a".repeat(32) + "\n" + "x".repeat(30_000));
+const rawFile = join(stage0, "outputs", "raw-session", "1.txt");
+ok("P4 raw output is saved, redacted and referenced by seq",
+    rawSaved.rawRef === "outputs/raw-session/1.txt" && existsSync(rawFile) &&
+        readFileSync(rawFile, "utf8").includes("[REDACTED]") &&
+        !readFileSync(rawFile, "utf8").includes("sk-" + "a".repeat(32)) &&
+        existsSync(join(stage0, "outputs", "raw-session", "1.json")),
+    JSON.stringify(rawSaved));
+ok("P4 small tool output does not create a raw file",
+    rawOutput.saveRawOutput(rawSessionFile, 2, "short").rawRef === undefined &&
+        !existsSync(join(stage0, "outputs", "raw-session", "2.txt")));
+const factsLog = slog.createSessionLog({ providerId: "deepseek" });
+const factsRaw = rawOutput.saveRawOutput(factsLog.file, 2, "FULL-" + "z".repeat(30_000));
+factsLog.append({ type: "tool_result", id: "raw-1", tool: "shell", ok: true, output: "truncated", collection: factsRaw });
+const factsCommand = await load("commands/facts.js");
+const factsShown = factsCommand.factsCommand.run({ args: ["show", "2"], raw: "/facts show 2" });
+ok("P4 /facts show returns full raw output",
+    typeof factsShown.message === "string" && factsShown.message.includes("FULL-") &&
+        factsShown.message.includes("z".repeat(30_000)) && factsShown.message.includes("rawRef=outputs/"),
+    String(factsShown.message).slice(0, 200));
+const factsProvenance = factsCommand.factsCommand.run({ args: ["provenance"], raw: "/facts provenance" });
+ok("P4 /facts provenance reports status and raw facts",
+    typeof factsProvenance.message === "string" && factsProvenance.message.includes("projectionStatus") &&
+        factsProvenance.message.includes("rawFacts") && factsProvenance.message.includes("lastFactSeq"),
+    String(factsProvenance.message).slice(0, 200));
+const rawCleanup = rawOutput.removeRawOutputsForSession(rawSessionFile);
+ok("P4 raw outputs are deleted with the session", rawCleanup === undefined && !existsSync(join(stage0, "outputs", "raw-session")));
+const sensitive = await load("agent/policy/sensitive.js");
+const sensitiveHits = sensitive.detect("OPENAI=sk-" + "a".repeat(32) + "\nAuthorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature\nPASSWORD=hunter2\npostgres://user:pass@host/db");
+ok("P4 sensitive detection covers keys, assignments and connection strings",
+    sensitive.RULESET_VERSION === "1" &&
+        sensitiveHits.some((hit) => hit.category === "provider_key") &&
+        sensitiveHits.some((hit) => hit.ruleId === "secret-assignment") &&
+        sensitiveHits.some((hit) => hit.category === "connection_string") &&
+        sensitiveHits.every((hit) => hit.start >= 0 && hit.end > hit.start),
+    JSON.stringify(sensitiveHits));
 ok("egress block denies a content marker before writing",
     markerWrite.ok === false && markerWrite.code === "EGRESS_DENY" && !existsSync(join(stage0, "marker.txt")),
     JSON.stringify(markerWrite));
@@ -3001,6 +3083,13 @@ ok("projection includes the session plan as a protected system message",
     planProjection.messages.some((message) => message.role === "system" &&
         message.content.startsWith("[plan]") && message.content.includes("ship it") && message.content.includes("[x] two")),
     JSON.stringify(planProjection.messages.filter((message) => message.role === "system")));
+const seqProjection = projectionModule.factsToMessages([
+    { seq: 5, type: "user", content: "first" },
+    { seq: 6, type: "assistant_raw", content: "second" },
+]);
+ok("P4-2 factsToMessages keeps fact seq",
+    seqProjection.length === 2 && seqProjection[0].seq === 5 && seqProjection[1].seq === 6,
+    JSON.stringify(seqProjection));
 const egressProjection = projectionModule.factsToMessages([
     { type: "user", content: "hi" },
     { type: "egress_denied", outlet: "write_file.path", target: ".env", rule: "sensitive_path", mode: "audit", wouldBlock: true, code: "EGRESS_DENY", reason: "test egress" },
@@ -3036,6 +3125,40 @@ const oldSessionResume = projectionModule.resumeSession(oldSession.file, stage0)
 ok("old JSONL without new fields resumes unchanged",
     oldSessionResume.messages[0]?.content === "old question" && oldSessionResume.messages.at(-1)?.content === "old answer",
     JSON.stringify(oldSessionResume.messages));
+const c3Log = slog.createSessionLog({ providerId: "deepseek", model: "deepseek-v4-pro", cwd: stage0 });
+c3Log.append({ type: "user", content: "c3" });
+c3Log.close({ reason: "exit", compaction: { source: "local", summaryRef: "summary-999-c3.md", pending: false } });
+const c3End = slog.readSession(c3Log.file).filter((fact) => fact.type === "session_end").at(-1);
+ok("P7 session_end carries the latest compaction ref",
+    c3End?.compaction?.source === "local" && c3End?.compaction?.summaryRef === "summary-999-c3.md",
+    JSON.stringify(c3End));
+const p7Old = join(paths.getPaths().sessions, "summary-111111-p7-old.md");
+const p7New = join(paths.getPaths().sessions, "summary-222222-p7-new.md");
+writeFileSync(p7Old, "old", "utf8");
+writeFileSync(p7New, "new", "utf8");
+const p7Log = slog.createSessionLog({ providerId: "deepseek", model: "deepseek-v4-pro", cwd: stage0 });
+p7Log.append({ type: "compacted", source: "local", summaryRef: p7Old, keepMessages: 1 });
+p7Log.append({ type: "compacted", source: "local", summaryRef: p7New, keepMessages: 1 });
+const p7Stale = slog.staleSummaryRefs(p7Log.file);
+for (const ref of p7Stale)
+    rmSync(ref, { force: true });
+const cleanRef = join(paths.getPaths().sessions, "summary-777777-p9-clean.md");
+writeFileSync(cleanRef, "clean", "utf8");
+const cleanLog = slog.createSessionLog({ providerId: "deepseek", model: "deepseek-v4-pro", cwd: stage0 });
+cleanLog.append({ type: "compacted", source: "local", summaryRef: cleanRef, keepMessages: 1, droppedFromSeq: 2, droppedToSeq: 3, droppedCount: 2 });
+const cleanResult = (await load("commands/compact.js")).compactCommand.run({ args: ["clean", "2"], state: { history: [] }, actions: {} });
+ok("P9 /compact clean removes summary and returns fact",
+    cleanResult.compactionCleaned?.refs?.[0] === cleanRef && !existsSync(cleanRef),
+    JSON.stringify(cleanResult));
+const compactListModule = await load("commands/compact.js");
+const compactList = compactListModule.compactCommand.run({ args: ["list"], state: { history: [] }, actions: {} });
+ok("P9 /compact list reads compacted facts",
+    typeof compactList.message === "string" && compactList.message.includes("Compacted facts"),
+    String(compactList.message).slice(0, 200));
+ok("P7 stale summary keeps only the latest ref",
+    p7Stale.includes(p7Old) && !p7Stale.includes(p7New) && !existsSync(p7Old) && existsSync(p7New),
+    JSON.stringify(p7Stale));
+rmSync(p7New, { force: true });
 ok("session close writes a projection manifest", Boolean(firstResume.projection.manifest?.contentHash) &&
     /^[0-9a-f]{64}$/.test(firstResume.projection.manifest.contentHash), JSON.stringify(firstResume.projection.manifest));
 writeFileSync(factLog.file, readFileSync(factLog.file, "utf8") +
@@ -3177,6 +3300,29 @@ const compactedResult = compactionModule.compactMessages(longHistory, { ...compa
 });
 ok("#44 local compaction drops at least 60% of estimated tokens", compactedResult.compacted && compactedResult.afterTokens < beforeCompactTokens * 0.4,
     `${beforeCompactTokens} -> ${compactedResult.afterTokens}`);
+const anchorCompacted = compactionModule.compactMessages(longHistory, { ...compactionModule.DEFAULT_COMPACTION_CONFIG }, {
+    contextWindow: 32768,
+    providerId: "deepseek",
+    model: "deepseek-v4-pro",
+    force: true,
+    forceReason: "anchor",
+});
+ok("P5-1 force anchor compaction reports reason=anchor",
+    anchorCompacted.compacted === true && anchorCompacted.reason === "anchor" &&
+        typeof anchorCompacted.summary === "string" && anchorCompacted.summary.length > 0,
+    JSON.stringify({ compacted: anchorCompacted.compacted, reason: anchorCompacted.reason }));
+const forcedAnchorRun = await collect(runner.runAgent({
+    provider: scriptedProvider([{ text: "anchor done" }]),
+    model: "mock",
+    messages: longHistory,
+    prompt: "continue",
+    maxTurns: 1,
+    cwd: stage0,
+    forceAnchor: true,
+}));
+ok("P5-1 external forceAnchor emits an anchor compaction",
+    forcedAnchorRun.some((event) => event.type === "compaction" && event.reason === "anchor"),
+    JSON.stringify(forcedAnchorRun.filter((event) => event.type === "compaction")));
 const compactedText = compactedResult.messages.map((message) => message.content).join("\n");
 ok("#44 summary keeps early file names", compactedResult.summary.includes("src/file-0.ts") && compactedText.includes("src/early-notes.md"), compactedResult.summary.slice(0, 200));
 ok("summary prioritizes notes/outcomes/files before requests/actions",
@@ -3186,6 +3332,12 @@ ok("summary prioritizes notes/outcomes/files before requests/actions",
     compactedResult.summary.slice(0, 300));
 ok("#44 summary is under 1500 tokens and written to disk", modelMeta.estTokens(compactedResult.summary, { providerId: "deepseek", model: "deepseek-v4-pro" }) < 1500 &&
     Boolean(compactedResult.summaryFile) && existsSync(compactedResult.summaryFile));
+const seqSummary = compactionModule.buildSummary(
+    [{ role: "user", content: "indexed request", seq: 7 }, { role: "assistant", content: "ok", seq: 8 }],
+    compactionModule.DEFAULT_COMPACTION_CONFIG,
+    { providerId: "deepseek", model: "deepseek-v4-pro" },
+);
+ok("P4 S index carries fact seq", seqSummary.includes("[seq=7]"), seqSummary.slice(0, 200));
 const heapHistory = Array.from({ length: 20 }, (_value, index) => ({ role: index % 2 === 0 ? "user" : "assistant", content: `turn ${index}` }));
 const heapCompacted = compactionModule.compactMessages(heapHistory, { ...compactionModule.DEFAULT_COMPACTION_CONFIG, heapLimitMb: 0.000001 }, {
     contextWindow: 1000000,
@@ -3288,6 +3440,29 @@ ok("#45 patch supports Add/Update/Delete/Move", patched45.ok === true &&
     patched45.diffs?.length === 4 && patched45.diffs.some((diff) => diff.path.endsWith("up.txt") && diff.oldText === "old" + LF && diff.newText === "new" + LF),
     patched45.output);
 ok("FC-057 patch returns a per-file diff", patched45.output.includes("--- a/up.txt") && patched45.output.includes("+++ b/up.txt") && patched45.output.includes("@@"));
+const previewWrite = await agentTools.runAgentTool({ tool: "write_file", path: "p3-preview.txt", content: "one\ntwo\n" }, stage0);
+const previewAppend = await agentTools.runAgentTool({ tool: "append_file", path: "p3-preview.txt", content: "three\n" }, stage0);
+const previewReplace = await agentTools.runAgentTool({ tool: "replace_in_file", path: "p3-preview.txt", find: "two", replace: "TWO" }, stage0);
+ok("P3-6 write/append/replace expose unified diffs",
+    /^\+one/m.test(previewWrite.diffs?.[0]?.unified ?? "") &&
+        /^\+three/m.test(previewAppend.diffs?.[0]?.unified ?? "") &&
+        /^-two/m.test(previewReplace.diffs?.[0]?.unified ?? "") &&
+        /^\+TWO/m.test(previewReplace.diffs?.[0]?.unified ?? ""),
+    JSON.stringify({ write: previewWrite.diffs, append: previewAppend.diffs, replace: previewReplace.diffs }));
+const largeWriteBody = Array.from({ length: 205 }, (_value, index) => "line " + index).join(LF) + LF;
+const largeWriteDenied = await agentTools.runAgentTool({ tool: "write_file", path: "p3-large-write.txt", content: largeWriteBody }, stage0);
+ok("P3-1 large write requires approval",
+    largeWriteDenied.ok === false && largeWriteDenied.code === "APPROVAL_DENY" && !existsSync(join(stage0, "p3-large-write.txt")),
+    JSON.stringify(largeWriteDenied));
+const largeWriteAllowed = await agentTools.runAgentTool({ tool: "write_file", path: "p3-large-write.txt", content: largeWriteBody }, stage0, {
+    requestApproval: async (request) => ({
+        kind: request.patchDiffs?.[0]?.unified.includes("@@") ? "allow" : "deny",
+        scope: "once",
+    }),
+});
+ok("P3-1 large write approval allows the write",
+    largeWriteAllowed.ok === true && existsSync(join(stage0, "p3-large-write.txt")),
+    JSON.stringify(largeWriteAllowed));
 const sandboxPatch = ["*** Begin Patch", "*** Add File: ../outside-patch.txt", "+x", "*** End Patch", ""].join(LF);
 const sandboxPatchDenied = await agentTools.runAgentTool({ tool: "apply_patch", patch: sandboxPatch }, stage0);
 ok("apply_patch reports SANDBOX_DENY for an escaped target",
@@ -3306,9 +3481,11 @@ ok("large patch approval deny writes nothing",
     bigPatchDenyCalls === 1 && bigPatchDenied.ok === false && !existsSync(join(stage0, "big-approved.txt")),
     bigPatchDenied.output);
 let bigPatchAllowCalls = 0;
+let bigPatchRequest;
 const bigPatchAllowed = await agentTools.runAgentTool({ tool: "apply_patch", patch: bigPatch }, stage0, {
     requestApproval: async (request) => {
         bigPatchAllowCalls += 1;
+        bigPatchRequest = request;
         return {
             kind: request.options.some((option) => option.kind === "allow") ? "allow" : "deny",
             scope: "once",
@@ -3318,6 +3495,26 @@ const bigPatchAllowed = await agentTools.runAgentTool({ tool: "apply_patch", pat
 ok("large patch approval allow applies the patch",
     bigPatchAllowCalls === 1 && bigPatchAllowed.ok === true && existsSync(join(stage0, "big-approved.txt")),
     bigPatchAllowed.output);
+ok("D1 approval carries plan.files[].diff as patchDiffs",
+    bigPatchRequest?.patchDiffs?.length === 1 &&
+        /^--- /m.test(bigPatchRequest.patchDiffs[0].unified) &&
+        /^\+\+\+ /m.test(bigPatchRequest.patchDiffs[0].unified) &&
+        /^@@/m.test(bigPatchRequest.patchDiffs[0].unified) &&
+        /^\+line 204$/m.test(bigPatchRequest.patchDiffs[0].unified),
+    JSON.stringify(bigPatchRequest?.patchDiffs));
+const bigPatchAsk = approvalJson.encodeGateAsk(bigPatchRequest);
+ok("D1 gate:ask includes real diffs and added/removed stats",
+    bigPatchAsk.diffs?.[0]?.unified.includes("@@") &&
+        bigPatchAsk.diffstat.files === 1 && bigPatchAsk.diffstat.added === 205 && bigPatchAsk.diffstat.removed === 0,
+    JSON.stringify(bigPatchAsk.diffstat));
+const hiddenPatchAsk = approvalJson.encodeGateAsk(bigPatchRequest, { diffPreview: false });
+ok("diff preview config can hide gate diffs",
+    hiddenPatchAsk.diffs === undefined,
+    JSON.stringify(hiddenPatchAsk));
+ok("D1 execution diffs reuse the applied unified diff",
+    bigPatchAllowed.diffs?.[0]?.unified === bigPatchRequest.patchDiffs[0].unified &&
+        bigPatchAllowed.diffs[0].unified.includes("@@"),
+    JSON.stringify(bigPatchAllowed.diffs));
 
 writeFileSync(join(stage0, "multi.txt"), "a" + LF + "b" + LF + "c" + LF + "d" + LF + "e" + LF, "utf8");
 const patch46 = `*** Begin Patch
@@ -4095,10 +4292,21 @@ const repairedScalars = valuesModule.parseJsonObjectWithRepair('{"timeoutMs":"50
 ok("[1.3] known numeric/boolean strings are coerced",
     repairedScalars.value?.timeoutMs === 5000 && repairedScalars.value?.overwrite === true, JSON.stringify(repairedScalars));
 const structuredDiff = valuesModule.buildStructuredDiff("a\nb\nc", "a\nB\nc");
-ok("[2.4] structured diff anchors the first changed line",
-    structuredDiff.changedStartLine === 2 && structuredDiff.oldLineCount === 3 &&
+ok("[2.4] structured diff anchors the changed hunk",
+    structuredDiff.changedStartLine === 1 && structuredDiff.oldLineCount === 3 &&
         structuredDiff.newLineCount === 3 && structuredDiff.oldText === "a\nb\nc" &&
         structuredDiff.newText === "a\nB\nc", JSON.stringify(structuredDiff));
+const diffModule = await load("lib/diff.js");
+const lineDiffOld = Array.from({ length: 400 }, (_value, index) => "line " + (index + 1)).join("\n") + "\n";
+const lineDiffNew = lineDiffOld.replace("line 10\n", "line ten\n").replace("line 300\n", "line three hundred\n");
+const lineDiffHunks = diffModule.diffHunks(lineDiffOld, lineDiffNew);
+ok("P3-1/P3-2 multi-hunk diff keeps three context lines",
+    lineDiffHunks.length === 2 && lineDiffHunks.every((hunk) => hunk.lines.filter((line) => line.type === " ").length >= 6),
+    JSON.stringify(lineDiffHunks.map((hunk) => ({ oldStart: hunk.oldStart, oldCount: hunk.oldCount, newStart: hunk.newStart, newCount: hunk.newCount }))));
+ok("P3-2 missing final newline marker",
+    diffModule.unifiedDiff("a.txt", "a.txt", "a\n", "a", "update").includes("\\ No newline at end of file"));
+ok("P3-3 standard insert count",
+    diffModule.countChangedLines("a\nb\nc\n", "a\nx\nb\nc\n") === 1);
 const unrepaired = valuesModule.parseJsonObjectWithRepair('{"path":');
 ok("[1.3] irreparable arguments still fail", Boolean(unrepaired.error) && !unrepaired.value, JSON.stringify(unrepaired));
 
@@ -4373,7 +4581,7 @@ ok("B2-09 invalid config language falls back safely",
         i18nModule.setLocale(123) === "en",
     JSON.stringify({ numeric: i18nModule.normalizeLocale(123), region: i18nModule.normalizeLocale("zh-CN") }));
 
-const residualBackup = join(process.env.FASTCODE_HOME, "probe.fastcode-backup-123");
+const residualBackup = join(process.env.FASTCODE_HOME, "probe.fastcode-backup-123-456-abc");
 writeFileSync(residualBackup, "backup", "utf8");
 const doctorWithBackup = diagnostics.collectDiagnostics();
 ok("doctor reports residual atomic backups",

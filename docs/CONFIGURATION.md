@@ -5,7 +5,7 @@
 默认 `~/.fastcode/`（可用 `FASTCODE_HOME` 整体迁移）：
 
     ~/.fastcode/
-      config.json       主配置：provider/model/theme/agentMode/sharedDirs/egress/shellPoolSize/capabilities
+      config.json       主配置：provider/model/theme/agentMode/diffPreview/sharedDirs/egress/shellPoolSize/capabilities
       auth.json         仅 API Key（provider 级，权限 0600；删除后需重新 /login）
       trusted.json      已信任目录 + 记住的工具审批（catalogHash 绑定；删除后重新信任）
       model-meta.json   可选：覆盖上下文窗口 / charsPerToken / supportsTools
@@ -36,6 +36,7 @@
 | theme | 主题 id | fastcode |
 | language | UI 语言：`en` / `zh`（接受 `zh-CN` 等前缀）；`FASTCODE_LANG` 优先 | en |
 | agentMode | 是否允许本地工具（shell/读写文件） | true |
+| diffPreview | 审批/执行结果展示 unified diff；持久化配置，默认开启 | true |
 | systemPrompt | 系统提示 | 内置 |
 | enabledSkills | 启用的技能名数组 | [] |
 | enabledPlugins | 启用的插件名数组 | [] |
@@ -45,7 +46,7 @@
 | maxAgentTurns | 单次请求最多工具轮次 | 24 |
 | requestIdleTimeoutMs | 流式空闲超时（毫秒） | 60000 |
 | reasoningEffort | 思考强度 auto/low/medium/high/max | auto |
-| shellPoolSize | **resident** shell 池并发数；安全默认 2，最大 6；`/threads <1-6>` 修改；不限制 one-shot 路径 | 2 |
+| shellPoolSize | **resident** shell 池并发数；安全默认 2，最大 128；`/threads <1-128>` 修改；不限制 one-shot 路径 | 2 |
 | capabilities | 旧版缓存字段，仅为兼容保留；自 0.1.8-beta.1 起**不再参与** native/pseudo 判定（能力只记在进程内） | `{ "toolCalling": {} }` |
 | egress | 应用层 egress 策略；见 §2.1 | `{ "enabled": true, "mode": "block", ... }` |
 | permissions | 声明式 shell 权限；只作用于 Soft Gate，见 §2.2 | `{ "shell": { "allow": [], "deny": [] } }` |
@@ -146,7 +147,7 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
 - 启动/每次运行从全局数据目录、项目根（`.git`/`package.json`）到 cwd 链读取 `AGENTS.md` / `FASTCODE.md`；按 global → project → local 注入 system（agent block 之前），每文件 32KB（按 UTF-8 字节）、总量 96KB 上限。`/context` 显示来源。
 - 同名文件按“近层覆盖远层”：子目录的 `AGENTS.md` 会替换根目录同名文件；不同名文件（`AGENTS.md` + `FASTCODE.md`）仍同时保留。本次输入层尚未单独建模。
 - `/revert <n>` 删除第 n 条可见 user 消息及之后并重建投影；连续 revert 不会复活更早已撤销的事实。`--files` 文件还原尚未实现。
-- 结构化 `oldText/newText` 目前覆盖 `write_file` / `append_file` / `replace_in_file`；`apply_patch` 仍返回 per-file 文本 diff，TUI 仍只显示摘要。
+- ??? `oldText/newText` ???? `write_file` / `append_file` / `replace_in_file`?`apply_patch` ?????????? per-file unified diff?TUI/JSON/plain ????? diff ???
 
 ### 2.5 会话计划 / 目标
 
@@ -306,6 +307,7 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_SHELL_ALLOWLIST | 只允许匹配这些正则的命令，分号分隔 |
 | FASTCODE_SHELL_DENY_EXTRA | 追加的危险命令正则，分号分隔 |
 | FASTCODE_RESTRICT_TO_WORKSPACE | 设为 1 额外拒绝 ../ 路径穿越 |
+| FASTCODE_HEADLESS_SESSION_LOG | `--ui json/plain` ? session facts?????1.2 ??????? | 0 |
 | FASTCODE_READ_MAX_BYTES | read_file 单次读取上限；read_many 的单文件读取上限，默认 200000 |
 | FASTCODE_READ_SCAN_MAX_BYTES | read_file offset/limit 统计总行数时的扫描上限，默认 8000000；超出时 totalLines 为下界并标记 truncated |
 | FASTCODE_READ_MANY_MAX_BYTES | read_many 的总输出字节预算，默认 400000；超出后跳过剩余文件并给出 hint。单次调用的 `maxBytes` 会被钳制到该值；单文件错误只标记 skipped，不再丢弃整次结果 |
@@ -542,7 +544,7 @@ catalog 42（OpenAI 兼容，`providers/catalog.ts`）：
 |---|---|---|
 | maxAgentTurns | 单次请求最多工具轮次；到上限提示“输入 继续” | 24 |
 | requestIdleTimeoutMs | 流式空闲超时；每次收到 chunk 重置 | 60000 |
-| shellPoolSize | **resident** shell 池并发数；默认 2，最大 6，可用 `/threads` 调整；不限制 one-shot 路径 | 2 |
+| shellPoolSize | **resident** shell 池并发数；默认 2，最大 128，可用 `/threads` 调整；不限制 one-shot 路径 | 2 |
 
 达到轮次上限或断流时历史不会丢：直接输入 `继续` 即可接着做。
 旧版 `contextBudgetChars` 已移除；读取旧配置时该字段会被忽略，压缩使用 token 阈值。
@@ -571,13 +573,13 @@ shell 工具有两条执行路径，预算互不共享：
 
 | 路径 | 触发 | 限制 / 预算 | 满载行为 |
 |---|---|---|---|
-| resident | POSIX 且命令未被判定为交互/REPL | `shellPoolSize`：默认 **2**，`/threads <1-6>` 最大 6（仅 resident） | 排队等待空闲 resident（受命令 timeout 限制） |
+| resident | POSIX 且命令未被判定为交互/REPL | `shellPoolSize`：默认 **2**，`/threads <1-128>` 最大 128（仅 resident） | 排队等待空闲 resident（受命令 timeout 限制） |
 | one-shot | Windows，或命令命中交互/REPL 判定 | `FASTCODE_MAX_SPAWN_PER_TURN`：默认 **8/轮**（每轮新建速率，不是全局并发上限） | 立即返回 `spawn limit reached`，**不排队** |
 
 - 每个 shell job 只保留最近 **256KB** 输出窗口；更早的内容会被丢弃。runner 另有单条 tool 消息硬上限（`FASTCODE_TOOL_MESSAGE_LIMIT`，默认 1MB）。
 - `shell` 与 FastCode 同用户、同 OS 权限，并继承完整 `process.env`（可能含用户导出的 API key）；`FASTCODE_SANDBOX`/`FASTCODE_SANDBOX_ROOT` 只是标记，不是隔离。完整权限模型见 `AUDIT.md` §8.9。
 - `FASTCODE_SHELL_ALLOWLIST` 是 Soft Gate（可审批/可被 `FASTCODE_ALLOW_DANGEROUS` 绕过），不是硬白名单；Hard Block 仍优先。
-- `/threads` 只调整 resident 池，不影响 one-shot，也不构成“全局最多 2/6 个进程”的承诺。
+- `/threads` 只调整 resident 池，不影响 one-shot，也不构成“全局最多 2/128 个进程”的承诺。
 - `FASTCODE_MAX_SPAWN_PER_TURN` 同时计入新建 resident 和 one-shot；同一轮若新建 2 个 resident，本轮只剩 6 次 one-shot 配额。
 - `shellPoolStats().active` 和 `doctor` 的 `active` 统计所有仍在运行的 shell job（resident + one-shot）；`pool/maxPool` 只统计 resident。二者会不一致。
 - 同轮默认最多约 8 个新进程（2 resident + 6 one-shot，或 0 resident + 8 one-shot）；跨 turn 时 resident 池保留、one-shot 预算重置，未结束的旧 one-shot 仍占并发（例如既有 2 resident + 本轮 8 one-shot = 10；`/threads 6` 时为 14），长期未结束的 one-shot 没有全局回收上限。
@@ -653,7 +655,7 @@ API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`�
 | `/attach [id]` | 查看后台会话的新输出；省略 id 时打开会话选择器 | `/attach` |
 | `/kill [id]` | 终止后台会话进程树；省略 id 时打开会话选择器 | `/kill` |
 | `/bg` | 说明长命令自动转后台机制 | `/bg` |
-| `/threads [1-6]` (`pool`) | resident shell 并发选择器 / 设置 | `/threads` → picker |
+| `/threads [1-128]` (`pool`) | resident shell 并发选择器 / 设置 | `/threads` → picker |
 | `/edit` | 用 `$EDITOR` 编辑当前输入 | `/edit` |
 
 说明：`/provider`、`/model`、`/theme`、`/threads`、`/agent`、`/effort` 无参数时都会打开同一套选择器；带参数时保留快捷路径。

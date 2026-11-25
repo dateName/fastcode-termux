@@ -19,6 +19,7 @@ import { aboutCommand } from "./about.js";
 import { configCommand } from "./config.js";
 import { whoamiCommand } from "./whoami.js";
 import { contextCommand } from "./context.js";
+import { factsCommand } from "./facts.js";
 import { jobsCommand } from "./jobs.js";
 import { killCommand } from "./kill.js";
 import { cancelCommand } from "./cancel.js";
@@ -54,6 +55,7 @@ export const COMMANDS = [
     configCommand,
     whoamiCommand,
     contextCommand,
+    factsCommand,
     jobsCommand,
     killCommand,
     cancelCommand,

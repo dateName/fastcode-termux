@@ -2,6 +2,8 @@ import { constants, existsSync } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 import { buildStructuredDiff, structuredDiffFields } from "../../lib/values.js";
+import { countChangedLines, unifiedDiff } from "../../lib/diff.js";
+import { approveLargeEdit } from "./edit-approval.js";
 import { assertNotSymlink, sandboxWritePath } from "./paths.js";
 import { readTextFileResult } from "./readers.js";
 import { invalid, prepareWritePath, requiredString } from "./validate.js";
@@ -9,6 +11,7 @@ const APPEND_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND
 export const appendFileTool = {
     name: "append_file",
     requiresTrust: true,
+    approvalHints: { mayRequireApproval: true },
     stateScope: "turn",
     revalidate: ["trust", "sandboxRoots"],
     prepare(call, ctx) {
@@ -38,7 +41,11 @@ export const appendFileTool = {
             }
         }
         const diff = buildStructuredDiff(beforeText, beforeText + content);
+        const unified = unifiedDiff(file, file, beforeText, beforeText + content, existed ? "update" : "add");
         diff.truncated = diff.truncated || beforeTruncated;
+        const approvalDenied = await approveLargeEdit("append_file", call, ctx, file, unified, countChangedLines(beforeText, beforeText + content));
+        if (approvalDenied)
+            return approvalDenied;
         await mkdir(dirname(file), { recursive: true });
         assertNotSymlink(file);
         const handle = await open(file, APPEND_FLAGS, 0o666);
@@ -56,6 +63,7 @@ export const appendFileTool = {
             output: `appended ${file}`,
             sideEffects: existed ? { touched: [file] } : { created: [file] },
             ...structuredDiffFields(diff),
+            diffs: [{ path: file, unified, ...diff }],
         };
     },
 };

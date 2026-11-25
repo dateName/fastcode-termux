@@ -5,7 +5,7 @@
  * time. A headless transport can consume it without leaking TUI output to
  * stdout. Hard Block requests never reach this code.
  */
-import type { ApprovalDecision, ApprovalOption, ApprovalRequest } from "./approval.js";
+import type { ApprovalDecision, ApprovalOption, ApprovalRequest, PatchDiff } from "./approval.js";
 import { decisionForOption } from "./approval.js";
 
 export const GATE_PROTOCOL_VERSION = 1;
@@ -20,7 +20,8 @@ export interface GateAskEvent {
     prompt: string;
     source: string;
     targets: string[];
-    diffstat: { files: number; lines: number };
+    diffstat: { files: number; lines: number; added: number; removed: number };
+    diffs?: PatchDiff[];
     options: Array<{ id: string; label: string; kind: string; default?: boolean }>;
     default: string;
     require_input?: string;
@@ -36,7 +37,27 @@ function targetsFor(request: ApprovalRequest): string[] {
     return values.filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
-export function encodeGateAsk(request: ApprovalRequest): GateAskEvent {
+function diffStatFor(diffs: PatchDiff[] | undefined, fallback: string): { files: number; lines: number; added: number; removed: number } {
+    if (diffs?.length) {
+        let added = 0;
+        let removed = 0;
+        for (const diff of diffs) {
+            for (const line of diff.unified.split(/\r?\n/)) {
+                if (line.startsWith("+++") || line.startsWith("---"))
+                    continue;
+                if (line.startsWith("+"))
+                    added += 1;
+                else if (line.startsWith("-"))
+                    removed += 1;
+            }
+        }
+        return { files: diffs.length, lines: added + removed, added, removed };
+    }
+    const lines = fallback ? fallback.split(/\r?\n/).length : 0;
+    return { files: fallback ? fallback.split(/\r?\n/).filter(Boolean).length : 0, lines, added: 0, removed: 0 };
+}
+
+export function encodeGateAsk(request: ApprovalRequest, viewOptions: { diffPreview?: boolean } = {}): GateAskEvent {
     const options = request.options.map((option, index) => ({
         id: optionId(option, index),
         label: option.label,
@@ -57,7 +78,8 @@ export function encodeGateAsk(request: ApprovalRequest): GateAskEvent {
         prompt: request.prompt ?? "Approval required",
         source: request.source ?? "system",
         targets: targetsFor(request),
-        diffstat: { files: text ? text.split(/\r?\n/).filter(Boolean).length : 0, lines: text ? text.split(/\r?\n/).length : 0 },
+        diffstat: diffStatFor(viewOptions.diffPreview === false ? undefined : request.patchDiffs, text),
+        ...(viewOptions.diffPreview !== false && request.patchDiffs?.length ? { diffs: request.patchDiffs } : {}),
         options,
         default: options[defaultIndex]?.id ?? "",
         ...(requireInput ? { require_input: requireInput } : {}),

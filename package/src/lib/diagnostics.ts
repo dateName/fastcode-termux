@@ -183,6 +183,8 @@ export function collectDiagnostics() {
         compactionHeapUsedMb: process.memoryUsage().heapUsed / 1024 / 1024,
         compactionForced: heapExceeded(compaction),
         serverCompactionAware: compaction.serverCompactionAware,
+        longRun: ["1", "true", "yes", "on"].includes((process.env["FASTCODE_LONG_RUN"] ?? "").trim().toLowerCase()),
+        anchorChars: compaction.anchorChars,
         shellActive: shells.active,
         shellPool: shells.pool,
         shellPoolMax: shells.maxPool,

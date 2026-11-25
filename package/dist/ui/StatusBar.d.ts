@@ -1,4 +1,4 @@
-export declare const StatusBar: ({ theme, providerId, model, inputTokens, outputTokens, costUsd, enabledSkillCount, reasoningEffort, hint, }: {
+export declare const StatusBar: ({ theme, providerId, model, inputTokens, outputTokens, costUsd, enabledSkillCount, reasoningEffort, longRun, hint, }: {
     theme: any;
     providerId: any;
     model: any;
@@ -7,5 +7,6 @@ export declare const StatusBar: ({ theme, providerId, model, inputTokens, output
     costUsd: any;
     enabledSkillCount: any;
     reasoningEffort: any;
+    longRun: any;
     hint: any;
 }) => import("react").ReactElement<any, string | import("react").JSXElementConstructor<any>>;

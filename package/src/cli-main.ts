@@ -10,14 +10,17 @@ import { readPackageMeta } from "./lib/pkg.js";
 import { installSkill, listInstalledSkills, uninstallSkill, searchRegistry, resolveRegistry } from "./skills/manager.js";
 import { loadConfig, saveConfig, resolveProviderKey } from "./config/store.js";
 import { getPaths } from "./config/paths.js";
+import { buildConfigExport } from "./config/export.js";
+import { writeFileSync } from "node:fs";
 import { PROVIDERS, getProvider } from "./providers/index.js";
 import { collectDiagnostics, formatDiagnostics } from "./lib/diagnostics.js";
 import { probeConnectivity } from "./lib/http.js";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { latestSessionFile, listSessions, projectionPath, readSession, resolveResumeFile, resolveSessionFile } from "./session/log.js";
 import { readProjection, sessionMetaFromFile } from "./session/projection.js";
 import { forgetToolApproval, listToolApprovals, listTrusted, trustProject, untrustProject } from "./config/trust.js";
 import { isValidModelId } from "./commands/model.js";
+import { toolCatalogHash } from "./agent/registry.js";
 const NL = String.fromCharCode(10);
 const HELP = [
     "",
@@ -52,9 +55,12 @@ const HELP = [
     "    $ fastcode skills search <q>     Search the registry",
     "    $ fastcode doctor                Environment diagnostics (Termux/mobile)",
     "    $ fastcode doctor --net          Also probe registry connectivity",
+    "    $ fastcode doctor --backup-check Check config/auth/trust/model-meta backups",
     "    $ fastcode update                Check for a newer release",
     "",
     "  Options",
+    "    --long-run, --full-access   Long-run mode: turns=9999, anchor 30000 chars;\n                                 does NOT disable egress/trust/sandbox/approval",
+    "    --cost-cap <USD>            Process-local cost cap (default: unlimited)",
     "    --version, -v   Show version",
     "    --help, -h      Show this help",
     "",
@@ -84,6 +90,10 @@ export async function parseCli(): Promise<any> {
         console.log(HELP);
         return { done: true };
     }
+    if (argv.includes("-v") || argv.includes("--version")) {
+        console.log(readPackageMeta().version);
+        return { done: true };
+    }
     const cli = meow(HELP, {
         importMeta: import.meta,
         flags: {
@@ -91,11 +101,26 @@ export async function parseCli(): Promise<any> {
             ui: { type: "string", default: "tty" },
             forget: { type: "string" },
             net: { type: "boolean", default: false },
+            backupCheck: { type: "boolean", default: false },
+            fullAccess: { type: "boolean", default: false },
+            longRun: { type: "boolean", default: false },
+            costCap: { type: "string" },
         },
         autoHelp: true,
         autoVersion: true,
     });
     const uiMode = String(cli.flags.ui ?? "tty").toLowerCase();
+    const longRun = Boolean(cli.flags.fullAccess || cli.flags.longRun);
+    if (longRun)
+        process.env.FASTCODE_LONG_RUN = "1";
+    if (typeof cli.flags.costCap === "string") {
+        const cap = Number(cli.flags.costCap);
+        if (!Number.isFinite(cap) || cap <= 0) {
+            console.error("Invalid --cost-cap: " + cli.flags.costCap);
+            process.exit(1);
+        }
+        process.env.FASTCODE_COST_BUDGET_USD = String(cap);
+    }
     if (!["tty", "native", "plain", "json"].includes(uiMode)) {
         console.error("Unknown --ui mode: " + uiMode + " (use tty, native, plain, or json)");
         process.exit(1);
@@ -183,6 +208,59 @@ export async function parseCli(): Promise<any> {
         const paths = getPaths();
         if (rest[0] === "path") {
             console.log(paths.config);
+            return { done: true };
+        }
+        if (rest[0] === "export") {
+            const outIndex = rest.indexOf("--out");
+            const out = outIndex >= 0 ? rest[outIndex + 1] : undefined;
+            const data = buildConfigExport(paths, { withKeys: rest.includes("--with-keys") });
+            const text = JSON.stringify(data, null, 2);
+            if (out) {
+                writeFileSync(out, text + "\n", { encoding: "utf8", mode: 0o600 });
+                console.log("Exported config to " + out);
+            }
+            else {
+                console.log(text);
+            }
+            if (rest.includes("--with-keys"))
+                console.error("[fastcode] warning: export contains API keys; protect the file.");
+            return { done: true };
+        }
+        if (rest[0] === "import") {
+            const file = rest[1];
+            if (!file || !existsSync(file)) {
+                console.error("Usage: fastcode config import <file>");
+                process.exit(1);
+            }
+            const data = JSON.parse(readFileSync(file, "utf8"));
+            const targets = [
+                ["config", paths.config],
+                ["auth", paths.auth],
+                ["trusted", paths.trust],
+                ["modelMeta", paths.root + "/model-meta.json"],
+            ];
+            const stamp = Date.now();
+            for (const [key, target] of targets) {
+                if (!(key in data) || data[key] === undefined)
+                    continue;
+                if (key === "auth" && JSON.stringify(data.auth).includes("[REDACTED]")) {
+                    console.error("[fastcode] auth export is redacted; keys were not imported. Re-export with --with-keys first.");
+                    continue;
+                }
+                if (existsSync(target))
+                    copyFileSync(target, target + ".import.bak." + stamp);
+                writeFileSync(target, JSON.stringify(data[key], null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+            }
+            const currentCatalog = toolCatalogHash();
+            const staleApprovals = data?.trusted?.tools && typeof data.trusted.tools === "object"
+                ? Object.values(data.trusted.tools).filter((entry: any) => entry?.catalogHash && entry.catalogHash !== currentCatalog).length
+                : 0;
+            console.log("Imported config from " + file);
+            console.log("  imported: " + targets.filter(([key]) => key in data && data[key] !== undefined).map(([key]) => key).join(", "));
+            console.log("  backups:  " + targets.filter(([, target]) => existsSync(target)).length + " target(s), suffix .import.bak");
+            console.error("[fastcode] remembered approvals may be invalid if the tool catalog changed; re-approve affected tools.");
+            if (staleApprovals > 0)
+                console.error("           " + staleApprovals + " remembered approval(s) use an older catalogHash and will require re-approval.");
             return { done: true };
         }
         const cfg = loadConfig();
@@ -363,6 +441,21 @@ export async function parseCli(): Promise<any> {
     }
     if (first === "doctor") {
         console.log(formatDiagnostics(collectDiagnostics()));
+        if (cli.flags.backupCheck === true) {
+            const paths = getPaths();
+            const entries = [["config", paths.config], ["auth", paths.auth], ["trusted", paths.trust], ["model-meta", paths.root + "/model-meta.json"]];
+            for (const [label, file] of entries) {
+                const present = existsSync(file);
+                const mode = present && process.platform !== "win32" ? (statSync(file).mode & 0o777).toString(8).padStart(4, "0") : "n/a";
+                console.log("  " + label.padEnd(12) + (present ? "present" : "missing") + "  mode " + mode + "  " + file);
+                if (!present && label === "auth")
+                    console.log("    fix: run /login (or set the provider ENV key) to create auth.json");
+                if (present && label === "auth" && process.platform !== "win32" && mode !== "0600")
+                    console.log("    fix: chmod 600 " + file);
+            }
+            console.log("  backups     run `fastcode config export --out <file>` before manual edits");
+            return { done: true };
+        }
         if (cli.flags.net === true) {
             const url = "https://registry.npmjs.org/";
             const reachable = await probeConnectivity(url);
@@ -376,7 +469,7 @@ export async function parseCli(): Promise<any> {
     }
     // No sub-command → treat all positionals as the initial prompt.
     const prompt = cli.input.length > 0 ? cli.input.join(" ") : undefined;
-    return prompt ? { prompt, done: false, ui: uiMode } : { done: false, ui: uiMode };
+    return prompt ? { prompt, done: false, ui: uiMode, longRun } : { done: false, ui: uiMode, longRun };
 }
 function compareVersions(a, b) {
     const pa = a.split(".").map((n) => parseInt(n, 10) || 0);

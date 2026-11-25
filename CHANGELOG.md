@@ -2,6 +2,17 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
+## 0.1.9-beta.1（2026-11-25，工作树，未发布）
+
+> 状态：基于 0.1.8 的 P4–P9 harness 工作；Windows smoke **479/479**（POSIX 480）；未提交/未发布；npm `latest` 仍为 0.1.8，`beta` 仍为 0.1.8-beta.4。
+
+- P4：sensitive、raw output、seq、S 索引、Provenance、`/facts show`
+- P5/P6：累计 anchor、`--long-run`/`--full-access`、cost cap
+- P7/P8：生命周期、INTERRUPTED 标记、headless session_id 契约
+- P9：compact list/clean、config export/import、doctor backup check
+- 其他：三色 diff、并发硬上限 128
+
+
 ## 0.1.8（2026-11-22，正式版，已发布）
 
 > 状态：基于 0.1.8-beta.4 的 yq 第二轮修复；Windows smoke **447/447**（POSIX 448）；已构建并发布到 GitHub Release 与 npm `latest`。`beta` tag 仍保留 0.1.8-beta.4。
@@ -12,6 +23,14 @@
 - `apply_patch` 沙箱拒绝返回 `SANDBOX_DENY`。
 - worktree diff 使用记录的 base（含 commit + binary）；`apply --commit` 支持增量重复应用，状态文案区分 tracked/untracked。
 - 验证：Windows smoke **447/447**（POSIX 448）。
+
+## D1 + P2 工作树（未发布）
+
+- D1：`apply_patch` 审批新增 `patchDiffs`，直接来自 `plan.files[].diff`；执行后 `diffs[].unified` 来自 `applied.files[].diff`。
+- D1：TUI 审批/执行后默认显示 unified diff；`gate:ask` 增加 `diffs` 与 `{files,lines,added,removed}` diffstat；native/plain 同步。
+- P2：permission regex 锚定、`*` 不跨目录、连续星号拒绝、项目层 catch-all allow 收窄。
+- P2：atomic restore 走 `writeTargetNoFollow`；backup 使用 `COPYFILE_EXCL`；`backups()` 精确匹配；Q14 restore 成功保留 backup；`O_NOFOLLOW` 不可用 fail closed；native 合法调用清零连续错误。
+- 验证：Windows smoke **479/479**（POSIX 480）。
 
 ## 0.1.8-beta.4（2026-11-22，已发布）
 

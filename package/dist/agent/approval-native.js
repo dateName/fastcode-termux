@@ -77,11 +77,15 @@ async function nativeFeedback(prompt, signal, timeoutMs = 60_000) {
         timer.unref?.();
     });
 }
-export async function nativeApproval(request, signal) {
+export async function nativeApproval(request, signal, options = {}) {
     if (signal?.aborted)
         return { kind: "deny", reason: "approval cancelled" };
     const labels = request.options.map((option) => option.label);
-    const title = request.prompt ?? `Approval: ${request.tool}`;
+    const firstDiff = options.diffPreview === false ? undefined : request.patchDiffs?.[0];
+    const diffTitle = firstDiff
+        ? `\n${request.patchDiffs.length} file(s)\n${firstDiff.unified.split(/\r?\n/).slice(0, 8).join("\n")}`
+        : "";
+    const title = ((request.prompt ?? `Approval: ${request.tool}`) + diffTitle).slice(0, 1200);
     return await new Promise((resolve) => {
         let settled = false;
         let child;

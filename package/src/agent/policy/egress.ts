@@ -13,6 +13,7 @@ import { realpathOf } from "../../lib/realpath.js";
 import { isCriticalReadTarget, isSensitiveTarget, isSharedStoragePath } from "../guards.js";
 import type { EgressAudit, ToolCall } from "../tools/types.js";
 import { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG, type EgressConfig, type EgressMode } from "./defaults.js";
+import { detect } from "./sensitive.js";
 
 export type { EgressConfig, EgressMode } from "./defaults.js";
 export { DEFAULT_CONTENT_MARKERS, DEFAULT_EGRESS_CONFIG } from "./defaults.js";
@@ -85,21 +86,11 @@ function builtinDenyPaths(): string[] {
 }
 
 interface CompiledPolicy {
-    markers: RegExp[];
     globs: RegExp[];
     denyPaths: string[];
 }
 
 const compileCache = new Map<string, CompiledPolicy>();
-
-function safeRegExp(pattern: string): RegExp | undefined {
-    try {
-        return new RegExp(pattern, "i");
-    }
-    catch {
-        return undefined;
-    }
-}
 
 function globToRegExp(glob: string): RegExp {
     let source = "^";
@@ -135,7 +126,6 @@ function compile(config: EgressConfig): CompiledPolicy {
     if (cached)
         return cached;
     const compiled: CompiledPolicy = {
-        markers: config.denyContentMarkers.map(safeRegExp).filter(Boolean) as RegExp[],
         globs: config.denyGlobs.map(globToRegExp),
         denyPaths: config.denyPaths.map((entry) => resolve(entry).replace(/\\/g, "/")),
     };
@@ -166,12 +156,8 @@ function isInside(child: string, parent: string): boolean {
     return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
-function markerHit(payload: string, compiled: CompiledPolicy): string | undefined {
-    for (const marker of compiled.markers) {
-        if (marker.test(payload))
-            return marker.source;
-    }
-    return undefined;
+function markerHit(payload: string, config: EgressConfig): string | undefined {
+    return detect(payload, config.denyContentMarkers)[0]?.ruleId;
 }
 
 function scanWindow(payload: string, maxBytes: number): string {
@@ -199,7 +185,7 @@ function evaluateSubject(subject: EgressSubject, cwd: string, config: EgressConf
         const overBudget = Buffer.byteLength(payload, "utf8") > config.maxScanBytes;
         if (overBudget && subject.outbound)
             return decide("scan_budget_exceeded", `payload exceeds the ${config.maxScanBytes}-byte egress scan budget`);
-        const marker = markerHit(scanWindow(payload, config.maxScanBytes), compiled);
+        const marker = markerHit(scanWindow(payload, config.maxScanBytes), config);
         if (marker)
             return decide("content_marker", `payload matched denyContentMarkers (${marker})`);
         return undefined;

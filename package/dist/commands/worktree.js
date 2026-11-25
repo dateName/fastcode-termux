@@ -17,7 +17,7 @@ export const worktreeCommand = {
                 if (!args[1])
                     return { message: "Usage: /worktree diff <path>" };
                 const result = worktreeDiff(args[1]);
-                const diff = result.diff.length > 8000 ? result.diff.slice(0, 8000) + "\n[... diff truncated ...]" : result.diff;
+                const diff = result.diff;
                 return { message: [`Status:`, result.status.trim() || "(clean)", "", diff || "(no tracked diff)"].join("\n") };
             }
             if (sub === "apply") {

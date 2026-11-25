@@ -1,4 +1,6 @@
 /** Exhaustiveness helper for closed unions. Adding a variant fails to compile. */
+import { diffHunks, splitContent } from "./diff.js";
+
 export function assertNever(value: never, context: string): never {
     throw new Error(`${context}: unhandled variant ${JSON.stringify(value)}`);
 }
@@ -25,21 +27,32 @@ export function structuredDiffFields(diff: StructuredDiff) {
     };
 }
 
+function windowText(side: ReturnType<typeof splitContent>, hunk: ReturnType<typeof diffHunks>[number], exclude: "+" | "-"): string {
+    const selected = hunk.lines.filter((line) => line.type !== exclude);
+    let text = selected.map((line) => line.text).join("\n");
+    const last = selected[selected.length - 1];
+    const lastLine = exclude === "+" ? last?.oldLine : last?.newLine;
+    if (side.endsWithNewline && lastLine === side.lines.length)
+        text += "\n";
+    return text;
+}
+
 export function buildStructuredDiff(oldText: string, newText: string, limit = 16_384): StructuredDiff {
     const before = String(oldText ?? "");
     const after = String(newText ?? "");
-    const oldLines = before.split(/\r?\n/);
-    const newLines = after.split(/\r?\n/);
-    let same = 0;
-    while (same < oldLines.length && same < newLines.length && oldLines[same] === newLines[same])
-        same += 1;
-    const truncated = before.length > limit || after.length > limit;
+    const oldSide = splitContent(before);
+    const newSide = splitContent(after);
+    const hunks = diffHunks(before, after);
+    const first = hunks[0];
+    const oldWindow = first ? windowText(oldSide, first, "+") : before;
+    const newWindow = first ? windowText(newSide, first, "-") : after;
+    const truncated = oldWindow.length > limit || newWindow.length > limit;
     return {
-        oldText: before.slice(0, limit),
-        newText: after.slice(0, limit),
-        changedStartLine: same + 1,
-        oldLineCount: oldLines.length,
-        newLineCount: newLines.length,
+        oldText: oldWindow.slice(0, limit),
+        newText: newWindow.slice(0, limit),
+        changedStartLine: first?.oldStart ?? 1,
+        oldLineCount: oldSide.lines.length,
+        newLineCount: newSide.lines.length,
         truncated,
     };
 }

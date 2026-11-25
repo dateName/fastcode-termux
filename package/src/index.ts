@@ -18,13 +18,13 @@ async function main() {
             process.exit(1);
         }
         const { runHeadless } = await import("./headless.js");
-        await runHeadless({ prompt: cli.prompt, ui: "json", resume: cli.resume });
+        await runHeadless({ prompt: cli.prompt, ui: "json", resume: cli.resume, longRun: cli.longRun });
         return;
     }
     if (!process.stdout.isTTY) {
         if (cli.ui === "plain" && cli.prompt) {
             const { runHeadless } = await import("./headless.js");
-            await runHeadless({ prompt: cli.prompt, ui: "plain", resume: cli.resume });
+            await runHeadless({ prompt: cli.prompt, ui: "plain", resume: cli.resume, longRun: cli.longRun });
             return;
         }
         console.error("FastCode TUI requires a TTY. Use `fastcode --ui plain|json \"<prompt>\"` for pipe mode.");
@@ -39,7 +39,7 @@ async function main() {
     // React.createElement avoids needing a separate .tsx loader for this file.
     // exitOnCtrlC: false lets the app own Ctrl+C so the documented
     // "press Ctrl+C twice to quit" behavior actually works.
-    render(React.createElement(App, { initialPrompt: cli.prompt, resume: cli.resume, ui: cli.ui ?? "tty" }), { exitOnCtrlC: false });
+    render(React.createElement(App, { initialPrompt: cli.prompt, resume: cli.resume, ui: cli.ui ?? "tty", longRun: cli.longRun }), { exitOnCtrlC: false });
 }
 main().catch((err) => {
     const debug = ["1", "true", "yes", "on"].includes((process.env["FASTCODE_DEBUG"] ?? "").trim().toLowerCase());

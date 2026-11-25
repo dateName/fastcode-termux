@@ -70,10 +70,14 @@ export const applyPatchTool = {
         const applied = await applyPatchPlan(planned.plan);
         const warnings = applied.warnings.length > 0 ? "\n\nwarnings:\n" + applied.warnings.map((line) => "- " + line).join("\n") : "";
         const diffs = applied.ok
-            ? planned.plan.files.map((file) => ({
-                path: file.moveTo ?? file.path,
-                ...buildStructuredDiff(file.oldContent ?? "", file.newContent ?? ""),
-            }))
+            ? applied.files.map((file) => {
+                const plannedFile = planned.plan.files.find((candidate) => (candidate.moveTo ?? candidate.path) === file.path);
+                return {
+                    path: file.path,
+                    unified: file.diff,
+                    ...buildStructuredDiff(plannedFile?.oldContent ?? "", plannedFile?.newContent ?? ""),
+                };
+            })
             : undefined;
         return {
             ok: applied.ok,
@@ -88,7 +92,18 @@ function patchApprovalRequest(call, review, plan) {
     const options = DEFAULT_ALLOW_OPTIONS.map((option) => ({ ...option }));
     const denyIndex = options.findIndex((option) => option.kind === "deny");
     const files = Array.isArray(plan?.files) ? plan.files : [];
-    const diff = files.map((file) => `${file.relPath ?? file.path}: ${file.changedLines ?? "?"} line(s)`).join("\n");
+    const patchDiffs = files
+        .map((file) => ({
+        path: String(file.moveTo ?? file.path ?? ""),
+        unified: String(file.diff ?? ""),
+    }))
+        .filter((file) => file.path && file.unified);
+    const diff = patchDiffs
+        .map((file) => {
+        const stats = unifiedDiffStats(file.unified);
+        return `${file.path}: +${stats.added} -${stats.removed}`;
+    })
+        .join("\n");
     return {
         id: approvalRequestId(),
         tool: "apply_patch",
@@ -96,10 +111,23 @@ function patchApprovalRequest(call, review, plan) {
         reason: review.reason.includes("sensitive") ? "sensitive_path" : "large_diff",
         options,
         preview: diff ? { kind: "diff", text: diff } : undefined,
+        patchDiffs: patchDiffs.length > 0 ? patchDiffs : undefined,
         tier: 2,
         prompt: `Apply patch? ${review.reason}`,
         source: "system",
         defaultIndex: denyIndex >= 0 ? denyIndex : 0,
-        timeoutMs: 120_000,
     };
+}
+function unifiedDiffStats(unified) {
+    let added = 0;
+    let removed = 0;
+    for (const line of unified.split(/\r?\n/)) {
+        if (line.startsWith("+++") || line.startsWith("---"))
+            continue;
+        if (line.startsWith("+"))
+            added += 1;
+        else if (line.startsWith("-"))
+            removed += 1;
+    }
+    return { added, removed };
 }

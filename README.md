@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Version | **0.1.8** (published; npm `latest` 0.1.8; `beta` still 0.1.8-beta.4) |
+| Version | **0.1.9-beta.1** (worktree, unpublished; published 0.1.8; npm `latest` 0.1.8; `beta` 0.1.8-beta.4) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
 | Repo | https://github.com/dateName/fastcode-termux |
 
-> **0.1.8** is the stable release, containing the yq second-round fixes on top of 0.1.8-beta.4. PC smoke **447/447** (POSIX 448); published to GitHub Release and npm `latest`. The previous beta.4 assets remain 441/441 (POSIX 442).
+> **0.1.9-beta.1** is the current worktree, containing the P4?P9 harness work. PC smoke **479/479** (POSIX 480); unpublished. The published stable remains 0.1.8 (447/447; POSIX 448).
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
@@ -83,7 +83,7 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 - Three `string-width` versions may disagree on ambiguous-width characters.
 - Native tools cover OpenAI-compatible providers only; others use the pseudo protocol.
 - Approval pending is wired to tty/native/plain/json resolvers; Tier 3 backup-before-execution is still pending (third batch), so Tier 3 destructive actions fail closed.
-- `/threads` caps the **resident** shell pool only (default 2, max 6). One-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget (default 8/turn), fail immediately at the limit, and can accumulate across turns; this is not a global concurrency cap.
+- `/threads` caps the **resident** shell pool only (default 2, max 128). One-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget (default 8/turn), fail immediately at the limit, and can accumulate across turns; this is not a global concurrency cap.
 
 ---
 

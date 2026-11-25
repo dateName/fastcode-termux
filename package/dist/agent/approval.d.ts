@@ -11,6 +11,10 @@ export type ApprovalPreview = {
     kind: "choices";
     items: ChoiceItem[];
 };
+export interface PatchDiff {
+    path: string;
+    unified: string;
+}
 export type ApprovalOption = {
     kind: "allow";
     id?: string;
@@ -44,6 +48,7 @@ export interface ApprovalRequest {
     reason: ApprovalReason;
     options: ApprovalOption[];
     preview?: ApprovalPreview;
+    patchDiffs?: PatchDiff[];
     tier?: 0 | 1 | 2 | 3;
     prompt?: string;
     source?: "system" | "ai" | "free";

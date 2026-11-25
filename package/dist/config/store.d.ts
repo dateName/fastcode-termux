@@ -4,6 +4,8 @@ export declare const DEFAULT_CONFIG: {
     theme: string;
     /** UI language: "en" (default) or "zh". Overridden by FASTCODE_LANG. */
     language: string;
+    /** Persisted diff approval/output preview; defaults on. */
+    diffPreview: boolean;
     agentMode: boolean;
     systemPrompt: string;
     enabledSkills: any[];
@@ -22,7 +24,7 @@ export declare const DEFAULT_CONFIG: {
     requestIdleTimeoutMs: number;
     /** Thinking depth: auto = send nothing, provider default. */
     reasoningEffort: string;
-    /** Resident shell concurrency: safe default 2, max 6. `/threads` changes it. */
+    /** Resident shell concurrency: safe default 2, max 128. `/threads` changes it. */
     shellPoolSize: number;
     /** Cached per-provider/model capabilities (native vs pseudo tool calling). */
     capabilities: {

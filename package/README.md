@@ -28,10 +28,10 @@ Short alias included:
 fc
 ```
 
-**0.1.8** is the stable release, based on 0.1.8-beta.4 plus the yq
-second-round fixes. PC smoke 447/447 (POSIX 448); published to GitHub Release
-and npm `latest`. The previous beta.4 assets remain 441/441 (POSIX 442), and
-the npm `beta` tag still points at 0.1.8-beta.4.
+**0.1.9-beta.1** is the current worktree, based on 0.1.8 plus the P4?P9
+harness work. PC smoke 479/479 (POSIX 480); unpublished. The published stable
+is still 0.1.8 (447/447; POSIX 448); npm `latest` is 0.1.8 and `beta` is
+0.1.8-beta.4.
 
 ---
 
@@ -293,7 +293,7 @@ These run in the TUI without sending a model request:
 | `/cancel` | Abort the active run (mobile alternative to Esc) |
 | `/steer <text>` | Guide the next request of an active run |
 | `/jobs` / `/attach <id>` / `/kill <id>` | Background shell sessions |
-| `/threads [1-6]` | Show or set resident shell concurrency (default 2, max 6) |
+| `/threads [1-128]` | Show or set resident shell concurrency (default 2, max 128) |
 | `/expand` | Toggle full/collapsed tool output |
 | `/edit` | Edit the prompt in `$EDITOR` (works around Ink IME bugs) |
 | `/bg` | Explain background shell behaviour |
@@ -439,7 +439,7 @@ npm publish --access public
 | Patch transaction | parse → plan → apply; CRLF/mode kept; symlinks refused; move never overwrites | `/expand` for the full diff |
 | Process tree | abort or `/kill` kills children/grandchildren; `/exit` uses SIGTERM → wait → SIGKILL for resident shells | POSIX process group, Windows `taskkill /T` |
 | Compaction | token/heap threshold; Notes/Outcomes/Files first; summary written to `summary-*.md`; `/compact` records a `compacted` fact; old summaries cleaned; summary scans sample the first 64KB and oversized tool/user messages are slimmed when compaction makes no progress | FASTCODE_COMPACTION=0, FASTCODE_COMPACTION_RATIO, FASTCODE_COMPACTION_KEEP_TURNS, FASTCODE_COMPACTION_SUMMARY_TOKENS, FASTCODE_HEAP_LIMIT_MB |
-| Background shell | Commands over ~2s return a session id; poll incrementally. `/threads` caps the **resident** pool (default 2, max 6); one-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget and are not globally capped; each job keeps the last 256KB | `/jobs`, `/attach`, `/kill`, `/threads`, FASTCODE_MAX_SPAWN_PER_TURN |
+| Background shell | Commands over ~2s return a session id; poll incrementally. `/threads` caps the **resident** pool (default 2, max 128); one-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget and are not globally capped; each job keeps the last 256KB | `/jobs`, `/attach`, `/kill`, `/threads`, FASTCODE_MAX_SPAWN_PER_TURN |
 | Approval hook | Sensitive/large patches need approval; without a resolver they are denied (fail closed) | `--ui tty\|native\|plain\|json`; once/session/always; `fastcode trust --forget <key>` |
 
 ## 🙏 Credits

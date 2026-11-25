@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { atomicFile } from "../../lib/atomic-file.js";
 import { buildStructuredDiff, structuredDiffFields } from "../../lib/values.js";
+import { countChangedLines, unifiedDiff } from "../../lib/diff.js";
+import { approveLargeEdit } from "./edit-approval.js";
 import { existingMode, sandboxWritePath } from "./paths.js";
 import { invalid, optionalNumber, prepareWritePath, requiredString } from "./validate.js";
 function countOccurrences(source, find) {
@@ -11,6 +13,7 @@ function countOccurrences(source, find) {
 export const replaceInFileTool = {
     name: "replace_in_file",
     requiresTrust: true,
+    approvalHints: { mayRequireApproval: true },
     stateScope: "turn",
     revalidate: ["trust", "sandboxRoots"],
     prepare(call, ctx) {
@@ -56,6 +59,10 @@ export const replaceInFileTool = {
         }
         const next = source.split(find).join(replacement);
         const diff = buildStructuredDiff(source, next);
+        const unified = unifiedDiff(file, file, source, next, "update");
+        const approvalDenied = await approveLargeEdit("replace_in_file", call, ctx, file, unified, countChangedLines(source, next));
+        if (approvalDenied)
+            return approvalDenied;
         const mode = await existingMode(file);
         const written = await atomicFile.write(file, next, { mode: mode ?? 0o666 });
         return {
@@ -65,6 +72,7 @@ export const replaceInFileTool = {
             matches: count,
             sideEffects: { touched: [file] },
             ...structuredDiffFields(diff),
+            diffs: [{ path: file, unified, ...diff }],
         };
     },
 };

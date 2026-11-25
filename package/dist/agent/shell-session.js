@@ -9,7 +9,7 @@ const OUTPUT_LIMIT = 256 * 1024;
 const DEFAULT_BACKGROUND_MS = 2000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 export const DEFAULT_SHELL_POOL_SIZE = 2;
-export const MAX_SHELL_POOL_SIZE = 6;
+export const MAX_SHELL_POOL_SIZE = 128;
 let poolLimit = DEFAULT_SHELL_POOL_SIZE;
 const jobs = new Map();
 const pool = [];
@@ -441,7 +441,7 @@ function waitForChildClose(child, ms) {
 export function shellPoolSize() {
     return poolLimit;
 }
-/** Clamp and apply the resident shell concurrency (1..6, default 2). */
+/** Clamp and apply the resident shell concurrency (1..128, default 2). */
 export function setShellPoolSize(size) {
     const parsed = Number(size);
     poolLimit = Number.isFinite(parsed)

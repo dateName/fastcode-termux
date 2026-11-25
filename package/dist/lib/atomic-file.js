@@ -3,8 +3,16 @@ import { chmod, copyFile, lstat, open, rename, rm, stat } from "node:fs/promises
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
-export const TEMP_WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0);
-const TARGET_WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0);
+function noFollowFlag() {
+    const flag = constants.O_NOFOLLOW;
+    if (typeof flag === "number")
+        return flag;
+    if (process.platform === "win32")
+        return 0;
+    throw new Error("O_NOFOLLOW unavailable; refusing unsafe atomic write");
+}
+export const TEMP_WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollowFlag();
+const TARGET_WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollowFlag();
 export class AtomicWriteError extends Error {
     backupPath;
     constructor(message, backupPath) {
@@ -13,7 +21,7 @@ export class AtomicWriteError extends Error {
         this.backupPath = backupPath;
     }
 }
-const defaultIo = { rename, copyFile, open, chmod, rm, lstat, stat };
+const defaultIo = { rename, copyFile, open, chmod, rm, lstat, stat, createReadStream, lstatSync };
 const NON_FALLBACK_CODES = new Set(["EISDIR", "ENOTDIR", "ELOOP", "ENAMETOOLONG", "ENOENT", "ENOSPC", "EROFS", "EDQUOT"]);
 function isNonFallback(err) {
     return Boolean(err?.code && NON_FALLBACK_CODES.has(err.code));
@@ -27,13 +35,13 @@ function backupSibling(file) {
 async function removeQuietly(io, path) {
     await io.rm(path, { force: true }).catch(() => undefined);
 }
-async function filesEqual(a, b) {
-    const [left, right] = await Promise.all([stat(a), stat(b)]);
+async function filesEqual(io, a, b) {
+    const [left, right] = await Promise.all([io.stat(a), io.stat(b)]);
     if (left.size !== right.size)
         return false;
     const hash = async (file) => {
         const digest = createHash("sha256");
-        await pipeline(createReadStream(file), digest);
+        await pipeline(io.createReadStream(file), digest);
         return digest.digest("hex");
     };
     return (await hash(a)) === (await hash(b));
@@ -41,13 +49,13 @@ async function filesEqual(a, b) {
 async function writeTargetNoFollow(io, target, source, mode) {
     const handle = await io.open(target, TARGET_WRITE_FLAGS, mode ?? 0o666);
     try {
-        await pipeline(createReadStream(source), handle.createWriteStream());
+        await pipeline(io.createReadStream(source), handle.createWriteStream());
     }
     finally {
         await handle.close();
     }
     if (mode !== undefined)
-        await chmod(target, mode).catch(() => undefined);
+        await io.chmod(target, mode).catch(() => undefined);
 }
 async function openTemp(io, path, mode) {
     return await io.open(path, TEMP_WRITE_FLAGS, mode ?? 0o666);
@@ -69,7 +77,7 @@ export function createAtomicFile(ioOverrides = {}) {
         // lstat is only for a friendly error; the final open uses O_NOFOLLOW so a
         // race cannot redirect the write through a symlink.
         try {
-            if (lstatSync(target).isSymbolicLink())
+            if (io.lstatSync(target).isSymbolicLink())
                 throw new Error("refusing to overwrite a symlink: " + target);
         }
         catch (err) {
@@ -81,7 +89,7 @@ export function createAtomicFile(ioOverrides = {}) {
         let backupPath;
         try {
             backupPath = backupSibling(target);
-            await io.copyFile(target, backupPath);
+            await io.copyFile(target, backupPath, constants.COPYFILE_EXCL);
         }
         catch (err) {
             backupPath = undefined;
@@ -93,7 +101,7 @@ export function createAtomicFile(ioOverrides = {}) {
         let keepBackup = false;
         try {
             await writeTargetNoFollow(io, target, tmp, mode);
-            if (!(await filesEqual(tmp, target)))
+            if (!(await filesEqual(io, tmp, target)))
                 throw new Error("atomic write readback mismatch: " + target);
             await removeQuietly(io, tmp);
             if (backupPath)
@@ -104,8 +112,9 @@ export function createAtomicFile(ioOverrides = {}) {
             let restored = !backupPath;
             if (backupPath) {
                 try {
-                    await io.copyFile(backupPath, target);
+                    await writeTargetNoFollow(io, target, backupPath, mode);
                     restored = true;
+                    keepBackup = true;
                 }
                 catch {
                     keepBackup = true;
@@ -186,7 +195,7 @@ export function createAtomicFile(ioOverrides = {}) {
     function backups(dir) {
         try {
             return readdirSync(dir)
-                .filter((name) => name.includes(".fastcode-backup-"))
+                .filter((name) => /\.fastcode-backup-\d+-\d+-[a-z0-9]+$/.test(name))
                 .map((name) => join(dir, name));
         }
         catch {

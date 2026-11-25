@@ -68,6 +68,8 @@ export declare function collectDiagnostics(): {
     compactionHeapUsedMb: number;
     compactionForced: boolean;
     serverCompactionAware: boolean;
+    longRun: boolean;
+    anchorChars: number;
     shellActive: number;
     shellPool: number;
     shellPoolMax: number;

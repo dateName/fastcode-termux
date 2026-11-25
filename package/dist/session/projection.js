@@ -14,10 +14,10 @@ const MAX_TOOL_ARGUMENT_CHARS = 8_000;
 const TOOL_FOLD_CHARS = 600;
 export function unpairedToolNotice(tool) {
     if (READ_ONLY_TOOLS.has(tool))
-        return "执行中断（只读工具，可安全重试）。";
+        return "执行中断（只读工具，可安全重试）。 [code=INTERRUPTED doNotRetry=true]";
     if (IDEMPOTENT_TOOLS.has(tool))
-        return "执行中断，可安全重试（write_file 为全量写）。";
-    return "执行状态未知：进程中断时命令可能已完成。请先验证再操作（stat / git status / git diff），不要直接重做。";
+        return "执行中断，可安全重试（write_file 为全量写）。 [code=INTERRUPTED doNotRetry=true]";
+    return "执行状态未知：进程中断时命令可能已完成。请先验证再操作（stat / git status / git diff），不要直接重做 [code=INTERRUPTED doNotRetry=true]";
 }
 export function cwdDigest(cwd) {
     return createHash("sha1").update(cwd).digest("hex").slice(0, 8);
@@ -127,8 +127,10 @@ export function factsToMessages(facts) {
                 pending.push({ call, ok: false, output });
         }
         calls.clear();
-        if (pending.length > 0)
-            messages.push({ role: "user", content: formatToolResults(pending.splice(0)) });
+        if (pending.length > 0) {
+            const batch = pending.splice(0);
+            messages.push({ role: "user", content: formatToolResults(batch), ...(batch[0]?.seq ? { seq: batch[0].seq } : {}) });
+        }
     };
     for (const fact of facts) {
         if (!fact)
@@ -137,41 +139,42 @@ export function factsToMessages(facts) {
             flush();
             nativeTurn = false;
             if (typeof fact.content === "string" && fact.content)
-                messages.push({ role: "user", content: fact.content });
+                messages.push({ role: "user", content: fact.content, ...(typeof fact.seq === "number" ? { seq: fact.seq } : {}) });
         }
         else if (fact.type === "assistant_raw") {
             flush();
             const nativeCalls = Array.isArray(fact.toolCalls) ? fact.toolCalls : undefined;
             nativeTurn = Boolean(nativeCalls && nativeCalls.length > 0);
             if (typeof fact.content === "string")
-                messages.push({ role: "assistant", content: fact.content, ...(nativeTurn ? { toolCalls: nativeCalls } : {}) });
+                messages.push({ role: "assistant", content: fact.content, ...(nativeTurn ? { toolCalls: nativeCalls } : {}), ...(typeof fact.seq === "number" ? { seq: fact.seq } : {}) });
         }
         else if (fact.type === "tool_call") {
             calls.set(String(fact.id ?? ""), fact.args ?? { tool: fact.tool });
         }
         else if (fact.type === "notice") {
             if (typeof fact.content === "string" && fact.content)
-                messages.push({ role: "system", content: fact.content });
+                messages.push({ role: "system", content: fact.content, ...(typeof fact.seq === "number" ? { seq: fact.seq } : {}) });
         }
         else if (fact.type === "tool_result") {
             const id = String(fact.id ?? "");
             const call = calls.get(id) ?? { tool: fact.tool ?? "unknown" };
             calls.delete(id);
             if (nativeTurn) {
-                messages.push({ role: "tool", toolCallId: id, content: String(fact.output ?? "") });
+                messages.push({ role: "tool", toolCallId: id, content: String(fact.output ?? ""), ...(typeof fact.seq === "number" ? { seq: fact.seq } : {}) });
             }
             else {
                 pending.push({
                     call,
                     ok: Boolean(fact.ok),
                     output: String(fact.output ?? ""),
+                    ...(typeof fact.seq === "number" ? { seq: fact.seq } : {}),
                 });
             }
         }
         else if (fact.type === "egress_denied") {
             const target = fact.target ? ` target=${JSON.stringify(fact.target)}` : "";
             const content = `[egress] ${fact.mode ?? "audit"} rule=${fact.rule ?? "unknown"}${target} would_block=${Boolean(fact.wouldBlock)}\n${fact.reason ?? ""}`;
-            messages.push({ role: "system", content });
+            messages.push({ role: "system", content, ...(typeof fact.seq === "number" ? { seq: fact.seq } : {}) });
         }
     }
     flush();

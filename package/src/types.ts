@@ -26,6 +26,8 @@ export interface ToolSchema {
 export interface ChatMessage {
     role: Role;
     content: string;
+    /** Fact sequence when this message came from the session log. */
+    seq?: number;
     toolCalls?: NativeToolCall[];
     toolCallId?: string;
 }
@@ -156,8 +158,12 @@ export interface CommandCompaction {
     beforeTokens: number;
     afterTokens: number;
     droppedMessages: number;
+    droppedFromSeq?: number;
+    droppedToSeq?: number;
+    droppedCount?: number;
+    droppedSeqUnmapped?: boolean;
     keepMessages: number;
-    reason?: "threshold" | "heap" | "manual";
+    reason?: "threshold" | "heap" | "manual" | "anchor";
 }
 
 export interface CommandResult {
@@ -173,6 +179,8 @@ export interface CommandResult {
     compacted?: CommandCompaction;
     /** /clear result; the app appends a cleared fact so resume does not resurrect history. */
     cleared?: boolean;
+    /** /compact clean result; the app appends a compaction_cleaned fact. */
+    compactionCleaned?: { refs: string[] };
 }
 export interface CommandContext {
     args: string[];

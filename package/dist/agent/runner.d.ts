@@ -41,6 +41,7 @@ export interface RunOptions {
     takeSteering?: () => string[];
     onDelta?: (delta: string, text: string) => void;
     requestApproval?: ApprovalResolver;
+    forceAnchor?: boolean;
 }
 export type AgentStopReason = "complete" | "max_turns" | "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "incomplete" | "stream_error" | "protocol_error";
 export type AgentErrorKind = "token_budget" | "cost_budget" | "loop_detected" | "aborted" | "stream_error" | "protocol_error" | "incomplete";
@@ -51,8 +52,12 @@ export type AgentEvent = {
     beforeTokens: number;
     afterTokens: number;
     droppedMessages: number;
+    droppedFromSeq?: number;
+    droppedToSeq?: number;
+    droppedCount?: number;
+    droppedSeqUnmapped?: boolean;
     keptMessages: number;
-    reason: "threshold" | "heap";
+    reason: "threshold" | "heap" | "anchor";
     source: "local" | "server";
     summaryFile?: string;
 } | {
@@ -93,9 +98,11 @@ export type AgentEvent = {
     diffTruncated?: boolean;
     diffs?: Array<StructuredDiff & {
         path: string;
+        unified?: string;
     }>;
     atomic?: boolean;
     check?: ToolCheckResult;
+    rawOutput?: string;
 } | {
     type: "egress_denied";
     outlet: string;

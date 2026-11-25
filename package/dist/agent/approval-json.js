@@ -8,7 +8,26 @@ function targetsFor(request) {
     const values = [args.path, args.from, args.to, args.cwd, request.preview?.kind === "diff" ? "diff" : undefined];
     return values.filter((value) => typeof value === "string" && value.length > 0);
 }
-export function encodeGateAsk(request) {
+function diffStatFor(diffs, fallback) {
+    if (diffs?.length) {
+        let added = 0;
+        let removed = 0;
+        for (const diff of diffs) {
+            for (const line of diff.unified.split(/\r?\n/)) {
+                if (line.startsWith("+++") || line.startsWith("---"))
+                    continue;
+                if (line.startsWith("+"))
+                    added += 1;
+                else if (line.startsWith("-"))
+                    removed += 1;
+            }
+        }
+        return { files: diffs.length, lines: added + removed, added, removed };
+    }
+    const lines = fallback ? fallback.split(/\r?\n/).length : 0;
+    return { files: fallback ? fallback.split(/\r?\n/).filter(Boolean).length : 0, lines, added: 0, removed: 0 };
+}
+export function encodeGateAsk(request, viewOptions = {}) {
     const options = request.options.map((option, index) => ({
         id: optionId(option, index),
         label: option.label,
@@ -29,7 +48,8 @@ export function encodeGateAsk(request) {
         prompt: request.prompt ?? "Approval required",
         source: request.source ?? "system",
         targets: targetsFor(request),
-        diffstat: { files: text ? text.split(/\r?\n/).filter(Boolean).length : 0, lines: text ? text.split(/\r?\n/).length : 0 },
+        diffstat: diffStatFor(viewOptions.diffPreview === false ? undefined : request.patchDiffs, text),
+        ...(viewOptions.diffPreview !== false && request.patchDiffs?.length ? { diffs: request.patchDiffs } : {}),
         options,
         default: options[defaultIndex]?.id ?? "",
         ...(requireInput ? { require_input: requireInput } : {}),

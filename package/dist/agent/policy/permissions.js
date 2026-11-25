@@ -24,6 +24,16 @@ function mergeLayers(...layers) {
     }
     return { shell };
 }
+function isBroadProjectAllow(pattern) {
+    const value = pattern.trim();
+    if (value === "*" || value === "**")
+        return true;
+    const match = /^\/(.*)\/([a-z]*)$/.exec(value);
+    if (!match)
+        return false;
+    const body = match[1].replace(/^\^/, "").replace(/\$/, "");
+    return body === ".*";
+}
 function readLayer(file) {
     try {
         if (!existsSync(file))
@@ -40,7 +50,11 @@ export function loadPermissionPolicy(cwd = process.cwd()) {
     if (!isTrusted(cwd))
         return mergeLayers(global);
     const root = resolve(cwd);
-    return mergeLayers(global, readLayer(join(root, ".fastcode", "permissions.json")), readLayer(join(root, ".fastcode", "permissions.local.json")));
+    const project = mergeLayers(readLayer(join(root, ".fastcode", "permissions.json")), readLayer(join(root, ".fastcode", "permissions.local.json")));
+    // A trusted project must not silently become "allow everything" through
+    // a catch-all pattern. Deny rules are kept as-is (deny is already fail-closed).
+    const projectAllow = (project.shell?.allow ?? []).filter((pattern) => !isBroadProjectAllow(pattern));
+    return mergeLayers(global, { shell: { allow: projectAllow, deny: project.shell?.deny ?? [] } });
 }
 function patternMatcher(pattern) {
     const trimmed = pattern.trim();
@@ -56,7 +70,7 @@ function patternMatcher(pattern) {
             if (regexSafetyError(body))
                 return undefined;
             try {
-                return new RegExp(body, flags || "i");
+                return new RegExp("^(?:" + body + ")$", flags || "i");
             }
             catch {
                 return undefined;
@@ -67,8 +81,10 @@ function patternMatcher(pattern) {
         return undefined;
     const escaped = trimmed
         .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*/g, ".*")
-        .replace(/\?/g, ".");
+        .replace(/\*\*/g, "\u0000")
+        .replace(/\*/g, "[^/]*")
+        .replace(/\?/g, "[^/]")
+        .replace(/\u0000/g, ".*");
     return new RegExp("^" + escaped + "$", "i");
 }
 function matchesAny(patterns, command) {

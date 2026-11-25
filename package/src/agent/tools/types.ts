@@ -68,7 +68,7 @@ export interface ToolResult {
   oldLineCount?: number;
   newLineCount?: number;
   diffTruncated?: boolean;
-  diffs?: Array<StructuredDiff & { path: string }>;
+  diffs?: Array<StructuredDiff & { path: string; unified?: string }>;
   atomic?: boolean;
   check?: ToolCheckResult;
   egress?: EgressAudit;

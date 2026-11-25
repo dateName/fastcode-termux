@@ -4,7 +4,7 @@ import { DEFAULT_SHELL_POOL_SIZE, MAX_SHELL_POOL_SIZE, shellPoolSize } from "../
 export const threadsCommand = {
     name: "threads",
     aliases: ["pool"],
-    description: `Show or set resident shell concurrency (default ${DEFAULT_SHELL_POOL_SIZE}, max ${MAX_SHELL_POOL_SIZE}). Usage: /threads [1-${MAX_SHELL_POOL_SIZE}]`,
+    description: `Show or set resident shell concurrency (default ${DEFAULT_SHELL_POOL_SIZE}, hard max ${MAX_SHELL_POOL_SIZE}). Usage: /threads [1-${MAX_SHELL_POOL_SIZE}]`,
     run({ args, actions }: CommandContext) {
         const before = shellPoolSize();
         if (args.length === 0) {

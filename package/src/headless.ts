@@ -17,6 +17,7 @@ import { buildSkillsPrompt } from "./skills/manager.js";
 import { loadConfig, resolveApiKey } from "./config/store.js";
 import { getProviderOrThrow } from "./providers/index.js";
 import { resumeSession } from "./session/projection.js";
+import { createSessionLog } from "./session/log.js";
 import { discoverInstructions, formatInstructionPrompt } from "./session/instructions.js";
 import { cleanupProcesses } from "./lib/lifecycle.js";
 import { EventStream, headlessSessionId, serializeAgentEvent } from "./agent/event-stream.js";
@@ -25,6 +26,7 @@ interface HeadlessOptions {
     prompt: string;
     ui: "json" | "plain";
     resume?: string;
+    longRun?: boolean;
 }
 
 function optionalBudget(name: string): number | undefined {
@@ -35,7 +37,10 @@ function optionalBudget(name: string): number | undefined {
 export async function runHeadless(options: HeadlessOptions): Promise<void> {
     let config = loadConfig();
     setShellPoolSize(config.shellPoolSize);
-    const stream = options.ui === "json" ? new EventStream(headlessSessionId(options.resume)) : undefined;
+    const headlessSession = process.env["FASTCODE_HEADLESS_SESSION_LOG"] === "1"
+        ? createSessionLog({ providerId: config.providerId, model: config.model, cwd: process.cwd() })
+        : undefined;
+    const stream = options.ui === "json" ? new EventStream(headlessSession?.id ?? headlessSessionId(options.resume)) : undefined;
     const provider = getProviderOrThrow(config.providerId);
     let apiKey: string | undefined;
     if (provider.authEnv.length > 0) {
@@ -92,7 +97,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
 
     const requestApproval = async (request: ApprovalRequest): Promise<ApprovalDecision> => {
         if (options.ui === "json") {
-            stream!.emit(encodeGateAsk(request));
+            stream!.emit(encodeGateAsk(request, { diffPreview: config.diffPreview !== false }));
             const line = await nextLine(request.timeoutMs ?? 60_000);
             if (line === undefined) {
                 const decision: ApprovalDecision = { kind: "deny", reason: "approval timeout/EOF" };
@@ -109,6 +114,10 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             return parsed.decision;
         }
         process.stderr.write(`${request.prompt ?? "Approval required"}\n`);
+        if (config.diffPreview !== false && request.patchDiffs?.length) {
+            const diffLines = request.patchDiffs.flatMap((diff) => [`### ${diff.path}`, ...diff.unified.split(/\r?\n/)]);
+            process.stderr.write(`${diffLines.slice(0, 20).join("\n")}${diffLines.length > 20 ? "\n[... diff truncated ...]" : ""}\n`);
+        }
         request.options.forEach((option, index) => process.stderr.write(`${index + 1}. ${option.label}\n`));
         process.stderr.write(`Choose 1-${request.options.length}: `);
         const line = await nextLine(request.timeoutMs ?? 60_000);
@@ -126,12 +135,17 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
         return decisionForOption(option);
     };
 
+    if (options.longRun && !process.env["FASTCODE_TOKEN_BUDGET"] && !process.env["FASTCODE_COST_BUDGET_USD"])
+        process.stderr.write("[fastcode] LONG-RUN: no token/cost budget is set; the run is uncapped until stopped.\n");
+    let headlessCompaction = undefined;
     const abort = new AbortController();
     let failed = false;
     let toolCallCount = 0;
     let httpRequestCount = 0;
     const headlessSummaries = new Set<string>();
     let lastTurn = 0;
+    let lastStopReason = "";
+    let headlessCheckpointSeq = 0;
     const onSigint = () => abort.abort();
     const onTerminate = () => abort.abort();
     process.once("SIGINT", onSigint);
@@ -145,14 +159,14 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             messages: history,
             prompt: options.prompt,
             system,
-            maxTurns: config.agentMode ? Math.max(1, Math.floor(Number(config.maxAgentTurns) || 24)) : 1,
+            maxTurns: config.agentMode ? (options.longRun ? Math.max(9999, Math.floor(Number(config.maxAgentTurns) || 24)) : Math.max(1, Math.floor(Number(config.maxAgentTurns) || 24))) : 1,
             allowTools: config.agentMode,
             tokenBudget: optionalBudget("FASTCODE_TOKEN_BUDGET"),
             costBudgetUsd: optionalBudget("FASTCODE_COST_BUDGET_USD"),
             signal: abort.signal,
             cwd: process.cwd(),
             idleTimeoutMs: config.requestIdleTimeoutMs,
-            compaction: compactionConfigFromEnv(),
+            compaction: (() => { const value = compactionConfigFromEnv(); if (options.longRun) value.anchorChars = 30_000; return value; })(),
             reasoningEffort: config.reasoningEffort,
             protocol,
             tools: protocol === "native" ? toolSchemas() : undefined,
@@ -170,25 +184,47 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
                 rememberToolCapability(config.providerId, config.model, "native");
             },
         })) {
-            if (event.type === "assistant_raw")
+            if (event.type === "assistant_raw") {
                 httpRequestCount += 1;
-            if (event.type === "compaction" && event.summaryFile)
-                headlessSummaries.add(event.summaryFile);
+                headlessSession?.append({ type: "assistant_raw", content: event.text, ...(event.toolCalls ? { toolCalls: event.toolCalls } : {}) });
+            }
+            if (event.type === "tool_call")
+                headlessSession?.append({ type: "tool_call", id: event.id, tool: event.call.tool, args: event.call, native: Boolean(event.native) });
+            if (event.type === "tool_result")
+                headlessSession?.append({ type: "tool_result", id: event.id, tool: event.call.tool, ok: event.ok, output: event.output, ...(event.rawOutput ? { rawOutput: event.rawOutput } : {}) });
+            if (event.type === "notice")
+                headlessSession?.append({ type: "notice", content: event.text });
+            if (event.type === "egress_denied")
+                headlessSession?.append({ type: "egress_denied", outlet: event.outlet, target: event.target, rule: event.rule, mode: event.mode, wouldBlock: event.wouldBlock, code: event.code, reason: event.reason });
+            if (event.type === "compaction") {
+                if (event.summaryFile)
+                    headlessSummaries.add(event.summaryFile);
+                headlessCompaction = { source: event.source, summaryRef: event.summaryFile ?? null };
+                headlessSession?.append({ type: "compacted", source: event.source, summaryRef: event.summaryFile, reason: event.reason, beforeTokens: event.beforeTokens, afterTokens: event.afterTokens, droppedMessages: event.droppedMessages, keepMessages: event.keptMessages });
+                if (event.reason === "anchor")
+                    headlessSession?.checkpoint?.();
+            }
             if (options.ui === "json") {
                 if (event.type === "checkpoint") {
                     lastTurn = event.turn;
+                    headlessCheckpointSeq += 1;
                     stream!.setTurn(event.turn + 1);
                 }
                 if (event.type === "tool_call")
                     toolCallCount += 1;
                 if (event.type === "error")
                     failed = true;
+                if (event.type === "done")
+                    lastStopReason = event.stopReason;
                 if (event.type === "done" &&
                     (event.stopReason === "stream_error" || event.stopReason === "incomplete" || event.stopReason === "protocol_error" || event.stopReason === "loop_detected"))
                     failed = true;
                 const frame = serializeAgentEvent(event);
-                if (frame)
+                if (frame) {
+                    if (event.type === "checkpoint")
+                        frame.last_fact_seq = headlessCheckpointSeq;
                     stream!.emit(frame, event.type === "checkpoint" ? event.turn : undefined);
+                }
             }
             else if (event.type === "assistant_text") {
                 process.stdout.write(event.text);
@@ -209,15 +245,19 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             }
         }
         if (options.ui === "json")
-            stream!.emit({ event: "summary", tool_call_count: toolCallCount, http_request_count: httpRequestCount, last_turn: lastTurn }, lastTurn);
+            stream!.emit({ event: "summary", tool_call_count: toolCallCount, http_request_count: httpRequestCount, last_turn: lastTurn, ...(lastStopReason ? { stop_reason: lastStopReason } : {}) }, lastTurn);
     }
     finally {
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onTerminate);
         process.removeListener("SIGHUP", onTerminate);
+        headlessSession?.close({ reason: "exit", ...(headlessCompaction ? { compaction: headlessCompaction } : {}) });
         rl.close();
-        for (const ref of headlessSummaries)
-            removeSummaryFile(ref);
+        const latestSummary = Array.from(headlessSummaries).at(-1);
+        for (const ref of headlessSummaries) {
+            if (ref !== latestSummary)
+                removeSummaryFile(ref);
+        }
         // Resident shells keep the event loop alive; a normal headless finish
         // must release them just like the TUI and signal paths do.
         cleanupProcesses();

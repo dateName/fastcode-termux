@@ -4,12 +4,12 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.8**（已发布；npm `latest` 0.1.8；`beta` 仍为 0.1.8-beta.4） |
+| 版本 | **0.1.9-beta.1**（工作树，未发布；已发布 0.1.8；npm `latest` 0.1.8；`beta` 0.1.8-beta.4） |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
 | 仓库 | https://github.com/dateName/fastcode-termux |
 
-> **0.1.8** 为正式版，包含 0.1.8-beta.4 之上的 yq 第二轮修复；PC smoke **447/447**（POSIX 448），已发布到 GitHub Release 与 npm `latest`。上一版 beta.4 资产仍为 441/441（POSIX 442）。
+> **0.1.9-beta.1** 为当前工作树，包含 P4–P9 harness 工作；PC smoke **479/479**（POSIX 480），未发布。已发布正式版仍为 0.1.8（447/447；POSIX 448）。
 
 **English → [README.md](README.md)**
 
