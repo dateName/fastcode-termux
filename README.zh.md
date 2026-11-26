@@ -1,15 +1,15 @@
-# ⚡ FastCode 手机版
+# FastCode
 
-> **装在手机终端里的 AI 编程助手** —— 为 Termux / Android 优化，一行命令从 GitHub 仓库安装。
+> 跑在终端里的 AI 编程助手，支持 Termux/Android、Linux、macOS 和 Windows。
+
+FastCode 连接模型服务商，能读写文件、执行命令、搜索代码。仓库自带 `dist/cli.js`，克隆后无需 `npm install` 即可运行。
 
 | 项目 | 值 |
 |---|---|
-| 版本 | **0.1.9-beta.1**（工作树，未发布；已发布 0.1.8；npm `latest` 0.1.8；`beta` 0.1.8-beta.4） |
 | 命令 | `fastcode`（短别名 `fc`） |
 | 数据目录 | `~/.fastcode`（可用 `FASTCODE_HOME` 修改） |
-| 仓库 | https://github.com/dateName/fastcode-termux |
-
-> **0.1.9-beta.1** 为当前工作树，包含 P4–P9 harness 工作；PC smoke **479/479**（POSIX 480），未发布。已发布正式版仍为 0.1.8（447/447；POSIX 448）。
+| 源码 | https://github.com/dateName/fastcode-termux |
+| 文档 | [配置](docs/CONFIGURATION.md) · [架构](docs/ARCHITECTURE.md) · [排障](RUNBOOK.md) |
 
 **English → [README.md](README.md)**
 
@@ -56,32 +56,25 @@ FastCode-Termux 独立维护，面向 Termux/Android。TypeScript 源码在 `pac
 
 ---
 
-## 🛡️ 安全与可靠性
+## 安全
 
-| 能力 | 行为 | 覆盖方式 |
-|---|---|---|
-| 🔒 项目信任 | 首次在未知文件夹运行时，会在代理工具加载前询问 | `fastcode trust` / `untrust` / `trusted`；`FASTCODE_TRUST_ALL=1` |
-| 🧱 文件沙箱 | 文件工具限制在项目内；`../` 与软链接逃逸都会被拒绝 | `config.sharedDirs`、`FASTCODE_ALLOW_PATHS` |
-| 🚫 危险命令拦截 | 根/源码/通配符/系统路径删除、force-push 受保护分支、`git clean -fdx`、磁盘/容器/系统命令、敏感文件写入/删除/移动、敏感文件外传（`sensitive_file_egress`）、关键凭据读取（`id_*`、`/etc/shadow`、`/etc/sudoers`）、动态 eval/source/-c、反弹 shell 入口、`curl\|sh` 走不可授权的 Hard Block；`.env` 删除/写入/外发也是 Hard Block；裸 `printenv`、`git reset --hard` 属 Soft Gate，通过 resolver 审批 | `FASTCODE_ALLOW_DANGEROUS=1` 仅作用于 Soft Gate |
-| 🛰️ Egress 策略 | 应用层工具/载荷/输出策略；默认 `enabled:true + mode:"block"` 返回 `EGRESS_DENY`（`audit` 只记录、`off` 关闭）；trust/sharedDirs 不能覆盖 | `config.egress`：`enabled`、`mode`、`denyPaths`、`denyGlobs`、`denyContentMarkers`、`maxScanBytes` |
-| ✂️ 统一输出上限 | 输出边产生边截断（默认 30000 字符） | `FASTCODE_TOOL_OUTPUT_LIMIT` |
-| 🧮 tool 消息硬上限 | 单条 tool 消息进入 history 前兜底截断（默认 1,000,000 字符）；单行读取、grep 命中行与 shell 窗口更早裁剪 | `FASTCODE_TOOL_MESSAGE_LIMIT` |
-| 🧪 脚本退出码 | `--ui plain/json` 失败时输出错误并返回非零退出码；初始化错误默认不打印压缩后的 bundle 堆栈 | `FASTCODE_DEBUG=1` 查看完整堆栈 |
-| 🔌 执行后端 | HTTP provider + 规范 NDJSON CLI 后端基础层；CLI 只提议工具调用、由宿主执行；子进程环境 allowlist、stderr 脱敏 | CLI 后端默认不启用；见 `docs/EXECUTION_BACKENDS.md` |
-| 🧭 失败语义 | `done.stopReason` 是业务结果，退出码只管进程级异常；会话写失败降级、不固化残缺投影；审批决策是事件，不是授权 | 见 `docs/ERROR_SEMANTICS.md` |
-| 💾 会话日志 | 追加写入的 JSONL（append-only），崩溃后仍可恢复 | `fastcode sessions` / `fastcode resume`；缓存上限 **256MB** |
-| 🧾 补丁事务 | parse → plan → apply；保持 CRLF/mode；拒绝符号链接；move 不覆盖 | `/expand` 查看完整 diff |
-| 🛑 进程树/退出 | abort/`/kill` 杀子进程与孙进程；`/exit` 中止当前运行并清理所有 resident shell；SIGTERM/SIGHUP/fatal 同样清理 | POSIX 进程组；`lib/lifecycle.ts`；Windows `taskkill /T` |
-| 🔐 审批钩子 | Soft Gate 与敏感/大补丁生成 pending 请求；无 resolver 时 **拒绝**（fail closed） | `--ui tty\|native\|plain\|json`；once/session/always；`fastcode trust --forget <key>` |
+FastCode 能改文件、跑命令，所以以下边界默认开启：
 
-### 已知限制
+- **目录信任**：第一次进入新目录会询问。
+- **文件沙箱**：文件工具限制在项目内；`../` 和软链接逃逸会被拒绝。
+- **危险命令**：破坏性命令、凭据读取和敏感数据外发会被拦截或要求审批。
+- **审批**：敏感或大改动需要批准；没有审批通道时直接拒绝。
+- **输出限制**：控制台和模型输出都有上限，避免单条命令把会话撑爆。
+- **会话恢复**：会话按 JSONL 追加写入，崩溃后可以恢复。
 
-- Ink 5.x 的 IME 光标定位未彻底修复；Termux pty 尺寸异常时可能裁切/乱序（`abcdef` → `bcdefa`）。
-  用 `stty` 修正 pty，或用 `/edit`；彻底修需 Ink ≥6.7。
-- 进程内有 3 个 `string-width` 版本，歧义宽度字符可能列宽不一致。
-- 原生 tools 只覆盖 OpenAI 兼容服务商，其余走伪协议。
-- approval pending 已接入 tty/native/plain/json resolver；Tier 3 的执行前备份仍属第三批，当前破坏性动作 fail-closed。
-- `/threads` 只限制 **resident** shell 池（默认 2，最大 6）。one-shot 命令走独立的 `FASTCODE_MAX_SPAWN_PER_TURN` 预算（默认 8/轮），满额立即失败，且可跨 turn 累积；这不是全局并发上限。
+API Key、自定义路径和更细的策略见 [配置](docs/CONFIGURATION.md)；
+实现细节见 [审计](docs/AUDIT.md) 和 [错误语义](docs/ERROR_SEMANTICS.md)。
+
+### 备注
+
+- Termux 上 IME 光标可能受 pty 尺寸影响；`stty` 或 `/edit` 通常能解决。
+- 原生工具调用只用于 OpenAI 兼容服务商，其余走伪协议。
+- `/threads` 控制的是常驻 shell 池，不是全局并发数。
 
 ---
 
@@ -133,7 +126,7 @@ cd fastcode-portable-<version>
 ./fastcode
 ```
 
-> `release/` 目前仍是 0.1.8-beta.4 已发布资产；`npm run build` + `sh scripts/build-portable.sh` 会按当前 `package.json` 版本（当前 package.json 版本）生成 `fastcode-portable-<version>.tar.gz|zip`、`datename-fastcode-termux-<version>.tgz` 与 `SHA256SUMS`。
+> `release/` 保存最近一次已发布的资产；`npm run build` + `sh scripts/build-portable.sh` 会按当前 `package.json` 版本重新生成 `fastcode-portable-<version>.tar.gz|zip`、`datename-fastcode-termux-<version>.tgz` 与 `SHA256SUMS`。
 
 ### 方式三：从源码运行（仅在你要改源码 / 重新构建时）
 
@@ -192,6 +185,7 @@ fastcode
 | Groq / Mistral | `GROQ_API_KEY` / `MISTRAL_API_KEY` |
 | Ollama | 不需要 Key（本地免费） |
 | 自定义接口 | `FASTCODE_BASE_URL` + `FASTCODE_API_KEY` |
+| Stdio CLI（可选） | `FASTCODE_STDIO_COMMAND`（可选 `FASTCODE_STDIO_ARGS`、`FASTCODE_STDIO_MODEL`、`FASTCODE_STDIO_ENV_ALLOWLIST`） |
 
 **持久化到 `~/.bashrc`，重开终端也生效：**
 

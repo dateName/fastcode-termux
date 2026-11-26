@@ -1,15 +1,15 @@
-# ⚡ FastCode — Termux / Android build
+# FastCode
 
-> **An AI coding assistant that lives in your phone's terminal.** Optimised for Termux / Android; one-line install from the GitHub repo.
+> A terminal AI coding assistant for Termux/Android, Linux, macOS and Windows.
+
+FastCode connects to your model provider and can read files, make edits, run shell commands and search code. The repo ships a self-contained `dist/cli.js`, so a clone runs without `npm install`.
 
 | | |
 |---|---|
-| Version | **0.1.9-beta.1** (worktree, unpublished; published 0.1.8; npm `latest` 0.1.8; `beta` 0.1.8-beta.4) |
 | Command | `fastcode` (short alias `fc`) |
 | Data dir | `~/.fastcode` (override with `FASTCODE_HOME`) |
-| Repo | https://github.com/dateName/fastcode-termux |
-
-> **0.1.9-beta.1** is the current worktree, containing the P4?P9 harness work. PC smoke **479/479** (POSIX 480); unpublished. The published stable remains 0.1.8 (447/447; POSIX 448).
+| Source | https://github.com/dateName/fastcode-termux |
+| Docs | [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md) · [Troubleshooting](RUNBOOK.md) |
 
 **中文文档 → [README.zh.md](README.zh.md)**
 
@@ -57,32 +57,26 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 
 ---
 
-## 🛡️ Safety and reliability
+## Safety
 
-| Capability | Behaviour | Override |
-|---|---|---|
-| 🔒 Project trust | first run in an unknown folder asks before agent tools load | `fastcode trust` / `untrust` / `trusted`; `FASTCODE_TRUST_ALL=1` |
-| 🧱 File sandbox | file tools stay inside the project; `../` and symlink escapes are rejected | `config.sharedDirs`, `FASTCODE_ALLOW_PATHS` |
-| 🚫 Dangerous-command guard | non-overridable Hard Block for root/source/wildcard/system deletes, force-push to protected branches, `git clean -fdx`, disk/container/system commands, sensitive-file writes/deletes/moves, sensitive-file egress (`sensitive_file_egress`), critical credential reads (`id_*`, `/etc/shadow`, `/etc/sudoers`), dynamic eval/source/-c, reverse-shell entries and curl\|sh; bare `printenv`, `git reset --hard` are Soft Gate and approve through the resolver | `FASTCODE_ALLOW_DANGEROUS=1` only for Soft Gate |
-| 🛰️ Egress policy | application-layer tool/payload/output policy; default `enabled:true + mode:"block"` returns `EGRESS_DENY` (`audit` only records, `off` disables); cannot be overridden by trust/sharedDirs | `config.egress`: `enabled`, `mode`, `denyPaths`, `denyGlobs`, `denyContentMarkers`, `maxScanBytes` |
-| ✂️ Unified output cap | output is truncated while produced (default 30000 chars) | `FASTCODE_TOOL_OUTPUT_LIMIT` |
-| 🧮 Tool-message hard cap | a single tool message is capped before it enters history (default 1,000,000 chars); single-line reads, grep hits and shell windows are clipped earlier | `FASTCODE_TOOL_MESSAGE_LIMIT` |
-| 🧪 Scriptable exit codes | `--ui plain/json` report errors and exit non-zero on failure; startup errors avoid dumping the minified bundle stack | `FASTCODE_DEBUG=1` for full stacks |
-| 🔌 Execution backends | HTTP providers plus a canonical NDJSON CLI backend foundation; a CLI only proposes tool calls, the host executes them; child env is allowlisted and stderr is redacted | CLI backend is not enabled by default; see `docs/EXECUTION_BACKENDS.md` |
-| 🧭 Failure semantics | `done.stopReason` is the business result; exit codes are a process-level channel; a failed session write degrades and never freezes a partial projection; approval decisions are events, not grants | See `docs/ERROR_SEMANTICS.md` |
-| 💾 Session log | append-only JSONL, survives a crash | `fastcode sessions` / `fastcode resume`; cache cap **256MB** |
-| 🧾 Patch transaction | parse → plan → apply; CRLF/mode preserved; symlinks refused; move never overwrites | `/expand` for full diff |
-| 🛑 Process tree | abort/`/kill` kills children and grandchildren; `/exit` aborts the run and kills resident shells | POSIX process group; Windows `taskkill /T` |
-| 🔐 Approval hook | Soft Gate and sensitive/large patches produce a pending request; no resolver = **deny** (fail closed) | `--ui tty\|native\|plain\|json`; once/session/always; `fastcode trust --forget <key>` |
+FastCode can edit files and run commands, so these boundaries stay on by default:
 
-### Known limitations
+- **Folder trust** — first run in a new folder asks for confirmation.
+- **File sandbox** — file tools stay inside the project; `../` and symlink escapes are rejected.
+- **Dangerous commands** — destructive commands, credential access and sensitive-data egress are blocked or sent for approval.
+- **Approval** — sensitive or large edits require an approval; without a resolver they fail closed.
+- **Output limits** — console and model output are capped to keep a runaway command from flooding the session.
+- **Session recovery** — sessions are append-only JSONL and can be resumed after a crash.
 
-- Ink 5.x IME cursor placement is not fully fixed; a stale Termux pty size can clip/reorder text (`abcdef` → `bcdefa`).
-  Correct the pty with `stty`, or use `/edit`; a full fix needs Ink ≥6.7.
-- Three `string-width` versions may disagree on ambiguous-width characters.
-- Native tools cover OpenAI-compatible providers only; others use the pseudo protocol.
-- Approval pending is wired to tty/native/plain/json resolvers; Tier 3 backup-before-execution is still pending (third batch), so Tier 3 destructive actions fail closed.
-- `/threads` caps the **resident** shell pool only (default 2, max 128). One-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget (default 8/turn), fail immediately at the limit, and can accumulate across turns; this is not a global concurrency cap.
+Provider keys, custom paths and finer policy controls are documented in
+[Configuration](docs/CONFIGURATION.md); implementation details are in
+[Audit](docs/AUDIT.md) and [Error semantics](docs/ERROR_SEMANTICS.md).
+
+### Notes
+
+- On Termux, IME cursor placement can be affected by a stale pty size; `stty` or `/edit` usually fixes it.
+- Native tool calls are used for OpenAI-compatible providers; others use the pseudo protocol.
+- `/threads` controls the resident shell pool, not the global number of running commands.
 
 ---
 
@@ -109,7 +103,7 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-From npm: `npm install -g @datename/fastcode-termux@latest` (`latest` carries the current stable; `beta` still carries 0.1.8-beta.4). The tracked `release/` contains the current stable assets.
+From npm: `npm install -g @datename/fastcode-termux@latest` (`latest` is the stable channel; `beta` is the pre-release channel). The tracked `release/` contains the current release assets.
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 

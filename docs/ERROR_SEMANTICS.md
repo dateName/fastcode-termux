@@ -1,6 +1,6 @@
 # 错误语义与退出码
 
-> 状态：2026-11-22。本文是失败路径的权威说明；工具/守卫/审批细节仍以 `ARCHITECTURE.md`、`CONFIGURATION.md` 为准。
+> 状态：0.1.9-beta.1 工作树（2026-11-25）。本文是失败路径的权威说明；工具/守卫/审批细节仍以 `ARCHITECTURE.md`、`CONFIGURATION.md` 为准。
 
 ## 1. 原则
 

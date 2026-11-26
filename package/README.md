@@ -16,22 +16,11 @@
 </p>
 
 ```bash
-npm install -g @datename/fastcode-termux@beta
+npm install -g @datename/fastcode-termux@latest
 fastcode
 ```
 
-> The `latest` tag carries this version; `beta` remains at 0.1.8-beta.4. Install with `@latest` (or `@<version>`).
-
-Short alias included:
-
-```bash
-fc
-```
-
-**0.1.9-beta.1** is the current worktree, based on 0.1.8 plus the P4?P9
-harness work. PC smoke 479/479 (POSIX 480); unpublished. The published stable
-is still 0.1.8 (447/447; POSIX 448); npm `latest` is 0.1.8 and `beta` is
-0.1.8-beta.4.
+`latest` is the stable channel. The short alias is `fc`:
 
 ---
 
@@ -421,26 +410,20 @@ npm publish --access public
 
 ---
 
-## Safety, sessions and limits
+## Safety and limits
 
-| Feature | Behaviour | Override |
-| --- | --- | --- |
-| Project trust | First run in a folder asks before agent tools load; the list lives in ~/.fastcode/trusted.json | fastcode trust / untrust / trusted, FASTCODE_TRUST_ALL=1 |
-| Dangerous-command guard | Hard Block for destructive/system/sensitive-file commands and credential exfil; `.env` writes/deletes/moves, critical credential reads and egress are non-overridable | FASTCODE_ALLOW_DANGEROUS=1 only for Soft Gate |
-| Egress policy | application-layer tool/payload/output policy; default `enabled:true + mode:"block"` returns `EGRESS_DENY` (`audit` only records, `off` disables) | `config.egress`: enabled, mode, denyPaths, denyGlobs, denyContentMarkers, maxScanBytes |
-| Unified tool-output cap | Output is truncated while it is produced, not sliced afterwards (default 30000 characters) | FASTCODE_TOOL_OUTPUT_LIMIT |
-| Tool-message hard cap | A single tool message is capped before it enters history (default 1,000,000 characters); single-line reads, grep hits and shell windows are clipped earlier | FASTCODE_TOOL_MESSAGE_LIMIT |
-| Scriptable exit codes | `--ui plain/json` report errors and exit non-zero on failure; startup errors avoid the minified bundle stack | FASTCODE_DEBUG=1 for full stacks |
-| Execution backends | HTTP providers plus a canonical NDJSON CLI backend; a CLI only proposes tool calls, the host executes them; child env is allowlisted and stderr is redacted | Not enabled by default; set FASTCODE_STDIO_COMMAND (+ FASTCODE_STDIO_ARGS/MODEL/ENV_ALLOWLIST) to register the `stdio` provider; see `docs/EXECUTION_BACKENDS.md` |
-| Failure semantics | `done.stopReason` is the business result; exit codes are a process-level channel; a failed session write degrades and never freezes a partial projection; approval decisions are events, not grants | See `docs/ERROR_SEMANTICS.md` |
-| Session log | Append-only JSONL in ~/.fastcode/sessions, resumable after a crash (cache cap 256MB by default) | fastcode sessions, fastcode resume, FASTCODE_SESSION_LOG=0, FASTCODE_SESSION_CACHE_MB |
-| Checkpoints/projection | `*.projection.json` (~200KB cap) with tool/model/cwd fingerprint; tool payloads folded to edit facts, dropped-message markers, summary markers protected; unpaired tool calls completed on resume | FASTCODE_FSYNC, FASTCODE_SESSION_LOG |
-| Exit save point | `/exit` aborts the run, stops shells, then writes `session_end{reason,compaction}` + projection and best-effort fsyncs both; busy runs require a second `/exit` within 5s; Esc/Ctrl+C keep partial output | `/exit` (`/quit`, `/q`), double Ctrl+C |
-| Patch transaction | parse → plan → apply; CRLF/mode kept; symlinks refused; move never overwrites | `/expand` for the full diff |
-| Process tree | abort or `/kill` kills children/grandchildren; `/exit` uses SIGTERM → wait → SIGKILL for resident shells | POSIX process group, Windows `taskkill /T` |
-| Compaction | token/heap threshold; Notes/Outcomes/Files first; summary written to `summary-*.md`; `/compact` records a `compacted` fact; old summaries cleaned; summary scans sample the first 64KB and oversized tool/user messages are slimmed when compaction makes no progress | FASTCODE_COMPACTION=0, FASTCODE_COMPACTION_RATIO, FASTCODE_COMPACTION_KEEP_TURNS, FASTCODE_COMPACTION_SUMMARY_TOKENS, FASTCODE_HEAP_LIMIT_MB |
-| Background shell | Commands over ~2s return a session id; poll incrementally. `/threads` caps the **resident** pool (default 2, max 128); one-shot commands use a separate `FASTCODE_MAX_SPAWN_PER_TURN` budget and are not globally capped; each job keeps the last 256KB | `/jobs`, `/attach`, `/kill`, `/threads`, FASTCODE_MAX_SPAWN_PER_TURN |
-| Approval hook | Sensitive/large patches need approval; without a resolver they are denied (fail closed) | `--ui tty\|native\|plain\|json`; once/session/always; `fastcode trust --forget <key>` |
+FastCode can edit files and run commands, so these boundaries stay on by default:
+
+- **Folder trust** — first run in a new folder asks for confirmation.
+- **File sandbox** — file tools stay inside the project; `../` and symlink escapes are rejected.
+- **Dangerous commands** — destructive commands, credential access and sensitive-data egress are blocked or sent for approval.
+- **Approval** — sensitive or large edits require approval; without a resolver they fail closed.
+- **Output limits** — console and model output are capped to keep a runaway command from flooding the session.
+- **Session recovery** — sessions are append-only JSONL and can be resumed after a crash.
+
+Provider keys, custom paths and finer policy controls are documented in
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md); implementation details are in
+[`docs/AUDIT.md`](docs/AUDIT.md) and [`docs/ERROR_SEMANTICS.md`](docs/ERROR_SEMANTICS.md).
 
 ## 🙏 Credits
 
