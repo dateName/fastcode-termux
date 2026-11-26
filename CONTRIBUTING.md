@@ -10,7 +10,7 @@
 
 ## 硬约束
 
-- **不 fork 整个 Pi**；FastCode 的修复与 harness 改造要保留。
+- 保持现有修复与 harness 改造；不要整体重写核心架构。
 - 改 `package/src` 后必须：`npm run typecheck`、`npm run lint`、`npm run build`、`node scripts/smoke-test.mjs`、`node package/scripts/verify-artifacts.mjs`。
 - **`package/dist/cli.js` 受 Git 跟踪**：源码改动必须重新 build 并提交新产物；否则 clone 后跑旧 bundle。
 - 改 `AGENT_SYSTEM_PROTOCOL` 会改变模型行为；伪协议/原生 tools 必须可回退（`FASTCODE_TOOL_PROTOCOL=legacy|native|auto`）。
