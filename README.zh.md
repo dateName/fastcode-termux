@@ -20,8 +20,8 @@
 FastCode 是一个跑在终端里的**多模型 AI 编程助手**（TUI）。它连接你常用的模型服务商，
 能像 agent 一样**读文件、改文件、执行命令、搜索代码**，并支持 Agent Skills 扩展能力。
 
-本项目基于上游 `SimpleLittleDev/FastCode` 0.1.3 编译产物做了修复与手机适配，
-并已**逆向重建 TypeScript 源码**（`package/src`，`npm run build` 可重新编译）。
+FastCode-Termux 独立维护，面向 Termux/Android。TypeScript 源码在 `package/src`，
+`npm run build` 可重新构建 `dist`。
 
 发布物为**自包含单文件** `package/dist/cli.js`（用 esbuild 把 Ink/React/meow 等依赖全部内联），
 因此 `git clone` 后**不需要 `npm install`** 就能运行。
@@ -360,33 +360,23 @@ gh release create v<version> -t "FastCode <version>" \
 | [docs/DEVLOG.md](docs/DEVLOG.md) | 改动日志、迁移、风险与回滚 |
 | [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta 交接报告（历史） |
 | [CHANGELOG.md](CHANGELOG.md) | 分版本更新日志（含历史版本） |
-| [PATCHES.md](PATCHES.md) | 上游修复 + harness 改造 |
+| [PATCHES.md](PATCHES.md) | 既有修复 + harness 改造 |
 
 ---
 
 ## ℹ️ 关于本项目
 
-- 上游源码仓库 `github.com/SimpleLittleDev/FastCode`，npm 上最后一版是 0.1.3。
-  本仓库在其编译产物上修复 + 手机适配，并已逆向重建 TypeScript 源码（`package/src`）。
+- FastCode-Termux 独立维护，面向 Termux/Android；`package/src` 是源码真相源，
+  `npm run build` 重新构建 `dist`。
 
 ---
 
 ## 🙏 致谢
 
-本项目是站在他人肩膀上的二次修复与适配，特别感谢：
-
-- **SimpleLittleDev** —— 原始 FastCode TUI 的作者。本项目基于其 npm 包
-  [`@simplelittledev/fastcode`](https://www.npmjs.com/package/@simplelittledev/fastcode)（0.1.3）
-  的编译产物进行修复与手机适配，npm 上的贡献与荣誉归其所有。
-
-- 以及全部上游开源依赖的作者：Ink、React、meow、cfonts、marked、chalk 等。
-
-原始作者署名与上游项目名称、版权归各自所有；本仓库仅做修复与 Termux 适配。
+感谢 FastCode-Termux 贡献者与开源依赖作者：Ink、React、meow、cfonts、marked、chalk 等。
 
 ## 📜 许可证
 
-MIT。原始 FastCode © 2026 SimpleLittleDev；本修复/Termux 适配 © 2026 FastCode-Termux contributors。
-本项目基于 `SimpleLittleDev/FastCode`（`@simplelittledev/fastcode` 0.1.3），原项目采用 MIT。
-完整文本见 [LICENSE](LICENSE)。
+MIT。版权声明保留在 [LICENSE](LICENSE)。
 
 <sub>Made for Termux 🐧📱 · FastCode</sub>

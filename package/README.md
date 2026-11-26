@@ -444,12 +444,9 @@ npm publish --access public
 
 ## 🙏 Credits
 
-- **SimpleLittleDev** — author of the original FastCode TUI; the npm package
-  `@simplelittledev/fastcode` and its credit belong to them.
-- All upstream dependency authors (Ink, React, meow, cfonts, marked, chalk, ...).
+Thanks to the FastCode-Termux contributors and the open-source dependency authors
+(Ink, React, meow, cfonts, marked, chalk, ...).
 
 ## 📜 License
 
-MIT. Original FastCode © 2026 SimpleLittleDev; this fix/Termux adaptation © 2026
-FastCode-Termux contributors. Based on `SimpleLittleDev/FastCode`
-(`@simplelittledev/fastcode` 0.1.3), originally MIT. See `LICENSE`.
+MIT. Copyright notices retained in `LICENSE`.

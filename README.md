@@ -21,9 +21,8 @@ FastCode is a multi-model **AI coding assistant** that runs in your terminal (TU
 It connects to your favourite provider and works like an agent — it **reads files, edits
 files, runs commands and searches code** — and supports Agent Skills.
 
-This repo fixes and adapts the upstream `SimpleLittleDev/FastCode` 0.1.3 build for
-mobile, and the TypeScript source has been reverse-engineered into `package/src`
-(`npm run build` rebuilds `dist`).
+FastCode-Termux is maintained independently. The TypeScript source is tracked in
+`package/src` (`npm run build` rebuilds `dist`).
 
 The shipped artifact is a **self-contained single file** `package/dist/cli.js` (esbuild inlines
 Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
@@ -364,33 +363,24 @@ gh release create v<version> -t "FastCode <version>" \
 | [docs/DEVLOG.md](docs/DEVLOG.md) | change log: migrations, risks, rollback |
 | [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta handover report (historical) |
 | [CHANGELOG.md](CHANGELOG.md) | release notes (historical versions included) |
-| [PATCHES.md](PATCHES.md) | upstream fixes + harness changes |
+| [PATCHES.md](PATCHES.md) | earlier fixes + harness changes |
 
 ---
 
 ## ℹ️ About this build
 
-- The upstream repository is `SimpleLittleDev/FastCode`; npm's last release is 0.1.3.
-  This repo fixes and adapts that compiled artifact for mobile, with the TypeScript source reverse-engineered into `package/src`.
+- FastCode-Termux is maintained independently as the Termux/Android build.
+  `package/src` is the source of truth and `npm run build` rebuilds `dist`.
 
 ---
 
 ## 🙏 Credits
 
-This project is a fix + Termux adaptation that stands on other people's work. Thanks to:
-
-- **SimpleLittleDev** — author of the original FastCode TUI. This repo is a fix + mobile
-  adaptation built on the compiled artifact of the npm package
-  [`@simplelittledev/fastcode`](https://www.npmjs.com/package/@simplelittledev/fastcode) (0.1.3);
-  credit for the npm package belongs to them.
-
-Original author credits, upstream project names and copyrights remain the property of their
-respective owners; this repo only fixes and adapts for Termux.
+Thanks to the FastCode-Termux contributors and the open-source dependency authors
+(Ink, React, meow, cfonts, marked, chalk, ...).
 
 ## 📜 License
 
-MIT. Original FastCode © 2026 SimpleLittleDev; this fix/Termux adaptation © 2026
-FastCode-Termux contributors. This project is based on `SimpleLittleDev/FastCode`
-(`@simplelittledev/fastcode` 0.1.3), originally licensed under MIT. See [LICENSE](LICENSE).
+MIT. Copyright notices retained in [LICENSE](LICENSE).
 
 <sub>Made for Termux 🐧📱 · FastCode</sub>
