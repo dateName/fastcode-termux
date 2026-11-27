@@ -6,6 +6,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
  * decides before anything loads.
  */
 import { Box, Text, useInput } from "ink";
+import { t } from "../i18n/index.js";
 export const TrustGate = ({ theme, cwd, onDecision }) => {
     useInput((input) => {
         const value = String(input ?? "").toLowerCase();
@@ -15,12 +16,12 @@ export const TrustGate = ({ theme, cwd, onDecision }) => {
             onDecision(false);
     });
     return (_jsxs(Box, { flexDirection: "column", borderStyle: "round", borderColor: theme.accent, paddingX: 1, marginTop: 1, children: [
-            _jsx(Text, { color: theme.accent, bold: true, children: "Trust this folder?" }),
+            _jsx(Text, { color: theme.accent, bold: true, children: t("trust.title") }),
             _jsx(Text, { color: theme.muted, children: cwd }),
             _jsx(Text, { children: "" }),
-            _jsx(Text, { children: "FastCode agent tools can read, write and delete files here, and run shell commands." }),
-            _jsx(Text, { children: "Continue only if you trust this project." }),
+            _jsx(Text, { children: t("trust.body") }),
+            _jsx(Text, { children: t("trust.warning") }),
             _jsx(Text, { children: "" }),
-            _jsx(Text, { children: "[y] trust and continue    [n] decline (chat only)    [q] quit" }),
+            _jsx(Text, { children: t("trust.options") }),
         ] }));
 };

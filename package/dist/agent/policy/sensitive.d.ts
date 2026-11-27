@@ -15,4 +15,8 @@ export interface SensitiveMatch {
 }
 export declare const SENSITIVE_RULES: SensitiveRule[];
 /** Return every sensitive match; this scans the full input, not a window. */
+export declare function redactSensitive(content: string): {
+    text: string;
+    redacted: number;
+};
 export declare function detect(content: string, extraPatterns?: string[]): SensitiveMatch[];

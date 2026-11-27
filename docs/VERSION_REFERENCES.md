@@ -1,12 +1,12 @@
 # 版本号引用与升级清单
 
-> 状态：2026-11-21。**`package/package.json` 的 `version` 是唯一权威源**；本文件只记录哪些位置允许硬编码、哪些必须用占位符/引用，以及一次版本升级要改哪里。
+> 状态：2026-11-27。**`package/package.json` 的 `version` 是唯一权威源**；本文件只记录哪些位置允许硬编码、哪些必须用占位符/引用，以及一次版本升级要改哪里。
 > 行号是当前工作树快照；下次先运行 `node scripts/version-anchors.mjs` 获取最新行号。
 
 ## 1. 规则
 
 1. **唯一源**：`package/package.json` 的 `version`。`package-lock.json` 由 `npm version` 生成，不手改。
-2. **允许硬编码当前版本**（仅以下 15 行）：发布说明标题、当前状态头、用户可见版本表、运维包版本、审计报告标题。
+2. **允许硬编码当前版本**（以下当前状态锚点，合计 21 行，以 `version-anchors` 输出为准）：发布说明标题、当前状态头、运维包版本、审计报告标题等。
 3. **不硬编码**：
    - 安装命令用 `@beta` 或 `@<version>`；发布版本状态用 `npm view … dist-tags`。
    - 发布资产文件名、tag 命令、GitHub Release 命令用 `<version>` 占位符。
@@ -14,7 +14,7 @@
    - 历史版本（0.1.8-beta.2 / 0.1.8-beta.1 / 0.1.8-beta.0 / 0.1.7 / 0.1.6）是历史，不随当前版本替换。
 4. **状态 vs 版本**：`release/`、npm `beta`、`latest` 是发布状态，写“上一批/见 dist-tags”，不复制具体版本。
 
-## 2. 当前锚点（15 行）
+## 2. 当前锚点（2026-11-27 实测 21 行）
 
 | 文件 | 行 | 角色 | 处理 |
 |---|---:|---|---|
@@ -22,18 +22,21 @@
 | `package/package-lock.json` | 3, 9 | 生成物 | `npm version` 自动更新 |
 | `CHANGELOG.md` | 5 | 发布说明标题 | 新版本加 section |
 | `docs/DEVLOG.md` | 4 | 当前工作树头 | 只保留一份快照 |
-| `docs/AUDIT.md` | 1 | 审计报告标题 | 只改这一处 |
-| `README.md` | 7 | 用户版本表 | 只改这一处 |
-| `README.zh.md` | 7 | 用户版本表 | 只改这一处 |
-| `package/README.md` | 31 | 包内当前树声明 | 只改这一处 |
+| `docs/AUDIT.md` | 1, 431 | 审计标题 / npm beta 状态 | 标题随版本；beta 状态保留实际 tag |
+| `docs/ARCHITECTURE.md` | 3 | 当前版本头 | 随版本 |
+| `docs/CONFIGURATION.md` | 620 | CLI 速查标题 | 随版本 |
+| `docs/DEPLOYMENT.md` | 6 | 当前工作树版本 | 随版本；release/tag 另写实际值 |
+| `docs/ERROR_SEMANTICS.md` | 3 | 状态头 | 随版本 |
+| `docs/SDK.md` | 3 | 契约状态头 | 随版本 |
+| `docs/VERIFICATION_BASELINE.md` | 29 | 版本行 | 随版本；npm/release 另写实际状态 |
 | `PATCHES.md` | 1 | 修复清单标题 | 保留当前目标 |
-| `AGENTS.md` | 11 | 项目身份 | 只改这一处 |
-| `NOW.md` | 11 | 当前状态 | 只改这一处 |
-| `PROJECT_INDEX.md` | 7 | 项目一行定位 | 只改这一处 |
-| `RUNBOOK.md` | 18 | 运维包版本 | 只改这一处 |
-| `脑图.md` | 5 | 当前基线 | 只改这一处 |
+| `AGENTS.md` | 11, 84 | 项目身份 / 当前基线 | 随版本 |
+| `NOW.md` | 11 | 当前状态 | 随版本 |
+| `PROJECT_INDEX.md` | 7 | 项目一行定位 | 随版本 |
+| `RUNBOOK.md` | 18 | 运维包版本 | 随版本 |
+| `脑图.md` | 5, 34, 739 | 当前基线 / 发布态 / 一句话方向 | 随版本 |
 
-> `package-lock.json` 两行、`README`/`README.zh` 各一行；合计 15 行。
+> `version-anchors` 按文本命中计数，当前 21 行；`README` / `README.zh` / `package/README` 不硬编码当前版本，使用 `@beta`、`<version>` 或实际 dist-tags。
 
 ### 已改为占位符/引用（不要再写死）
 
@@ -57,7 +60,7 @@ npm version <version> --no-git-tag-version
 #    CHANGELOG / DEVLOG / AUDIT / README / README.zh / package README /
 #    PATCHES / AGENTS / NOW / PROJECT_INDEX / RUNBOOK / 脑图
 
-# 3) 查看剩余锚点（应只有上表 15 行）
+# 3) 查看剩余锚点（以 version-anchors 输出为准）
 cd ..
 node scripts/version-anchors.mjs
 

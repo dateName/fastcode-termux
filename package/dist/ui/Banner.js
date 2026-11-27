@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import BigText from "ink-big-text";
 import Gradient from "ink-gradient";
+import { t as translate } from "../i18n/index.js";
 const FRAMES = 16;
 // (font, columns) needed to render the literal text "FastCode" with
 // letterSpacing 1 and space:false. Measured with cfonts; largest first.
@@ -52,7 +53,7 @@ export const Banner = ({ theme, subtitle, stable = false }) => {
         return null;
     const t = stable ? 1 : Math.min(1, frame / FRAMES);
     const colors = rotate(theme.banner, t);
-    return (_jsxs(Box, { flexDirection: "column", alignItems: "flex-start", marginBottom: 1, children: [_jsx(Gradient, { colors: colors, children: _jsx(BigText, { text: "FastCode", font: font, space: false }) }), _jsx(Text, { color: theme.muted, children: subtitle ?? "multi-LLM TUI · skills.sh · slash commands · /help to start" })] }));
+    return (_jsxs(Box, { flexDirection: "column", alignItems: "flex-start", marginBottom: 1, children: [_jsx(Gradient, { colors: colors, children: _jsx(BigText, { text: "FastCode", font: font, space: false }) }), _jsx(Text, { color: theme.muted, children: subtitle ?? translate("banner.subtitle") })] }));
 };
 /** Cycle the gradient stops by `t ∈ [0,1]` for a subtle shimmer effect. */
 function rotate(stops, t) {

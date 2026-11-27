@@ -1,6 +1,6 @@
 # FastCode 架构说明
 
-> 版本：见 `package/package.json`（0.1.9-beta.1 工作树；基于 0.1.8 + P4–P9 harness；未提交/未发布）
+> 版本：见 `package/package.json`（0.1.9-beta.2 工作树；基于 0.1.8 + P4–P9 harness；未提交/未发布）
 > 适用：`package/src` 当前源码树与 `dist/cli.js` 构建产物
 > 维护：改模块、命令、环境变量或安全语义时同步本文件
 
@@ -14,15 +14,15 @@
 │ 命令层  cli-main.ts（TUI 之外）+ commands/*（斜杠命令）       │
 ├─────────────────────────────────────────────────────────────┤
 │ 界面层  app.ts + ui/*（Ink/React；只渲染事件，不跑 agent）    │
-│         headless.ts（--ui json / 非 TTY plain）               │
+│         headless.ts（--ui json / 非 TTY plain）             │
 ├─────────────────────────────────────────────────────────────┤
 │ 编排层  agent/runner.ts（async generator）                   │
-│         agent/registry.ts + tools/* + agent/policy/*          │
+│         agent/registry.ts + tools/* + agent/policy/*        │
 ├─────────────────────────────────────────────────────────────┤
 │ 领域层  providers/*（含 spec.ts） session/* skills/* plugins/*│
-│         agent/guards.ts agent/shell-ast.ts approval*.ts       │
+│         agent/guards.ts agent/shell-ast.ts approval*.ts      │
 ├─────────────────────────────────────────────────────────────┤
-│ 基础层  config/*  lib/*（含 lifecycle.ts） patch/*  types.ts  │
+│ 基础层  config/*  lib/*（含 lifecycle.ts） patch/*  types.ts │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,6 +75,7 @@
 - 后置检查：`registry` 在工具成功且有文件 sideEffects 时运行 `config.checkCommand`（`agent/check-loop.ts`）；只把改动文件经 `FASTCODE_CHECK_FILES` 传入，结果附在 `tool_result.check`，失败/超时**不改变工具 ok**。
 - 工具契约：`read_file` offset/limit（1-based）、`read_many` 总字节预算（`maxBytes` 钳制、逐文件错误隔离）、`grep` case/glob（长度/`**` 上限）/context/maxResults、`replace_in_file` expectedMatches、`copy_file` 默认拒绝已存在目标、`delete_file` 目录需 recursive、`move_path` EXDEV 回退；sideEffects 与实际 fs 状态一致。
 - `agent/tools/*`：15 个单文件工具；文件工具走沙箱路径；patch 三阶段 parse/plan/apply。`read_file` 的行区间分支先按字节预算裁剪再入结果；`grep` 超长命中行裁剪到 500 字符。
+- `lib/diff.ts`：行级 DP 预算 `4_000_000`；超过预算时先剥离公共前后缀，再用唯一行锚点（LIS）继续切分，避免大文件远距改动退化成单个巨 hunk。`ui/DiffPreview.ts` 按完整 hunk 截断，不再从 hunk 中间硬切。
 - `runner` 写入 `role:"tool"` 前统一按 `toolMessageLimit()`（默认 1MB）兜底；每轮请求前调用 `pairToolMessages()` 修复悬空 `tool_calls`，abort/loop-detected 提前 break 时对未执行调用补 `role:"tool"` 占位。
 - `agent/protocol.ts`：支持 `<fastcode_tool>`、DSML、Hermes/Qwen `<tool_call>`、Mistral `[TOOL_CALLS]`（pre-v11 数组 / v11+ `func[CALL_ID]{...}`）、Kimi K2 section、Llama `<|python_tag|>` 与裸 JSON；解析器返回 `{calls, consumedEnd, errors, detectedDialects}`；残留标签抢救与重复解析防护。`detectedDialects` 非空但 0 调用时返回 `errors`，runner 注入 `protocol_error`，不再静默记 `complete`；参数归一（Hermes 对象 arguments、Mistral 的 `{` 起点、Kimi ID 头取函数名、Llama `parameters`→`arguments`）在解析器内完成。
 - `agent/shell-ast.ts`：纯 JS `bash-parser` 第二意见，只升级 hard；只解析 `-c`、`find -exec`、`eval/source/.`、同段一次赋值；解析失败保持形状结果。
@@ -132,7 +133,7 @@
 
 ## 8. Shell 与进程树
 
-- `agent/shell-session.ts`：两条执行路径，预算不共享。**resident**：POSIX 非交互命令，`sh -s` 池默认 2、`/threads` 可调至 6；池满时排队；每条命令包在子 shell 中（隔离 `export`/`umask`/`set -e`/`exit`）；含后台操作符时完成标记后回收该 resident。**one-shot**：Windows 或交互/REPL 判定命令，由 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮，新建速率而非全局并发上限）限制，满额立即失败、不排队。每个 job 保留最近 **256KB** 输出窗口，再加上 runner 的单条 tool 消息硬上限。`shellPoolStats().active` 统计所有运行中 job，`pool/maxPool` 只统计 resident；跨 turn 未结束的 one-shot 仍占并发。详见 `CONFIGURATION.md` §后台 shell。
+- `agent/shell-session.ts`：两条执行路径，预算不共享。**resident**：POSIX 非交互命令，`sh -s` 池默认 2、`/threads` 可调至 128；池满时排队；每条命令包在子 shell 中（隔离 `export`/`umask`/`set -e`/`exit`）；含后台操作符时完成标记后回收该 resident。**one-shot**：Windows 或交互/REPL 判定命令，由 `FASTCODE_MAX_SPAWN_PER_TURN`（默认 8/轮，新建速率而非全局并发上限）限制，满额立即失败、不排队。每个 job 保留最近 **256KB** 输出窗口，再加上 runner 的单条 tool 消息硬上限。`shellPoolStats().active` 统计所有运行中 job，`pool/maxPool` 只统计 resident；跨 turn 未结束的 one-shot 仍占并发。详见 `CONFIGURATION.md` §后台 shell。
 - 超时/取消统一 `lib/process-tree.ts` 的 `terminateProcessTree`：进程组 `SIGTERM` → grace → `SIGKILL`；ESRCH 视为已退出。`agent/process-tree.ts` 保留兼容 re-export，供 shell 会话与后端层复用。
 - 后台任务保留 timeout；转后台只解除前台 AbortSignal。
 - `setsid` 后代仍可能逃逸；不扫描 `ppid=1`，错误信息明确边界。
@@ -176,13 +177,24 @@ npm run bench
 git diff --check
 ```
 
-当前基线（2026-11-21 PC 复核；Termux 为 2026-11-06 真机记录）：
+当前基线（计数唯一源）：`docs/VERIFICATION_BASELINE.md`（2026-11-27）。
 
-- PC：**447/447**（当前工作树本地 build；Windows / Node 24；POSIX 专属用例跳过）
-- Termux 真机：281/281（历史；2026-11-06 tag 前记录；当前工作树新增用例待复跑）
+- PC（Windows）：见 `docs/VERIFICATION_BASELINE.md`（当前工作树本地 build）
+- Termux 真机：见 `docs/VERIFICATION_BASELINE.md`（历史，待复跑）
 - bench（Windows / Node v24.20.0）：cold start 143.74ms、write 200KB 8.86ms、read_many 10×200KB 26.04ms、list 1000 68.19ms、grep 1000 630.06ms
 - bench（Termux / Node v26.4.0）：cold start 893.13ms、write 200KB 32.78ms、read_many 10×200KB 82.57ms、list 1000 153.18ms、grep 1000 865.73ms
 - 回滚演练：`git archive HEAD` 临时目录中的旧 bundle 可启动（`--version` 正常）
 - 2026-11-15 新增用例覆盖单行超长读取、tool 消息硬上限、压缩限界/收敛、无 index 归并/对象参数、悬空 tool_calls、headless 退出码、配额/超时/权限一致性、custom 认证头与 probe modelsPath；失败语义批次覆盖 degraded 会话/幂等 close、审批决策帧、probe 归因、incomplete/terminal latch、`protocol_error`；方言批次覆盖 Hermes/Qwen、Mistral pre-v11/v11+、Kimi K2、Llama tag/裸 JSON；当前版本收尾批次覆盖 #150–#152（400 前缀去重、混排剥离 offset、native 降级 system 同步）。Windows 计数 441（POSIX 448）；Termux 真机计数待复跑。
 
 改 `src` 后必须重新 build 并提交新的 `dist`；仓库内文档以本文件、`MODULES.md`、`CONFIGURATION.md` 与两份 README 为准。离线开发文档归档在 `config/kai`，不上传。
+
+## 13. 对外 SDK 契约（M1 起）
+
+- 契约类型在 `src/public/types.ts` 定义：`TaskStatus` / `RunError` / `RunConfig` / `RunOptions` / `TaskHandle` / `RunResult`；`onEvent` 引用现有 `AgentEvent`，不改事件闭集。
+- 错误/状态映射在 `src/runtime/error-map.ts`：`AgentErrorKind` / `AgentStopReason` 全分支映射为公开 `RunError` / `TaskStatus`，新增分支触发编译期穷尽检查（`Record` + `assertNever`）。
+- M2 已落地 `runTask()` / `TaskHandle` 封装（`src/runtime/task.ts`）：同步校验、事件 pump、wait/stop、`logPath`/`sessionId`、事实落盘。
+- M3 已落地库入口与发布面：`src/lib.ts`、`package.json` 的 `exports`（`.` + `./types`）、`dist/lib.js` / `dist/lib.d.ts` / `dist/public/types.d.ts`；`./runtime` 子路径不提供。
+- M4 已落地契约快照（`exports` / 公开 `.d.ts` / NDJSON 信封 + 6 条语义），随 `npm run check` 进 CI；SDK 文档见 `docs/SDK.md`；版本升级与 beta 细则待产品确认。
+- H1a-1 已落地 `runTask` 子进程 hook host（`src/hooks/hook-host-runner.ts` + `dispatch.ts`）：lazy start、NDJSON、env allowlist、软/硬超时、崩溃不杀 run；H1b/H1c 已把同一 host 接到 `headless`/TUI（CLI `FASTCODE_HOOKS=1`，默认关）；H1a-2 已实现 TUI warm host + `name:mtimeMs:size` 签名，未变复用、变化重启；headless/SDK 仍按 run 停止。
+- H2（2026-11-27）：`logPath` 固定 `<FASTCODE_HOME>/sessions/<id>.jsonl`；`logs/` 只放调试，`state/` 预留且不创建；SDK/CONFIG 文档 + smoke 断言。
+- H3（2026-11-27）：执行引擎 = `runAgent`；编排/视图 = `runTask`/`TaskHandle`；CLI/TUI/headless = 消费者；未来 mode 必须做配置/工作流定义，不得向 `runAgent` 增加 mode 分支；评审规则见 `CONTRIBUTING.md`。

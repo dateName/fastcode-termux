@@ -1,5 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { createHash } from "node:crypto";
+const CTRL_C_CONFIRM_WINDOW_MS = 3250;
 /**
  * FastCode App component — the heart of the TUI.
  *
@@ -20,6 +21,7 @@ import { decisionForOption, parseApprovalChoice } from "./agent/approval.js";
 import { nativeApproval } from "./agent/approval-native.js";
 import { toolSchemas } from "./agent/tool-schemas.js";
 import { setShellPoolSize as applyShellPoolSize, shutdownShells, shutdownShellsAsync } from "./agent/shell-session.js";
+import { dispatchHook, hookEventFor, hooksEnabledFromEnv, shutdownHookHost, startHookHost, stopHookHost } from "./hooks/dispatch.js";
 import { Banner } from "./ui/Banner.js";
 import { Spinner } from "./ui/Spinner.js";
 import { StatusBar } from "./ui/StatusBar.js";
@@ -40,12 +42,14 @@ import { buildPluginsPrompt } from "./plugins/manager.js";
 import { buildSkillsPrompt } from "./skills/manager.js";
 import { createSessionLog, latestUnclosedSession, loggingEnabled, openSessionLog, readSession, staleSummaryRefs } from "./session/log.js";
 import { saveRawOutput } from "./session/raw-output.js";
+import { redactSensitive } from "./agent/policy/sensitive.js";
 import { resumeSession } from "./session/projection.js";
 import { applyPlan, applyRevert } from "./session/actions.js";
 import { discoverInstructions, formatInstructionPrompt } from "./session/instructions.js";
 import { formatPlan, latestPlan } from "./session/plan.js";
 import { isTrusted, trustProject } from "./config/trust.js";
 import { TrustGate } from "./ui/TrustGate.js";
+import { t } from "./i18n/index.js";
 function positiveInt(value, fallback) {
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
@@ -185,9 +189,10 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
     const idRef = useRef(startup.transcript.length);
     const abortRef = useRef(null);
     const lastCompactionRef = useRef(null);
+    const toolResultsRef = useRef(new Map());
     const sawDeltaRef = useRef(false);
     const lastStreamFlushRef = useRef(0);
-    const ctrlCRef = useRef(0);
+    const ctrlCFirstAtRef = useRef(null);
     const exitConfirmRef = useRef(0);
     const busyRef = useRef(false);
     const initialPromptSubmittedRef = useRef(false);
@@ -205,6 +210,12 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
         const idleDeadline = Date.now() + 1000;
         while (busyRef.current && Date.now() < idleDeadline)
             await new Promise((resolve) => setTimeout(resolve, 20));
+        try {
+            await shutdownHookHost();
+        }
+        catch {
+            // Hook shutdown is best effort during exit.
+        }
         try {
             await shutdownShellsAsync(400);
         }
@@ -305,26 +316,25 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
             return;
         }
         if (key.ctrl && inputChar === "c") {
-            ctrlCRef.current += 1;
-            if (busy && ctrlCRef.current === 1) {
+            const now = Date.now();
+            const firstAt = ctrlCFirstAtRef.current;
+            if (busy && firstAt === null) {
                 if (abortRef.current) {
                     abortRef.current.abort();
                     abortRef.current = null;
                 }
-                pushSystem("Cancelled current run; partial output kept. Press Ctrl+C again to quit, or type 继续 to continue.");
-                setTimeout(() => {
-                    ctrlCRef.current = 0;
-                }, 1500);
+                ctrlCFirstAtRef.current = now;
+                pushSystem(`Cancelled current run; partial output kept. Press Ctrl+C again within ${Math.round(CTRL_C_CONFIRM_WINDOW_MS / 1000)}s to quit.`);
                 return;
             }
-            if (ctrlCRef.current >= 2) {
+            if (firstAt !== null && now - firstAt <= CTRL_C_CONFIRM_WINDOW_MS) {
+                ctrlCFirstAtRef.current = null;
+                pushSystem("Saving session and exiting...");
                 void quitCleanly();
             }
             else {
-                pushSystem("Press Ctrl+C again to quit.");
-                setTimeout(() => {
-                    ctrlCRef.current = 0;
-                }, 1500);
+                ctrlCFirstAtRef.current = now;
+                pushSystem(`Press Ctrl+C again within ${Math.round(CTRL_C_CONFIRM_WINDOW_MS / 1000)}s to quit.`);
             }
         }
     });
@@ -572,7 +582,7 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
         if (patchPreview)
             pushDiffVisual(request.patchDiffs);
         if (ui === "json") {
-            return { kind: "deny", reason: "JSON approval mode requires the headless protocol channel (not wired in this build)" };
+            return { kind: "deny", reason: "JSON UI has no interactive approval channel; use --ui plain or answer approval in headless mode" };
         }
         const approvalSignal = abortRef.current?.signal;
         if (ui === "plain") {
@@ -711,6 +721,7 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
             requestId: request.id,
             tool: request.tool,
             decision: decision.kind,
+            source: request.source ?? "system",
             approvalKey,
             ...(request.tier !== undefined ? { tier: request.tier } : {}),
             ...(decision.kind === "allow" ? { scope: decision.scope } : {}),
@@ -825,6 +836,16 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
                 },
                 actions,
             });
+            if (res?.expandTool) {
+                const stored = toolResultsRef.current.get(res.expandTool);
+                if (!stored)
+                    pushSystem(`No tool result with id ${res.expandTool}.`);
+                else {
+                    pushVisualSystem(`Tool ${res.expandTool}:\n\n\`\`\`\n${stored.output}\n\`\`\``);
+                    if (stored.diffs?.length)
+                        pushDiffVisual(stored.diffs);
+                }
+            }
             if (res?.message)
                 pushSystem(res.message);
             if (res?.picker) {
@@ -973,6 +994,13 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
                 .join("\n\n");
             let lastRawFact = "";
             sawDeltaRef.current = false;
+            await startHookHost({
+                enabled: hooksEnabledFromEnv(),
+                taskId: sessionRef.current?.id,
+                cwd: process.cwd(),
+                providerId: config.providerId,
+                model: config.model,
+            });
             for await (const ev of runAgent({
                 provider,
                 apiKey,
@@ -1060,19 +1088,20 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
                     case "tool_call":
                         sessionRef.current.append({ type: "tool_call", id: ev.id, tool: ev.call.tool, args: ev.call, native: Boolean(ev.native) });
                         setStreamPhase("tool");
-                        setAgentActivity(`Coding: ${ev.call.tool}`);
+                        setAgentActivity(t("activity.coding", { tool: ev.call.tool }));
                         pushSystem(`Running tool: \`${ev.call.tool}\`\n\n\`\`\`json\n${JSON.stringify(ev.call, null, 2)}\n\`\`\``);
                         break;
                     case "tool_result": {
+                        toolResultsRef.current.set(ev.id, { output: ev.output, diffs: ev.diffs });
                         const collection = ev.rawOutput && sessionRef.current?.file
-                            ? saveRawOutput(sessionRef.current.file, sessionRef.current.nextSeq(), ev.rawOutput)
+                            ? saveRawOutput(sessionRef.current.file, sessionRef.current.nextSeq(), ev.rawOutput, ev.droppedChars)
                             : undefined;
                         sessionRef.current.append({
                             type: "tool_result",
                             id: ev.id,
                             tool: ev.call.tool,
                             ok: ev.ok,
-                            output: ev.output,
+                            output: redactSensitive(ev.output).text,
                             sideEffects: ev.sideEffects,
                             ...(ev.code ? { code: ev.code } : {}),
                             ...(ev.hint ? { hint: ev.hint } : {}),
@@ -1095,7 +1124,8 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
                             ...(ev.check ? { check: ev.check } : {}),
                             ...(collection ? { collection } : {}),
                         });
-                        const collapsed = stableUi && !expanded;
+                        const editTool = ["apply_patch", "write_file", "append_file", "replace_in_file"].includes(String(ev.call.tool));
+                        const collapsed = stableUi && !expanded && !editTool && !ev.diffs?.length;
                         const body = collapsed ? collapseToolOutput(ev.output) : ev.output;
                         const hint = collapsed ? "\n\n_(output collapsed; /expand to show full output)_" : "";
                         const diffDetail = config.diffPreview !== false && ev.diffs?.length
@@ -1161,7 +1191,7 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
                         break;
                     case "error":
                         if (ev.kind === "aborted")
-                            pushSystem("Cancelled current run; partial output kept. Type 继续 to continue.");
+                            pushSystem("Cancelled current run; partial output kept. Send another message to continue.");
                         else if (ev.kind === "stream_error")
                             pushSystem(streamErrorMessage(ev.message, provider, config.model));
                         else
@@ -1182,6 +1212,9 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
                         }
                         break;
                 }
+                const hookEvent = hookEventFor(ev);
+                if (hookEvent)
+                    await dispatchHook(hookEvent, { taskId: sessionRef.current?.id, cwd: process.cwd(), providerId: config.providerId, model: config.model });
             }
         }
         catch (err) {
@@ -1190,6 +1223,7 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
             pushSystem(`Error: ${String(err?.message ?? err)}`);
         }
         finally {
+            await stopHookHost({ shutdown: false });
             setStreamingId(null);
             setStreamingText("");
             setAgentActivity(null);
@@ -1271,6 +1305,7 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
         return () => clearTimeout(t);
     }, [handleSubmit, initialPrompt]);
     useEffect(() => () => {
+        void shutdownHookHost();
         shutdownShells();
         if (sessionRef.current)
             sessionRef.current.close(lastCompactionRef.current ? { compaction: lastCompactionRef.current } : {});
@@ -1288,5 +1323,5 @@ export const App = ({ initialPrompt, resume, ui = "tty", longRun = false }) => {
         };
         return _jsx(TrustGate, { theme: theme, cwd: process.cwd(), onDecision: decide });
     }
-    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: entry.role === "diff" ? _jsx(DiffPreview, { diffs: entry.diffs, theme }) : _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingTail(streamingText, 6), markdown: false, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamPhase === "streaming" ? "Streaming" : streamPhase === "tool" ? "Waiting for tool" : "Thinking"), stable: stableUi }) })) : null, picker ? _jsx(Picker, { theme: theme, title: picker.title, items: picker.items, index: pickerIndex, current: picker.current }) : _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: pendingLogin ? handleWizardSubmit : handleSubmit, disabled: false, placeholder: promptPlaceholder, mask: promptMask }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, longRun, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length, reasoningEffort: config.reasoningEffort }), _jsxs(Text, { color: theme.muted, children: [COMMANDS.length, " commands \u00B7 ", config.enabledSkills.length, " skill(s) active"] })] })] }));
+    return (_jsxs(Box, { flexDirection: "column", paddingX: 1, children: [showBanner ? _jsx(Banner, { theme: theme, stable: stableUi }) : null, _jsx(Static, { items: transcript, children: (entry) => (_jsx(Box, { marginTop: 1, children: entry.role === "diff" ? _jsx(DiffPreview, { diffs: entry.diffs, theme }) : _jsx(MessageBubble, { theme: theme, role: entry.role, content: entry.content, markdown: entry.markdown }) }, entry.id)) }), streamingId !== null && liveStreamingUi ? (_jsx(Box, { marginTop: 1, flexDirection: "column", children: _jsx(MessageBubble, { theme: theme, role: "assistant", content: streamingTail(streamingText, 6), markdown: false, streaming: true }) })) : null, _jsxs(Box, { marginTop: 1, flexDirection: "column", children: [busy ? (_jsx(Box, { marginBottom: 1, children: _jsx(Spinner, { theme: theme, label: agentActivity ?? (streamPhase === "streaming" ? t("activity.streaming") : streamPhase === "tool" ? t("activity.waitingTool") : t("activity.thinking")), stable: stableUi }) })) : null, picker ? _jsx(Picker, { theme: theme, title: picker.title, items: picker.items, index: pickerIndex, current: picker.current }) : _jsx(Prompt, { theme: theme, value: input, onChange: setInput, onSubmit: pendingLogin ? handleWizardSubmit : handleSubmit, disabled: false, placeholder: promptPlaceholder, mask: promptMask }), _jsx(StatusBar, { theme: theme, providerId: config.providerId, model: config.model, longRun, inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost, enabledSkillCount: config.enabledSkills.length + config.enabledPlugins.length, reasoningEffort: config.reasoningEffort }), _jsx(Text, { color: theme.muted, children: t("app.footer", { commands: COMMANDS.length, skills: config.enabledSkills.length }) })] })] }));
 };

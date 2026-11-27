@@ -28,7 +28,7 @@ const SPECS = [
     // Aggregators / gateways (OpenAI-compatible direct)
     { id: "aihubmix", label: "AIHubMix", baseUrl: "https://aihubmix.com/v1", authEnv: ["AIHUBMIX_API_KEY"] },
     { id: "aiwave", label: "AIWave", baseUrl: "https://aiwave.live/v1", authEnv: ["AIWAVE_API_KEY"] },
-    { id: "hefu", label: "HeFu (合富宝)", baseUrl: "https://api.hefu.hk/v1", authEnv: ["HEFUAI_API_KEY"] },
+    { id: "hefu", label: "HeFu", baseUrl: "https://api.hefu.hk/v1", authEnv: ["HEFUAI_API_KEY"] },
     { id: "4sapi", label: "4SAPI", baseUrl: "https://4sapi.com/v1", authEnv: ["4SAPI_API_KEY"] },
     { id: "aigateway", label: "AIgateway", baseUrl: "https://api.aigateway.sh/v1", authEnv: ["AIG_KEY"] },
     { id: "dmxapi", label: "DMXAPI", baseUrl: "https://www.dmxapi.cn/v1", authEnv: ["DMXAPI_API_KEY"] },
@@ -46,12 +46,12 @@ const SPECS = [
     { id: "opencode-go", label: "OpenCode Go", baseUrl: "https://opencode.ai/zen/go/v1", authEnv: ["OPENCODE_API_KEY"] },
     // Domestic (OpenAI-compatible direct)
     { id: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.cn/v1", authEnv: ["MINIMAX_API_KEY"] },
-    { id: "volcengine", label: "Volcengine Ark (豆包)", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", authEnv: ["ARK_API_KEY"] },
-    { id: "qianfan", label: "Baidu Qianfan (文心)", baseUrl: "https://qianfan.baidubce.com/v2", authEnv: ["QIANFAN_API_KEY"] },
+    { id: "volcengine", label: "Volcengine Ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", authEnv: ["ARK_API_KEY"] },
+    { id: "qianfan", label: "Baidu Qianfan", baseUrl: "https://qianfan.baidubce.com/v2", authEnv: ["QIANFAN_API_KEY"] },
     { id: "hunyuan", label: "Tencent Hunyuan", baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", authEnv: ["HUNYUAN_API_KEY"] },
-    { id: "stepfun", label: "StepFun (阶跃星辰)", baseUrl: "https://api.stepfun.com/v1", authEnv: ["STEPFUN_API_KEY"] },
-    { id: "spark", label: "iFlytek Spark (讯飞星火)", baseUrl: "https://spark-api-open.xf-yun.com/v1", authEnv: ["SPARK_API_KEY"] },
-    { id: "siliconflow", label: "SiliconFlow (硅基流动)", baseUrl: "https://api.siliconflow.cn/v1", authEnv: ["SILICONFLOW_API_KEY"] },
+    { id: "stepfun", label: "StepFun", baseUrl: "https://api.stepfun.com/v1", authEnv: ["STEPFUN_API_KEY"] },
+    { id: "spark", label: "iFlytek Spark", baseUrl: "https://spark-api-open.xf-yun.com/v1", authEnv: ["SPARK_API_KEY"] },
+    { id: "siliconflow", label: "SiliconFlow", baseUrl: "https://api.siliconflow.cn/v1", authEnv: ["SILICONFLOW_API_KEY"] },
     { id: "302ai", label: "302.AI", baseUrl: "https://api.302.ai/v1", authEnv: ["AI302_API_KEY"] },
     // International (OpenAI-compatible direct)
     { id: "together", label: "Together AI", baseUrl: "https://api.together.ai/v1", authEnv: ["TOGETHER_API_KEY"] },

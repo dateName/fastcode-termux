@@ -61,6 +61,8 @@ export declare function listSessions(): {
     bytes: number;
     modified: string;
     messages: number;
+    cwd: string;
+    model: string;
 }[];
 export declare function resolveSessionFile(idOrFile: string): string;
 /**

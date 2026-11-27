@@ -89,7 +89,7 @@ export type AgentEvent =
     | { type: "assistant_raw"; text: string; toolCalls?: NativeToolCall[]; reasoning?: string }
     | { type: "assistant_text"; text: string }
     | { type: "tool_call"; id: string; call: ToolCall; native?: boolean }
-    | { type: "tool_result"; id: string; call: ToolCall; ok: boolean; output: string; sideEffects?: SideEffects; code?: string; hint?: string; truncated?: boolean; totalLines?: number; returnedLines?: number; totalBytes?: number; returnedBytes?: number; filesRead?: number; filesSkipped?: number; matches?: number; oldText?: string; newText?: string; changedStartLine?: number; oldLineCount?: number; newLineCount?: number; diffTruncated?: boolean; diffs?: Array<StructuredDiff & { path: string; unified?: string }>; atomic?: boolean; check?: ToolCheckResult; rawOutput?: string }
+    | { type: "tool_result"; id: string; call: ToolCall; ok: boolean; output: string; sideEffects?: SideEffects; code?: string; hint?: string; truncated?: boolean; totalLines?: number; returnedLines?: number; totalBytes?: number; returnedBytes?: number; filesRead?: number; filesSkipped?: number; matches?: number; oldText?: string; newText?: string; changedStartLine?: number; oldLineCount?: number; newLineCount?: number; diffTruncated?: boolean; diffs?: Array<StructuredDiff & { path: string; unified?: string }>; atomic?: boolean; check?: ToolCheckResult; rawOutput?: string; droppedChars?: number }
     | { type: "egress_denied"; outlet: string; target?: string; rule: string; mode: "audit" | "block"; wouldBlock: boolean; code: "EGRESS_DENY"; reason: string }
     | { type: "usage"; usage: NonNullable<ChatChunk["usage"]> }
     | { type: "loop_detected"; fingerprint: string; occurrences: number; warned: boolean }
@@ -338,7 +338,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                 lastVisible = partial;
             stopReason = "incomplete";
             errorMessage = `Connection ended before the response finished${streamed.retried > 0 ? ` (retried ${streamed.retried}×)` : ""}. ` +
-                "Partial output is kept — type 继续 to continue.";
+                "Partial output is kept — send another message to continue.";
             yield { type: "notice", text: errorMessage };
             // Terminal state gets both a notice (kept in the transcript) and an
             // error event so headless/JSON consumers see a non-complete stop
@@ -419,13 +419,13 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
                 }
                 yield { type: "tool_call", id, call, native: true };
                 const result: any = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
-                const rawOutput = String(result.output ?? "");
+                const rawOutput = String(result.rawOutput ?? result.output ?? "");
                 if (typeof result.output === "string")
                     result.output = boundToolMessage(result.output);
                 trackSideEffects(activeFiles, result.sideEffects);
                 if (result.egress)
                     yield { type: "egress_denied", ...result.egress };
-                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result), ...(rawOutput.length > 30_000 ? { rawOutput } : {}) };
+                yield { type: "tool_result", id, call, ok: Boolean(result.ok), output: String(result.output ?? ""), ...toolResultMeta(result), ...(rawOutput.length > 30_000 ? { rawOutput } : {}), ...(result.droppedChars ? { droppedChars: result.droppedChars } : {}) };
                 anchorChars += String(result.output ?? "").length;
                 history = [...history, { role: "tool", toolCallId: id, content: String(result.output ?? "") }];
                 executed.add(id);
@@ -547,7 +547,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
             const id = `tc_${++toolCallSeq}`;
             yield { type: "tool_call", id, call };
             const result: any = await runAgentTool(call, cwd, { signal, turn: turn + 1, requestApproval: options.requestApproval });
-            const rawOutput = String(result.output ?? "");
+            const rawOutput = String(result.rawOutput ?? result.output ?? "");
             if (typeof result.output === "string")
                 result.output = boundToolMessage(result.output);
             results.push({ call, ok: Boolean(result.ok), output: String(result.output ?? ""), sideEffects: result.sideEffects });
@@ -583,7 +583,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
     let finalText = "";
     if (stopReason === "aborted") {
         const partial = stripToolCalls(currentText).trim() || lastVisible;
-        finalText = (partial ? partial + "\n\n" : "") + "[用户中断]";
+        finalText = (partial ? partial + "\n\n" : "") + "[user interrupted]";
         yield { type: "error", kind: "aborted", message: "Cancelled.", text: partial };
     }
     else if (stopReason === "protocol_error") {
@@ -596,7 +596,7 @@ export async function* runAgent(options: RunOptions): AsyncGenerator<AgentEvent,
         finalText = lastVisible || errorMessage;
     }
     else if (stopReason === "max_turns") {
-        finalText = `Reached the maximum of ${maxTurns} agent tool turns. The work so far is kept in this session — type 继续 to keep going.`;
+        finalText = `Reached the maximum of ${maxTurns} agent tool turns. The work so far is kept in this session — send another message to keep going.`;
     }
     else {
         finalText = lastVisible;

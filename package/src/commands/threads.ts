@@ -8,22 +8,9 @@ export const threadsCommand = {
     run({ args, actions }: CommandContext) {
         const before = shellPoolSize();
         if (args.length === 0) {
-            const sizes = Array.from({ length: MAX_SHELL_POOL_SIZE }, (_, index) => index + 1);
+            actions.setInput?.(`/threads `);
             return {
-                message: `Shell concurrency: ${before} resident slot(s) (default ${DEFAULT_SHELL_POOL_SIZE}, max ${MAX_SHELL_POOL_SIZE}).`,
-                picker: {
-                    title: `Resident shell concurrency · current ${before}`,
-                    current: String(before),
-                    items: sizes.map((size) => ({
-                        value: String(size),
-                        label: String(size),
-                        hint: size === DEFAULT_SHELL_POOL_SIZE ? "default" : size === MAX_SHELL_POOL_SIZE ? "max" : undefined,
-                    })),
-                    onSelect: (value) => {
-                        actions.setShellPoolSize(Number(value));
-                        actions.pushSystemMessage(`Shell concurrency: ${before} → ${shellPoolSize()}. Running jobs keep their slots.`);
-                    },
-                },
+                message: `Shell concurrency: ${before} resident slot(s) (default ${DEFAULT_SHELL_POOL_SIZE}, hard max ${MAX_SHELL_POOL_SIZE}). \nPrompt prefilled: type 1-${MAX_SHELL_POOL_SIZE} and Enter.`,
             };
         }
         const requested = Number(args[0]);

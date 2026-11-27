@@ -1,7 +1,7 @@
 import { installSkill, uninstallSkill, listInstalledSkills, searchRegistry, getSkill, rebaselineSkills, resolveRegistry, } from "../skills/manager.js";
 export const skillsCommand = {
     name: "skills",
-    description: "Manage Agent Skills (download from skills.sh and toggle).",
+    description: "Manage Agent Skills: /skills [list|search <q>|install <id> [--force]|uninstall <name>|enable [name]|disable [name]|info [name]|verify [name]|registry <url>]",
     async run({ args, state, actions }) {
         const sub = (args[0] ?? "list").toLowerCase();
         const rest = args.slice(1);

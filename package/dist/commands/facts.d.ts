@@ -1,7 +1,7 @@
 export declare const factsCommand: {
     name: string;
     description: string;
-    run({ args, raw }: any): {
+    run({ args }: any): {
         message: string;
     };
 };

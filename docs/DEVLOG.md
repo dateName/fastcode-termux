@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前开发线：**0.1.9-beta.1 工作树**（基于 0.1.8 + P4–P9 harness；未提交/未发布，npm `latest` 仍为 0.1.8，`beta` 见 npm）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 / 0.1.8-beta.1 / 0.1.8-beta.2 / 0.1.8-beta.3 / 0.1.8-beta.4 保持不变
+> 当前开发线：**0.1.9-beta.2 工作树**（基于 0.1.8 + P4–P9 harness；未提交/未发布，npm `latest` 仍为 0.1.8，`beta` 见 npm）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 / 0.1.8-beta.1 / 0.1.8-beta.2 / 0.1.8-beta.3 / 0.1.8-beta.4 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows
@@ -884,3 +884,49 @@ node scripts/verify-artifacts.mjs # 5 guard markers in cli.js + guards.js, bundl
 - B2-03：shell soft-gate 在 Hard Block 后、审批前检查 trust；未信任目录批准一次也不能执行。B2-07 精确化为“本地敏感读取允许、外传拦截”。
 - yq 第二轮：permissions/grep regex 长度与嵌套量词防护；`**` 上限 4；read_many UTF-8 码点与预算一致；grep 行上限按字节；apply_patch SANDBOX_DENY；worktree recorded base + binary + `--commit` 增量 apply。
 - 验证：Windows **ALL PASS (447/447)**（POSIX 448）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。
+
+
+---
+
+## B29–B45 收口（2026-11-26）
+
+### 采集层 / 大文件 / diff
+
+- B29：`createOutputBuffer` 增加 `fullValue()`；runner 从 `result.rawOutput` 落 raw；grep 透传 `rawText`/`droppedChars`。
+- B30：raw 记录真实丢弃字符；facts/raw 出口统一 `redactSensitive`。
+- B32：`write_file`/`append_file` 读取完整 before，不再用 16K 前缀计算 diff/审批。
+- B31：DP 预算 250000 → 4,000,000；超预算先剥公共前后缀，再用唯一行锚点 + LIS 继续分 hunk。
+- B37：DiffPreview 按完整 hunk 截断，不再从 hunk 中间硬切；省略时提示 `/expand <id>`。
+
+### TUI / sessions / headless
+
+- B39：保存最近 tool_result；`/expand <id>` 重放完整输出与 diff；编辑类工具输出在 stable UI 不折叠。
+- B40：`/threads` 无参不弹 picker，显示当前值并预填 `/threads `；范围 1–128。
+- B41：`sess`/`ls` 作为 `sessions` 别名，不再把 `sess` 当 prompt。
+- B42：`sessions show` 打印用户/助手全文、tool_call 参数、tool_result 输出、compacted/checkpoint；支持 `--full`、`--max-chars`；追加 provenance 告警。
+- B43：JSONL 被 prune 后可从 `.projection.json` 列出、show、resume。
+- B44：列表按事实计数，带 cwd 与 `provider::model`；`--all`/`--limit`；projection-only 入列表。
+- B45：headless 默认写 session log；`FASTCODE_HEADLESS_SESSION_LOG=0` 关闭；frame 与 log 共享 session_id。
+- R1：`fastcode resume` 无 id 且有 TTY 时打开终端选择器（↑/↓、1–9、Enter、Esc）；`resume <id>`/`latest` 直连；非 TTY 回退最近一条。
+- R2：命令文档/可用性审计；`/cost` 兼容空会话 totals；CLI `--help` 补 config export/import、sessions 参数、resume picker、skills `--force`；新增注册表/别名/`/help` 覆盖回归。
+- R3：扩展中文 i18n 覆盖 banner、prompt、trust gate、picker 提示/页码、status bar、activity、help/about、footer；新增 zh catalog 全 key 回归。
+- R4：清理英文界面残留中文（中断/取消提示、`[user interrupted]`、projection 说明、provider 标签、列表分隔符），新增 provider label 与中断提示无 CJK 回归。
+- R5：新增 `scripts/security-test.mjs` 24 项安全攻击回归矩阵与 `docs/SECURITY_MATRIX.md`；覆盖路径/链接、shell、egress、session、审批、资源、权限；CI 在 check 后执行。
+
+### 审批 / 诊断 / 中断
+
+- B33：JSON UI deny 文案改为“无交互审批通道”。
+- B34：`approval` fact 带 `source`；Requests/Notes/Actions/Outcomes 带 `[seq=N]`，Requests 上限 20。
+- B35：raw 会话额度按字符统计。
+- B36：`lockdown()` 返回布尔状态；doctor 打印 anchorChars。
+- B38：未配对/中断 tool result 写结构化 `code:"INTERRUPTED"`/`doNotRetry:true`。
+
+### 验证
+
+- Windows smoke **501/501**；bundle **2,252,335 bytes**；`npm run check`、`verify:artifacts`、`verify:gate --self-test` 通过。
+- 新增回归：P1 B30 fullValue、P2 B32 完整 before、P3-4/P3-5 多 hunk、P4 `/expand <id>`、P7 B38、B41/B43/B44/B45。
+- 未完成：diff `n/p` 翻页、`/expand` `<Static>` 原位重渲染、POSIX/Termux 实跑、npm beta 回退。
+
+### 回滚
+
+- 按 P1–P7 分阶段改动；可整体回退到 main `0c2ab21`。未 commit、未 push。

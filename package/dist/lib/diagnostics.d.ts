@@ -25,6 +25,7 @@ export declare function collectDiagnostics(): {
     skillsInstalled: number;
     skillsRegistry: string;
     debug: boolean;
+    hooks: boolean;
     configCache: boolean;
     pluginsInstalled: number;
     enabledSkills: any;

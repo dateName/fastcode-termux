@@ -11,6 +11,6 @@ export interface CollectionMeta {
 }
 export declare function sessionOutputId(sessionFile: string): string;
 /** Persist the full tool output for a fact; redaction applies only to this file. */
-export declare function saveRawOutput(sessionFile: string, seq: number, content: string): CollectionMeta;
+export declare function saveRawOutput(sessionFile: string, seq: number, content: string, droppedChars?: number): CollectionMeta;
 export declare function readRawOutput(sessionFile: string, rawRef: string): string | undefined;
 export declare function removeRawOutputsForSession(sessionFile: string): void;

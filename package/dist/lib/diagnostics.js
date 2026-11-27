@@ -140,6 +140,7 @@ export function collectDiagnostics() {
         skillsInstalled,
         skillsRegistry: resolveRegistry(process.env["FASTCODE_SKILLS_REGISTRY"], config.skillsRegistry),
         debug: debugEnabled(),
+        hooks: ["1", "true", "yes", "on"].includes((process.env["FASTCODE_HOOKS"] ?? "").trim().toLowerCase()),
         configCache: configCacheStatus().cached,
         pluginsInstalled,
         enabledSkills: (config.enabledSkills ?? []).length,
@@ -254,7 +255,7 @@ export function formatDiagnostics(info) {
     lines.push(`  read limits   read ${info.readMaxBytes}B · scan ${info.readScanMaxBytes}B · read_many ${info.readManyMaxBytes}B · grep ${info.grepMaxBytes}B`);
     lines.push(`  egress        ${info.egress.enabled ? "enforce" : "audit-only"} · mode ${info.egress.mode} · scan ${info.egress.maxScanBytes}B · paths ${info.egress.denyPaths} · globs ${info.egress.denyGlobs} · markers ${info.egress.denyContentMarkers}`);
     lines.push(`  budgets       ${info.tokenBudget > 0 ? "tokens ≤ " + info.tokenBudget : "token budget off"} · ${info.costBudgetUsd > 0 ? "$" + info.costBudgetUsd : "cost budget off"}`);
-    lines.push(`  compaction    ${info.compactionEnabled ? "on" : "off"} · ${Math.round(info.compactionRatio * 100)}% · keep ${info.compactionKeepTurns} turns · summary ${info.compactionSummaryTokens} tok · heap ${info.compactionHeapUsedMb.toFixed(1)}/${info.compactionHeapMb}MB${info.compactionForced ? " [FORCED]" : ""}${info.serverCompactionAware ? " · server-aware" : ""}`);
+    lines.push(`  compaction    ${info.compactionEnabled ? "on" : "off"} · ${Math.round(info.compactionRatio * 100)}% · keep ${info.compactionKeepTurns} turns · summary ${info.compactionSummaryTokens} tok · anchor ${info.anchorChars} chars · heap ${info.compactionHeapUsedMb.toFixed(1)}/${info.compactionHeapMb}MB${info.compactionForced ? " [FORCED]" : ""}${info.serverCompactionAware ? " · server-aware" : ""}`);
     lines.push(`  shell pool    ${info.shellActive} active · ${info.shellPool}/${info.shellPoolMax} resident · ${info.shellSpawns} spawns · cap ${info.shellMaxSpawn}/turn`);
     lines.push(`  loop exempt   ${info.loopExempt.length > 0 ? info.loopExempt.join(", ") : "(none)"}`);
     lines.push(`  model meta    ctx ${info.modelMeta.contextWindow} · ~${info.modelMeta.charsPerToken} chars/token · ${info.modelMeta.supportsTools ? "tools" : "no tools"} · ${info.modelMetaFile}`);
@@ -273,7 +274,7 @@ export function formatDiagnostics(info) {
             `${info.customAuthPrefix ? " · prefix set" : ""}${info.customAuthExtraHeaders ? " · extra headers set" : ""}`);
     }
     lines.push(`  provider list ${info.providerCount} total (${info.catalogCount} catalog)`);
-    lines.push(`  config cache  ${info.configCache ? "warm" : "cold"} · debug ${info.debug ? "on" : "off"}`);
+    lines.push(`  config cache  ${info.configCache ? "warm" : "cold"} · debug ${info.debug ? "on" : "off"} · hooks ${info.hooks ? "on (FASTCODE_HOOKS)" : "off"}`);
     let apiKeyStatus;
     if (info.keyPresent)
         apiKeyStatus = "present";

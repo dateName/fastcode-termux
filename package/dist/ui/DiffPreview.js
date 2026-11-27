@@ -35,7 +35,35 @@ export function formatUnifiedDiff(unified, maxLines = 50) {
     }
     if (lines.length <= maxLines)
         return lines.join("\n");
-    return [...lines.slice(0, maxLines), `[... ${lines.length - maxLines} lines omitted ...]`].join("\n");
+    const header = [];
+    const hunks = [];
+    let current;
+    for (const line of lines) {
+        if (line.startsWith("@@")) {
+            current = [line];
+            hunks.push(current);
+        }
+        else if (current)
+            current.push(line);
+        else
+            header.push(line);
+    }
+    if (hunks.length === 0)
+        return [...lines.slice(0, maxLines), `[... ${lines.length - maxLines} lines omitted ...]`].join("\n");
+    const kept = [...header];
+    let used = header.length;
+    let omitted = 0;
+    for (const hunk of hunks) {
+        if (kept.length === header.length || used + hunk.length <= maxLines) {
+            kept.push(...hunk);
+            used += hunk.length;
+        }
+        else
+            omitted += 1;
+    }
+    if (omitted === 0)
+        return lines.join("\n");
+    return [...kept, `[... ${omitted} hunk(s) omitted; use /expand <id> for the full output ...]`].join("\n");
 }
 export function formatDiffPreview(diffs, maxLines = 50) {
     if (!diffs?.length)

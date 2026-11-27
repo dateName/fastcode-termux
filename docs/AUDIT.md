@@ -1,4 +1,4 @@
-# 安全与健壮性审计报告 — 0.1.9-beta.1 工作树（基于 0.1.8；历史基线 0.1.6-beta 起）
+# 安全与健壮性审计报告 — 0.1.9-beta.2 工作树（基于 0.1.8；历史基线 0.1.6-beta 起）
 
 审计对象：src/（114 个模块，由 dist 逆向重建后的源码）+ 构建脚本 + 部署方式。
 审计方法：逐模块阅读、构造复现、用 scripts/smoke-test.mjs 固化为回归。
@@ -336,11 +336,11 @@ provider 级 Key 复用、v1/v2 迁移。
 - `node scripts/smoke-test.mjs`：**ALL PASS (369/369)**（Node v24.20.0，2026-11-21；Windows 最终文件 symlink 用例跳过，悬空目录 junction 与硬链接 4 项 + 普通追加通过）。
 - CLI 复验：`fastcode resume <非 .jsonl 文件>` 退出码 1，原文件内容逐字节不变。
 - 硬链接复验：Windows `fs.linkSync` 4 项 + 普通追加通过；write/copy/replace 不再修改沙箱外文件，append 拒绝硬链接目标且正常文件可追加。
-- `npm run verify:artifacts`：通过（`dist/cli.js` 5 个 guard markers，bundle 2,245,293 bytes）。
+- `npm run verify:artifacts`：通过（`dist/cli.js` 5 个 guard markers；bundle 大小见 `docs/VERIFICATION_BASELINE.md`）。
 - `npm audit --omit=dev`：0 漏洞；全量 dev 依赖 6 个 moderate（见 B2-15）。
 - 发布资产 SHA256 复核通过；未发现会话/密钥文件。
 - 未做：Termux/POSIX 真机复跑、真实 provider 端到端、Windows 最终文件 symlink 复现（本机 `EPERM`；目录 junction 祖先已覆盖）。
-- 后续协议/参数、统一事件流、能力目录/结构化 diff、回滚/指令/权限/诊断、外置扩展/plan/worktree 批次后：Windows smoke **479/479**，bundle 2,245,293 bytes；安全回归仍通过。
+- 后续协议/参数、统一事件流、能力目录/结构化 diff、回滚/指令/权限/诊断、外置扩展/plan/worktree 批次后：验证计数见 `docs/VERIFICATION_BASELINE.md`；安全回归仍通过。
 
 ### 8.7 风险排序与建议
 
@@ -413,3 +413,19 @@ provider 级 Key 复用、v1/v2 迁移。
 
 - 文档明确：shell = 已信任用户的完整 shell，不是 sandbox；不要把 guardrails 当安全边界。
 - 若要收紧：① 复用 `child-env` allowlist 给 shell，至少不继承 API key；② 对 `auth.json`/sessions 的 shell 读取做 hard block 或输出脱敏；③ 扩展内容标记到 `sk-proj-`/`sk-ant-` 等，所有出口统一 `redactSecrets`；④ 解析 shell AST 路径并套 egress，或只允许 allowlist + 全量审批；⑤ 修复 B2-03 trust 顺序；⑥ 真隔离用 OS 级：Android/Termux app sandbox、独立低权限用户、容器/proot、seccomp/landlock、网络策略。
+
+### 8.10 B29–B45 收口记录（2026-11-26）
+
+范围：`B29–B45` 的采集层、diff/审批、TUI 命令与会话查询。状态区分代码完成、smoke 通过、真机验证；Termux/POSIX 未复跑，不把 Windows 结果外推。
+
+| 对象 | 结论 | 证据 / 限制 |
+|---|---|---|
+| 采集层 B29/B30 | 代码完成 | `createOutputBuffer.fullValue()` 保留完整文本；runner 从 `rawOutput` 落 raw；grep 透传 raw；facts/raw 出口统一脱敏。真实 provider 与 50012 字符实值未单独复验 |
+| diff B31/B32/B37 | 代码完成，n/p 未做 | DP 预算 4,000,000；超预算用唯一行锚点 + LIS 继续分 hunk；写工具读取完整 before；DiffPreview 只截完整 hunk。3000 行远距改动至少 2 hunk |
+| 审批 B33/B34/B36 | 代码完成 | JSON UI deny 文案可诊断；approval fact 带 `source`；Requests/Notes/Actions/Outcomes 带 seq；`lockdown()` 返回状态；doctor 打印 anchor |
+| 额度 B35 | 代码完成 | raw 会话额度按字符统计，不再把 `stat.size` 字节和字符阈值比较 |
+| 中断 B38 | 代码完成 | 投影的未配对结果带 `code:"INTERRUPTED"` / `doNotRetry:true`，正文标记保留给模型 |
+| TUI B39/B40 | 部分 | `/expand <id>` 重放完整输出与 diff；编辑类工具不折叠；`/threads` 预填输入并支持 1–128。`<Static>` 原位重渲染与 diff `n/p` 翻页未做 |
+| sessions B41–B45 | 代码完成 | `sess`/`ls` 别名；`show` 打印事实正文、`--full`/`--max-chars`、provenance；projection-only 可列/show/resume；列表带 cwd/model、`--all`/`--limit`；headless 默认写 log |
+
+验证边界：计数见 `docs/VERIFICATION_BASELINE.md`；`verify:artifacts`、`verify:gate --self-test` PASS。POSIX/Termux 未当前实跑。npm `beta` 的 0.1.9-beta.1 为误发且无有效 token 回退，不属于代码完成项。

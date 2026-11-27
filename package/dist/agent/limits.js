@@ -38,6 +38,7 @@ export function boundToolMessage(text, limit = toolMessageLimit()) {
 export function createOutputBuffer(limit = toolOutputLimit(), mode = "head") {
     const NL = String.fromCharCode(10);
     let text = "";
+    let fullText = "";
     let dropped = 0;
     const buffer = {
         get full() {
@@ -45,6 +46,7 @@ export function createOutputBuffer(limit = toolOutputLimit(), mode = "head") {
         },
         push(chunk) {
             const value = String(chunk);
+            fullText += value;
             if (mode === "tail") {
                 text += value;
                 if (text.length > limit) {
@@ -71,6 +73,9 @@ export function createOutputBuffer(limit = toolOutputLimit(), mode = "head") {
             if (text.length > 0)
                 buffer.push(NL);
             buffer.push(value);
+        },
+        fullValue() {
+            return fullText;
         },
         value() {
             if (dropped <= 0)

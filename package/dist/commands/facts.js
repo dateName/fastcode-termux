@@ -4,7 +4,7 @@ import { buildProvenance } from "../session/provenance.js";
 export const factsCommand = {
     name: "facts",
     description: "Show facts/raw output/provenance: /facts show <seq> | /facts provenance",
-    run({ args, raw }) {
+    run({ args }) {
         const sub = (args[0] ?? "show").toLowerCase();
         if (sub === "provenance") {
             const file = latestSessionFile();

@@ -31,6 +31,8 @@ export interface ToolCheckResult {
 export interface ToolResult {
     ok: boolean;
     output: string;
+    rawOutput?: string;
+    droppedChars?: number;
     code?: ToolErrorCode;
     hint?: string;
     truncated?: boolean;

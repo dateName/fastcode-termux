@@ -2,15 +2,34 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.9-beta.1（2026-11-25，工作树，未发布）
+## 0.1.9-beta.2（2026-11-27，工作树，未发布）
 
-> 状态：基于 0.1.8 的 P4–P9 harness 工作；Windows smoke **479/479**（POSIX 480）；未提交/未发布；npm `latest` 仍为 0.1.8，`beta` 仍为 0.1.8-beta.4。
+> 状态：基于 0.1.8 的 P4–P9 harness 工作 + B29–B45 收口 + H1/H2/H3；Windows smoke **547/547**（POSIX 未实跑）；H1 hook tests **13/13**；Termux H1 **13/13**；bundle 2,256,678 bytes；未提交/未发布；npm `latest` 仍为 0.1.8，`beta` 为误发的 0.1.9-beta.1（待回退）。计数唯一源见 `docs/VERIFICATION_BASELINE.md`。
 
 - P4：sensitive、raw output、seq、S 索引、Provenance、`/facts show`
 - P5/P6：累计 anchor、`--long-run`/`--full-access`、cost cap
 - P7/P8：生命周期、INTERRUPTED 标记、headless session_id 契约
 - P9：compact list/clean、config export/import、doctor backup check
+- 采集层：`createOutputBuffer.fullValue()` 保留完整 raw；`droppedChars` 记真实丢弃量；facts/raw 出口统一脱敏
+- 大文件：`write_file` / `append_file` 使用完整 before，不再用 16K 前缀制造假 diff
+- diff：DP 预算提升到 4,000,000；超预算时用唯一行锚点继续分 hunk，800 行与 3000 行远距改动都保留多个 hunk
+- TUI：`/expand <id>` 重放已存完整输出/diff；编辑类工具输出不再恒折叠；diff 按完整 hunk 截断
+- `/threads`：无参不再弹 picker，预填 `/threads `，范围 1–128
+- sessions：`sess`/`ls` 别名；`show` 打印 tool_call/tool_result/compacted/checkpoint，支持 `--full`、`--max-chars`；列表增加 cwd/model、`--all`/`--limit`；projection-only 会话可列出、查看、resume
+- `fastcode resume`：无 id 时在 TTY 中打开会话选择器（↑/↓、1–9、Enter、Esc）；仍可直接 `fastcode resume <id>` 或 `latest`；非 TTY 回退最近一条
+- headless：默认写 session log，`FASTCODE_HEADLESS_SESSION_LOG=0` 关闭
+- 审批/诊断：approval fact 增加 `source`；JSON UI deny 文案修正；`lockdown()` 返回状态；doctor 打印 anchor；approval raw 额度按字符统计
 - 其他：三色 diff、并发硬上限 128
+- 安全：新增 `scripts/security-test.mjs` 攻击回归矩阵（24 项）；覆盖路径/链接逃逸、shell Hard Block、egress/脱敏、session 路径、审批 fail-closed、资源上限；`Verify` CI 在 check 后执行
+- 命令审计：slash command 注册表/别名/`/help` 全覆盖回归；CLI `--help` 覆盖 config export/import、backup-check、resume picker；修复 `/cost` 在空会话状态缺少 totals 时崩溃
+- i18n：中文扩展覆盖 banner、输入框、信任确认、选择器提示/页码、状态栏、活动状态、help/about 与底部统计；新增 zh catalog 全 key 覆盖回归
+- i18n：清理英文界面残留中文——中断/取消提示、`[用户中断]`、projection 未配对说明、provider 标签和列表符号统一英文；新增无 CJK 回归
+- H1 hooks：`FASTCODE_HOOKS=1`（CLI TUI/headless）或 `RunOptions.enableHooks`（SDK）加载 `<FASTCODE_HOME>/hooks/*.mjs`；`on-tool-call` / `on-tool-result` / `on-run-complete`；子进程 host、env allowlist、软 1500ms/硬 3000ms、失败不阻断 run；默认关
+- H1a-2：TUI 保持 warm host，按 `name:mtimeMs:size` 签名复用；hook 文件变化才重启；headless/SDK 仍按 run 停止
+- H1b/H1c：headless/TUI 接线；H1c hook-enabled TUI pty 与默认关 TUI pty 均通过
+- H2：`logPath` 固定 `<FASTCODE_HOME>/sessions/<id>.jsonl`；`logs/` 调试、`state/` 预留不创建；smoke 增 logPath 断言
+- H3：执行引擎 `runAgent` / 编排 `runTask` / 消费者边界写入 ARCHITECTURE/SDK；CONTRIBUTING 加“新模式不进 runAgent 分支”评审规则
+- 未完成：diff `n/p` 翻页、`/expand` 原位重渲染、完整 Termux/POSIX smoke 复跑、npm beta 回退
 
 
 ## 0.1.8（2026-11-22，正式版，已发布）
@@ -30,7 +49,7 @@
 - D1：TUI 审批/执行后默认显示 unified diff；`gate:ask` 增加 `diffs` 与 `{files,lines,added,removed}` diffstat；native/plain 同步。
 - P2：permission regex 锚定、`*` 不跨目录、连续星号拒绝、项目层 catch-all allow 收窄。
 - P2：atomic restore 走 `writeTargetNoFollow`；backup 使用 `COPYFILE_EXCL`；`backups()` 精确匹配；Q14 restore 成功保留 backup；`O_NOFOLLOW` 不可用 fail closed；native 合法调用清零连续错误。
-- 验证：Windows smoke **479/479**（POSIX 480）。
+- 验证：Windows smoke **483/483**（POSIX 484）。
 
 ## 0.1.8-beta.4（2026-11-22，已发布）
 

@@ -21,6 +21,7 @@ import { createSessionLog } from "./session/log.js";
 import { discoverInstructions, formatInstructionPrompt } from "./session/instructions.js";
 import { cleanupProcesses } from "./lib/lifecycle.js";
 import { EventStream, headlessSessionId, serializeAgentEvent } from "./agent/event-stream.js";
+import { dispatchHook, hookEventFor, hooksEnabledFromEnv, startHookHost, stopHookHost } from "./hooks/dispatch.js";
 
 interface HeadlessOptions {
     prompt: string;
@@ -37,7 +38,7 @@ function optionalBudget(name: string): number | undefined {
 export async function runHeadless(options: HeadlessOptions): Promise<void> {
     let config = loadConfig();
     setShellPoolSize(config.shellPoolSize);
-    const headlessSession = process.env["FASTCODE_HEADLESS_SESSION_LOG"] === "1"
+    const headlessSession = process.env["FASTCODE_HEADLESS_SESSION_LOG"] !== "0"
         ? createSessionLog({ providerId: config.providerId, model: config.model, cwd: process.cwd() })
         : undefined;
     const stream = options.ui === "json" ? new EventStream(headlessSession?.id ?? headlessSessionId(options.resume)) : undefined;
@@ -101,7 +102,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
             const line = await nextLine(request.timeoutMs ?? 60_000);
             if (line === undefined) {
                 const decision: ApprovalDecision = { kind: "deny", reason: "approval timeout/EOF" };
-                // No session log in headless: the decision frame is the record.
+                // Headless decisions are also appended to the session log; set FASTCODE_HEADLESS_SESSION_LOG=0 to disable.
                 stream!.emit(encodeGateDecision(request, decision, "timeout/EOF"));
                 return decision;
             }
@@ -152,6 +153,13 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
     process.once("SIGTERM", onTerminate);
     process.once("SIGHUP", onTerminate);
     try {
+        await startHookHost({
+            enabled: hooksEnabledFromEnv(),
+            taskId: headlessSession?.id,
+            cwd: process.cwd(),
+            providerId: config.providerId,
+            model: config.model,
+        });
         for await (const event of runAgent({
             provider,
             apiKey,
@@ -243,11 +251,15 @@ export async function runHeadless(options: HeadlessOptions): Promise<void> {
                     failed = true;
                 process.stdout.write(event.finalText + "\n");
             }
+            const hookEvent = hookEventFor(event);
+            if (hookEvent)
+                await dispatchHook(hookEvent, { taskId: headlessSession?.id, cwd: process.cwd(), providerId: config.providerId, model: config.model });
         }
         if (options.ui === "json")
             stream!.emit({ event: "summary", tool_call_count: toolCallCount, http_request_count: httpRequestCount, last_turn: lastTurn, ...(lastStopReason ? { stop_reason: lastStopReason } : {}) }, lastTurn);
     }
     finally {
+        await stopHookHost();
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onTerminate);
         process.removeListener("SIGHUP", onTerminate);

@@ -8,6 +8,7 @@ import { jsxs as _jsxs, jsx as _jsx } from "react/jsx-runtime";
  */
 import { Box, Text } from "ink";
 import { PICKER_WINDOW, pickerWindowStart } from "./picker-window.js";
+import { t } from "../i18n/index.js";
 export const Picker = ({ theme, title, items, index, current, hint }) => {
     const max = Math.max(0, items.length - 1);
     const active = Math.max(0, Math.min(index, max));
@@ -20,5 +21,5 @@ export const Picker = ({ theme, title, items, index, current, hint }) => {
                 const number = String(offset + 1);
                 const isCurrent = current !== undefined && item.value === current;
                 return (_jsxs(Text, { color: selected ? theme.accent : theme.muted, children: [marker, " ", number, ". ", isCurrent ? "\u25CF " : "  ", item.label, item.hint ? _jsxs(Text, { color: theme.muted, children: ["  ", item.hint] }) : null] }, item.value));
-            }), items.length > PICKER_WINDOW ? (_jsx(Text, { color: theme.muted, children: `  \u2026 ${start + 1}-${start + visible.length} of ${items.length}` })) : null, _jsx(Text, { color: theme.muted, children: hint ?? "  \u2191/\u2193 select \u00B7 1-9 jump \u00B7 Enter confirm \u00B7 Esc cancel" })] }));
+            }), items.length > PICKER_WINDOW ? (_jsx(Text, { color: theme.muted, children: `  \u2026 ${t("picker.page", { start: start + 1, end: start + visible.length, total: items.length })}` })) : null, _jsx(Text, { color: theme.muted, children: hint ?? "  " + t("picker.hint") })] }));
 };

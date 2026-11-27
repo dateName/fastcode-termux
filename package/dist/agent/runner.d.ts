@@ -103,6 +103,7 @@ export type AgentEvent = {
     atomic?: boolean;
     check?: ToolCheckResult;
     rawOutput?: string;
+    droppedChars?: number;
 } | {
     type: "egress_denied";
     outlet: string;

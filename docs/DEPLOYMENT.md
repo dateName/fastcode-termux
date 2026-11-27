@@ -3,9 +3,9 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
-> 当前工作树版本：`0.1.9-beta.1`（基于 0.1.8 + P4–P9 harness；未提交/未发布）。
-> `release/` 为当前工作树 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；npm `latest` 仍为 0.1.8。
-> GitHub Release 与 npm 的实际同步以外部查询为准。
+> 当前工作树版本：`0.1.9-beta.2`（基于 0.1.8 + P4–P9 harness + B29–B45；未提交/未推送）。
+> `release/` 是 tag `v0.1.9-beta.1`（`b42f5cf`）的 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`，**不包含**当前未提交改动和 README 重写；assets 也未随 main `0c2ab21` 重建。
+> npm `latest` 为 0.1.8；`beta` 为 Release workflow 误发的 0.1.9-beta.1，token 401，尚未回退。GitHub Release 与 npm 的实际同步以外部查询为准。
 
 ## 0. 先确认 Node 与 git
 
@@ -134,14 +134,20 @@ Windows：
 `dist/cli.js` 自带全部依赖且为纯 JavaScript、无平台原生二进制，因此同一份
 便携包可在 Termux、Linux、macOS、Windows 通用，只有 Node 需各自安装。
 
-发布：
+发布 GitHub Release：
 
+    # 推荐：push v<version> tag，Release workflow 构建附件并创建 Release
+    git tag -a v<version> -m "FastCode <version>"
+    git push origin v<version>
+
+    # 手动兜底（无 Actions 时）：
     gh release create v<version> -t "FastCode <version>" \
       release/fastcode-portable-<version>.tar.gz \
       release/datename-fastcode-termux-<version>.tgz \
       release/SHA256SUMS
 
-    cd package && npm publish --access public --tag beta
+npm 发布是**显式 opt-in**：仓库变量 `PUBLISH_NPM=true` 时 Release workflow 才执行
+`npm publish --tag beta`；普通 tag 只发 GitHub Release，不自动改 npm dist-tag。
 
 维护自检：
 

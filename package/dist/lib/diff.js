@@ -8,30 +8,100 @@ export function splitContent(content) {
         lines.pop();
     return { lines, endsWithNewline };
 }
+function fallbackDiff(a, b) {
+    const n = a.length;
+    const m = b.length;
+    let prefix = 0;
+    while (prefix < n && prefix < m && a[prefix] === b[prefix])
+        prefix += 1;
+    let suffix = 0;
+    while (suffix < n - prefix && suffix < m - prefix && a[n - 1 - suffix] === b[m - 1 - suffix])
+        suffix += 1;
+    const out = [];
+    for (let index = 0; index < prefix; index += 1)
+        out.push({ type: " ", text: a[index], oldLine: index + 1, newLine: index + 1 });
+    const oldMid = a.slice(prefix, n - suffix);
+    const newMid = b.slice(prefix, m - suffix);
+    const anchors = uniqueAnchors(oldMid, newMid);
+    let oldCursor = 0;
+    let newCursor = 0;
+    for (const anchor of [...anchors, { oldIndex: oldMid.length, newIndex: newMid.length }]) {
+        for (let index = oldCursor; index < anchor.oldIndex; index += 1)
+            out.push({ type: "-", text: oldMid[index], oldLine: prefix + index + 1, newLine: 0 });
+        for (let index = newCursor; index < anchor.newIndex; index += 1)
+            out.push({ type: "+", text: newMid[index], oldLine: 0, newLine: prefix + index + 1 });
+        if (anchor.oldIndex < oldMid.length) {
+            out.push({
+                type: " ",
+                text: oldMid[anchor.oldIndex],
+                oldLine: prefix + anchor.oldIndex + 1,
+                newLine: prefix + anchor.newIndex + 1,
+            });
+        }
+        oldCursor = anchor.oldIndex + 1;
+        newCursor = anchor.newIndex + 1;
+    }
+    for (let index = suffix; index > 0; index -= 1) {
+        const oldIndex = n - index;
+        const newIndex = m - index;
+        out.push({ type: " ", text: a[oldIndex], oldLine: oldIndex + 1, newLine: newIndex + 1 });
+    }
+    return out;
+}
+function uniqueAnchors(oldLines, newLines) {
+    const oldCount = new Map();
+    const newCount = new Map();
+    const oldIndex = new Map();
+    const newIndex = new Map();
+    for (let index = 0; index < oldLines.length; index += 1) {
+        oldCount.set(oldLines[index], (oldCount.get(oldLines[index]) ?? 0) + 1);
+        oldIndex.set(oldLines[index], index);
+    }
+    for (let index = 0; index < newLines.length; index += 1) {
+        newCount.set(newLines[index], (newCount.get(newLines[index]) ?? 0) + 1);
+        newIndex.set(newLines[index], index);
+    }
+    const pairs = [];
+    for (const [line, count] of oldCount) {
+        if (count !== 1 || newCount.get(line) !== 1)
+            continue;
+        pairs.push({ oldIndex: oldIndex.get(line), newIndex: newIndex.get(line) });
+    }
+    pairs.sort((left, right) => left.newIndex - right.newIndex);
+    if (pairs.length === 0)
+        return [];
+    const tails = [];
+    const tailPairs = [];
+    const previous = new Array(pairs.length).fill(-1);
+    for (let index = 0; index < pairs.length; index += 1) {
+        const value = pairs[index].oldIndex;
+        let low = 0;
+        let high = tails.length;
+        while (low < high) {
+            const mid = (low + high) >> 1;
+            if (tails[mid] < value)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+        if (low > 0)
+            previous[index] = tailPairs[low - 1];
+        tails[low] = value;
+        tailPairs[low] = index;
+    }
+    const out = [];
+    let cursor = tailPairs[tails.length - 1];
+    while (cursor !== undefined && cursor >= 0) {
+        out.push({ oldIndex: pairs[cursor].oldIndex, newIndex: pairs[cursor].newIndex });
+        cursor = previous[cursor];
+    }
+    return out.reverse();
+}
 function lcs(a, b) {
     const n = a.length;
     const m = b.length;
-    if (n * m > 250_000) {
-        let prefix = 0;
-        while (prefix < n && prefix < m && a[prefix] === b[prefix])
-            prefix += 1;
-        let suffix = 0;
-        while (suffix < n - prefix && suffix < m - prefix && a[n - 1 - suffix] === b[m - 1 - suffix])
-            suffix += 1;
-        const out = [];
-        for (let index = 0; index < prefix; index += 1)
-            out.push({ type: " ", text: a[index], oldLine: index + 1, newLine: index + 1 });
-        for (let index = prefix; index < n - suffix; index += 1)
-            out.push({ type: "-", text: a[index], oldLine: index + 1, newLine: 0 });
-        for (let index = prefix; index < m - suffix; index += 1)
-            out.push({ type: "+", text: b[index], oldLine: 0, newLine: index + 1 });
-        for (let index = suffix; index > 0; index -= 1) {
-            const oldIndex = n - index;
-            const newIndex = m - index;
-            out.push({ type: " ", text: a[oldIndex], oldLine: oldIndex + 1, newLine: newIndex + 1 });
-        }
-        return out;
-    }
+    if (n * m > 4_000_000)
+        return fallbackDiff(a, b);
     const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
     for (let i = n - 1; i >= 0; i -= 1) {
         for (let j = m - 1; j >= 0; j -= 1) {

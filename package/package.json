@@ -1,13 +1,24 @@
 {
   "name": "@datename/fastcode-termux",
-  "version": "0.1.9-beta.1",
+  "version": "0.1.9-beta.2",
   "description": "FastCode — a blazing-fast TUI coding assistant. Multi-LLM, skills.sh skills, slash commands. Works on Termux, Linux, Windows, and macOS.",
   "type": "module",
   "bin": {
     "fastcode": "bin/fastcode.mjs",
     "fc": "bin/fastcode.mjs"
   },
-  "main": "./dist/index.js",
+  "main": "./dist/lib.js",
+  "types": "./dist/lib.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "default": "./dist/lib.js"
+    },
+    "./types": {
+      "types": "./dist/public/types.d.ts",
+      "default": "./dist/public/types.js"
+    }
+  },
   "files": [
     "bin",
     "dist",
@@ -28,11 +39,12 @@
     "check": "npm test && npm run typecheck && npm run lint && npm run build",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node ../scripts/smoke-test.mjs",
+    "test": "node ../scripts/smoke-test.mjs && node --test ../scripts/hook-tests.test.mjs",
+    "security": "node ../scripts/security-test.mjs",
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
     "verify:gate": "node ../scripts/verify-gate.mjs",
     "bench": "node scripts/bench.mjs",
-    "prepublishOnly": "npm run build"
+    "prepack": "npm run build"
   },
   "keywords": [
     "tui",

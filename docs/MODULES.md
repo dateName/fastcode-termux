@@ -17,16 +17,16 @@
 |---|---|---|
 | bin/fastcode.mjs | 优先 import 自包含 `dist/cli.js`，回退 `dist/index.js` / `src/index.ts`；缺依赖时打印修复指引 | dist/cli.js, dist/index.js, src/index.ts |
 | src/index.ts | 调用 CLI，非 TUI 子命令直接返回；否则检查 TTY 后加载 Ink/React/App | cli, ink, react, app |
-| src/cli-main.ts | 参数解析；provider/model/config/sessions/resume/trust/skills/doctor/update（改名避免 tsc 产物覆盖 dist/cli.js bundle） | skills, store, paths, providers, diagnostics, session/log, session/projection |
+| src/cli-main.ts | 参数解析；provider/model/config/sessions/resume/trust/skills/doctor/update（改名避免 tsc 产物覆盖 dist/cli.js bundle）；`resume` 无 id 时用终端 raw-key 选择器（↑/↓、1–9、Enter、Esc），非 TTY 回退最近一条 | skills, store, paths, providers, diagnostics, session/log, session/projection |
 
 ## 界面层
 
 | 文件 | 职责 | 依赖 |
 |---|---|---|
-| src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发；统一 provider → model → key 配置流程并暂存至确认；审批 feedback 文本等待与 Esc 取消 | runner, session, commands, providers, config/store, ui |
+| src/app.ts | TUI 主组件：消费 runner 事件、transcript、输入/选择器、斜杠命令分发；保存最近 tool_result 供 `/expand <id>` 重放输出与 diff；稳定 UI 折叠普通输出但不折叠编辑类工具；统一 provider → model → key 配置流程并暂存至确认；审批 feedback 文本等待与 Esc 取消 | runner, session, commands, providers, config/store, ui |
 | src/ui/Banner.ts | 启动横幅（稳定 UI 下不动画） | 无 |
 | src/ui/Message.ts | 消息气泡；Markdown 渲染缓存（不 memo，避免终端 resize 后宽度不更新） | lib/markdown |
-| src/ui/DiffPreview.ts | D1 ??/???? unified diff ???????????????? | ? |
+| src/ui/DiffPreview.ts | unified diff 三色渲染；默认按完整 hunk 截断，不再按行硬切；超出时提示 `/expand <id>` 查看完整输出 | 无 |
 | src/ui/Prompt.ts | 输入框与斜杠自动补全；`showCursor` 常开 | ink-text-input, commands/index |
 | src/ui/Spinner.ts | 思考动画（stable 模式低频） | 无 |
 | src/ui/Picker.ts | 模型/服务商/effort 选择器 | ui/picker-window |
@@ -67,14 +67,14 @@
 | src/agent/approval-store.ts | once/session/always 作用域；session 内存；always 绑 catalogHash | approval, trust, guards |
 | src/agent/approval-native.ts | termux-dialog sheet resolver；feedback 用 termux-dialog text 收集原因；code/index 严格映射，缺失/超时回落 | approval |
 | src/agent/approval-json.ts | NDJSON gate:ask/decision schema、`v:1` 版本与错 id/畸形校验（入站兼容旧 `version`）；feedback 要求 input 并回传用户文本 | approval |
-| src/headless.ts | `--ui json` / 非 TTY plain 的无线程 TUI 运行器；NDJSON 由 `agent/event-stream.ts` 统一信封（v/seq/ts/session_id/turn）、reasoning/tool_call/tool_result/egress_denied/gate/notice（plain 写 stderr）；error 事件写 stderr/JSON 并使失败退出码非 0；接 `onProtocolFallback`/`onNativeOk` 持久化能力 | runner, providers, approval-json, protocol-mode, config/store, event-stream |
+| src/headless.ts | `--ui json` / 非 TTY plain 的无线程 TUI 运行器；默认写 session log（`FASTCODE_HEADLESS_SESSION_LOG=0` 关闭），frame 与 log 共享 session_id；NDJSON 由 `agent/event-stream.ts` 统一信封（v/seq/ts/session_id/turn）、reasoning/tool_call/tool_result/egress_denied/gate/notice（plain 写 stderr）；error 事件写 stderr/JSON 并使失败退出码非 0；接 `onProtocolFallback`/`onNativeOk` 持久化能力 | runner, providers, approval-json, protocol-mode, config/store, event-stream |
 | src/agent/event-stream.ts | `EventStream` 统一 NDJSON 信封与 `serializeAgentEvent`；reasoning 帧；session_id/turn；TUI 直接消费 AgentEvent，JSON 消费本序列化器 | runner（type）、approval-json |
 | src/agent/limits.ts | 边产边截断的工具输出缓冲；`toolMessageLimit`/`boundToolMessage` 作为单条 tool 消息硬上限 | 无 |
 | src/agent/stream.ts | runStream：idle 超时、retryStream、incomplete；语义折叠委托 StreamAssembler；`capabilities.retryable:false` 时不重放 | lib/net, types, stream-events |
 | src/agent/stream-events.ts | `StreamEvent` 闭集（text/thinking/tool-call/usage/turn-end）；唯一 `StreamAssembler`；`chunkToStreamEvents` 适配旧 ChatChunk；`assertNever` 穷尽检查；usage 重复告警去重 | types, lib/values |
 | src/agent/compaction.ts | token 阈值 / heap 强制压缩；短历史动态减少保留尾部以压缩中间消息；摘要落盘与旧文件清理；Notes/Outcomes 优先与 limit marker；server-aware 互斥；摘要采样 64KB、collectFiles 有界、无进展熔断瘦身超限 tool/user 消息 | model-meta, config/paths |
 | src/agent/process-tree.ts | 兼容 re-export；实现已移至 `lib/process-tree.ts` | lib/process-tree |
-| src/agent/shell-session.ts | 两条路径：resident `sh -s` 池（默认 2，`/threads` ≤6，子 shell 隔离、池满排队）与 one-shot（`FASTCODE_MAX_SPAWN_PER_TURN` 预算、满额立即失败）；每个 job 保留最近 256KB 输出；后台输出隔离、`shutdownShellsAsync`、增量轮询、/jobs /kill 数据源 | process-tree |
+| src/agent/shell-session.ts | 两条路径：resident `sh -s` 池（默认 2，`/threads` ≤128，子 shell 隔离、池满排队）与 one-shot（`FASTCODE_MAX_SPAWN_PER_TURN` 预算、满额立即失败）；每个 job 保留最近 256KB 输出；后台输出隔离、`shutdownShellsAsync`、增量轮询、/jobs /kill 数据源 | process-tree |
 | src/agent/ignore.ts | .fastcodeignore、默认忽略、二进制识别；文件 ≤256KB、规则 ≤2000、单条 glob ≤256 字符且 `**` ≤4 | 无 |
 
 ## 领域层：patch
@@ -89,8 +89,8 @@
 
 | 文件 | 职责 | 依赖 |
 |---|---|---|
-| src/session/log.ts | append-only 事实流；seq；checkpoint；close(reason/compaction) + session_end/projection + best-effort fsync；`approval` 决策事实；幂等 close；写失败 stderr + degraded，degraded/日志关闭时跳过 projection/prune；fsync 分层；未闭合扫描；JSONL 0600；剪枝时清理 summary 引用 | config/paths, agent/compaction |
-| src/session/projection.ts | 事实→消息；fold 工具载荷、cleared/revert 重置、未配对 tool_call 补全；投影 200KB 硬上限（含 `toolCalls[].arguments` 截断）；dropped marker；fingerprint；resume；summaryRef 限 sessions 内且 ≤256KB | session/log, agent/registry, agent/protocol, config/paths |
+| src/session/log.ts | append-only 事实流；seq；checkpoint；close(reason/compaction) + session_end/projection + best-effort fsync；`approval` 决策事实（含 source）；幂等 close；写失败 stderr + degraded，degraded/日志关闭时跳过 projection/prune；`listSessions` 汇总时间、消息数、cwd、provider/model，并纳入 projection-only 会话；fsync 分层；未闭合扫描；JSONL 0600；剪枝时清理 summary 引用 | config/paths, agent/compaction |
+| src/session/projection.ts | 事实→消息；fold 工具载荷、cleared/revert 重置、未配对 tool_call 补全，并为中断结果写结构化 `code=INTERRUPTED` / `doNotRetry=true`；投影 200KB 硬上限（含 `toolCalls[].arguments` 截断）；dropped marker；fingerprint；resume；summaryRef 限 sessions 内且 ≤256KB | session/log, agent/registry, agent/protocol, config/paths |
 | src/session/actions.ts | `applyRevert` / `applyPlan`：追加 fact 后统一重建 projection，供 TUI 只发意图；避免 app 内重复 `resumeSession` | session/log, session/projection, session/plan |
 | src/session/instructions.ts | 发现 AGENTS.md/FASTCODE.md（global/项目根/cwd 链），同名近层覆盖远层，32KB/文件（UTF-8 字节）、96KB 总量，生成 system 注入文本与 hash | config/paths |
 | src/session/plan.ts | `plan` fact 归一化、最新计划、`[plan]` 格式化；投影保护 | 无 |
@@ -122,7 +122,7 @@
 | context | token/阈值/heap |
 | cancel / steer / bg / attach / expand / edit | 运行中控制、后台与输入绕行 |
 | jobs / kill | 后台 shell 会话 |
-| threads (pool) · src/commands/threads.ts | 查看/调整 resident shell 并发（默认 2，上限 6；不影响 one-shot 路径） |
+| threads (pool) · src/commands/threads.ts | 查看/调整 resident shell 并发（默认 2，上限 128；无参预填 `/threads `；不影响 one-shot 路径） |
 | compact | 强制本地压缩 |
 | revert | `/revert <n>` 删除第 n 条 user 消息及之后；`--files` 暂未实现 |
 | plan / goal | `/plan`、`/todo` 编辑会话计划；`/goal` 设置目标；落 `plan` fact |
@@ -135,6 +135,18 @@
 | src/skills/manager.ts | 技能列表/安装/卸载/提示拼装；目录 sha256 完整性校验与重新基线 | config/paths, lib/http, skills/parser, node:crypto |
 | src/skills/parser.ts | SKILL.md frontmatter | 无 |
 | src/plugins/manager.ts | 插件发现/导入/移除/提示拼装；`plugin.json` manifest（name/version/scope/capabilities）；`project` scope 安装到 `<cwd>/.fastcode/plugins`，仅已信任项目加载并优先于全局；默认关；仅支持 prompt/skills，其他能力拒绝 | config/paths |
+
+## 公共 SDK 契约与运行时（M1–M2）
+
+| 文件 | 职责 | 依赖 |
+|---|---|---|
+| src/public/types.ts | 对外 SDK 契约（TaskStatus/RunError/RunConfig/RunOptions/TaskHandle/RunResult）；引用 AgentEvent，不重定义事件 | agent/runner（仅类型） |
+| src/runtime/error-map.ts | 内部 AgentErrorKind/AgentStopReason → 公开 RunError/TaskStatus 的穷尽映射 | agent/runner, public/types, lib/values |
+| src/runtime/task.ts | `runTask()` + `TaskHandle` 公共封装：同步校验、RunConfig→内部 options、事件 pump、wait/stop、事实落盘、shell 收尾；不改 `runAgent` | agent/runner, public/types, runtime/error-map, config/store, providers, session/log, session/instructions, agent/shell-session |
+| src/lib.ts | 对外库入口：re-export `public/types` + `runTask`；不 import `src/index.ts`（CLI 入口） | public/types, runtime/task |
+| src/hooks/hook-host.ts | H1 hook 契约骨架：HookEvent / HookResult / HOOK_TIMEOUT_SOFT=1500 / HOOK_TIMEOUT_HARD=3000；无 spawn/IPC | agent/runner（仅类型） |
+| src/hooks/dispatch.ts | H1a-1/H1a-2/H1b/H1c hook host 管理：lazy start、NDJSON、env allowlist、崩溃/超时、stop；TUI warm host + mtime 签名；runTask + headless/TUI（CLI `FASTCODE_HOOKS`）接线 | hooks/hook-host, config/paths, lib/child-env, agent/runner（仅类型） |
+| src/hooks/hook-host-runner.ts | H1a-1 子进程 host：加载 hooks、NDJSON、hook stdout 重定向、软超时；被 spawn，不被主进程 import | 无（仅 Node 内置） |
 
 ## 基础层
 
@@ -191,7 +203,7 @@
 | scripts/install.sh / install-termux.sh | 软链 dist/cli.js 到 $PREFIX/bin |
 | scripts/build-portable.sh | release/ tar.gz/zip + npm pack + SHA256SUMS |
 | scripts/update-termux.sh | 目录/git/npm 更新 |
-| scripts/smoke-test.mjs | 回归（当前 PC 450 项 / POSIX 480；Termux 281 项为历史，待复跑） |
+| scripts/smoke-test.mjs | 回归（计数见 `fastcode/docs/VERIFICATION_BASELINE.md`） |
 | scripts/version-anchors.mjs | 只读扫描当前 package 版本的所有文本锚点；升级版本后用它核对 |
 | .github/workflows/release.yml | v* tag：构建资产、GitHub Release、npm publish |
 | .github/workflows/verify.yml | push/PR：Node 24、npm ci、npm run check、verify:artifacts、verify-gate、dist 无 modified/untracked |
@@ -200,7 +212,7 @@
 ## 测试与验证
 
 - `npm run typecheck` / `npm run lint` / `npm run build`
-- `node scripts/smoke-test.mjs`：当前 **479** 项（Windows；POSIX 480）行为断言（runner、预算、循环、工具契约、
+- `node scripts/smoke-test.mjs`：计数见 `fastcode/docs/VERIFICATION_BASELINE.md`；行为断言（runner、预算、循环、工具契约、
   retry/SSE、checkpoint/projection、compaction、patch、shell、native tools、命令、doctor、错误语义、方言）。
 - `node scripts/version-anchors.mjs`：列出当前版本的文本锚点；版本升级后核对是否只改允许位置。
 - Termux 真机额外验证：进程组 kill、/sdcard fsync、#50/#51/#54、TUI `/context`、`/edit`。

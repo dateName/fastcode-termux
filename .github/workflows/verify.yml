@@ -29,6 +29,10 @@ jobs:
         working-directory: package
         run: npm run check
 
+      - name: Security attack matrix
+        working-directory: package
+        run: npm run security
+
       - name: Verify artifacts
         working-directory: package
         run: npm run verify:artifacts

@@ -75,6 +75,15 @@ function scan(pattern, content) {
     return out;
 }
 /** Return every sensitive match; this scans the full input, not a window. */
+export function redactSensitive(content) {
+    const matches = detect(content);
+    if (matches.length === 0)
+        return { text: content, redacted: 0 };
+    let text = content;
+    for (const match of [...matches].sort((a, b) => b.start - a.start))
+        text = text.slice(0, match.start) + "[REDACTED]" + text.slice(match.end);
+    return { text, redacted: matches.length };
+}
 export function detect(content, extraPatterns = []) {
     if (!content)
         return [];

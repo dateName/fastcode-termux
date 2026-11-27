@@ -14,10 +14,10 @@ const MAX_TOOL_ARGUMENT_CHARS = 8_000;
 const TOOL_FOLD_CHARS = 600;
 export function unpairedToolNotice(tool) {
     if (READ_ONLY_TOOLS.has(tool))
-        return "执行中断（只读工具，可安全重试）。 [code=INTERRUPTED doNotRetry=true]";
+        return "Execution interrupted (read-only tool; safe to retry). [code=INTERRUPTED doNotRetry=true]";
     if (IDEMPOTENT_TOOLS.has(tool))
-        return "执行中断，可安全重试（write_file 为全量写）。 [code=INTERRUPTED doNotRetry=true]";
-    return "执行状态未知：进程中断时命令可能已完成。请先验证再操作（stat / git status / git diff），不要直接重做 [code=INTERRUPTED doNotRetry=true]";
+        return "Execution interrupted; safe to retry (write_file performs a full write). [code=INTERRUPTED doNotRetry=true]";
+    return "Execution status unknown: the process may have completed before interruption. Verify with stat / git status / git diff before retrying; do not blindly redo. [code=INTERRUPTED doNotRetry=true]";
 }
 export function cwdDigest(cwd) {
     return createHash("sha1").update(cwd).digest("hex").slice(0, 8);
@@ -122,14 +122,14 @@ export function factsToMessages(facts) {
         for (const [id, call] of calls) {
             const output = unpairedToolNotice(String(call?.tool ?? "unknown"));
             if (nativeTurn)
-                messages.push({ role: "tool", toolCallId: id, content: output });
+                messages.push({ role: "tool", toolCallId: id, content: output, code: "INTERRUPTED", doNotRetry: true });
             else
-                pending.push({ call, ok: false, output });
+                pending.push({ call, ok: false, output, interrupted: true });
         }
         calls.clear();
         if (pending.length > 0) {
             const batch = pending.splice(0);
-            messages.push({ role: "user", content: formatToolResults(batch), ...(batch[0]?.seq ? { seq: batch[0].seq } : {}) });
+            messages.push({ role: "user", content: formatToolResults(batch), ...(batch[0]?.seq ? { seq: batch[0].seq } : {}), ...(batch.every((item) => item.interrupted) ? { code: "INTERRUPTED", doNotRetry: true } : {}) });
         }
     };
     for (const fact of facts) {
@@ -281,7 +281,7 @@ export function pairToolMessages(messages) {
     let repaired = false;
     const synthesize = () => {
         for (const [id, tool] of expected)
-            out.push({ role: "tool", toolCallId: id, content: unpairedToolNotice(tool) });
+            out.push({ role: "tool", toolCallId: id, content: unpairedToolNotice(tool), code: "INTERRUPTED", doNotRetry: true });
         if (expected.size > 0)
             repaired = true;
         expected.clear();

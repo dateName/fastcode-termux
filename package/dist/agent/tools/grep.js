@@ -54,6 +54,8 @@ export const grepTool = {
         return {
             ok: true,
             output: result.text,
+            rawOutput: result.rawText,
+            droppedChars: Math.max(0, result.rawText.length - result.text.length),
             truncated: result.truncated,
             returnedLines: result.matchCount,
             matches: result.matchCount,

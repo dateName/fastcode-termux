@@ -12,8 +12,10 @@
       skills/           已安装 SKILL.md（含 .fastcode-source 完整性基线）
       plugins/          常驻插件包（PLUGIN.md）
       cache/            registry / 下载缓存（可安全删除）
-      sessions/         JSONL 事实流 + <id>.projection.json（会话历史；删除即丢失历史）
-      logs/             debug 日志（FASTCODE_DEBUG=1 时写入；可安全删除）
+      sessions/         JSONL 事实流 + <id>.projection.json（会话历史；删除即丢失历史；logPath 权威位置）
+      logs/             debug 日志（FASTCODE_DEBUG=1 时写入；可安全删除；不放会话 JSONL）
+      state/            预留（未启用；H2 不创建空目录）
+      hooks/            可选用户 hooks（*.mjs；H1b/H1c 已接 TUI/headless；FASTCODE_HOOKS=1 才加载；目录不存在或无 *.mjs 不启动 host）
 
 - 改 `config.json` 永远不会动到 `auth.json`；反之亦然。
 - 备份建议：`config.json`、`auth.json`、`trusted.json`、`model-meta.json`；`sessions/` 视需要。
@@ -177,6 +179,26 @@ heapUsed 超过 `FASTCODE_HEAP_LIMIT_MB`（默认 220）时即使未到阈值也
 
 仅支持 `prompt` / `skills` 能力；声明其他能力会在导入时拒绝。导入后默认**不启用**，需 `/plugin enable <name>`；核心升级不会覆盖该目录。
 
+插件目录结构：
+
+```text
+my-pack/
+├── plugin.json          # 可选 manifest
+├── PLUGIN.md            # prompt 正文；缺失时回退 README.md
+├── SKILL.md             # 可选根 skill
+└── skills/
+    └── reviewer/
+        └── SKILL.md     # 可选子 skill
+```
+
+- `capabilities` 可省略：有 `PLUGIN.md`/`README.md` 推断为 `prompt`，有 `SKILL.md` 推断为 `skills`。
+- `scope:"project"` 安装到 `<cwd>/.fastcode/plugins/<name>/`，仅项目已信任时加载，并优先于同名全局插件。
+- 导入会复制整个目录并写 `.fastcode-source`；同名目标会先删除再复制。
+- 插件只把正文/skills 拼进 system prompt，不执行插件代码；不要把它当 npm 依赖或 sandbox。
+- `/plugin list|import <path> [name]|enable [name]|disable [name]|remove <name>|info [name]`。
+
+依赖清单与插件边界见 `DEPENDENCIES.md`。
+
 ## 3. auth.json：Key 绑定到「服务商」
 
 同一 provider 的所有模型共用一把 Key。当前格式为 **version 3**：
@@ -272,7 +294,7 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | 变量 | 作用 |
 |---|---|
 | FASTCODE_HOME | 数据目录（默认 ~/.fastcode） |
-| FASTCODE_LANG | UI 语言（`en` / `zh`，接受 `zh-CN` 等前缀）；优先于 `config.language`；仅覆盖已抽取到字符串目录的文案 |
+| FASTCODE_LANG | UI 语言（`en` / `zh`，接受 `zh-CN` 等前缀）；优先于 `config.language`；覆盖横幅、输入框、信任确认、选择器、状态栏、活动状态、help/about 与底部统计，命令输出仍多为英文 |
 | FASTCODE_STABLE_UI | 设为 1 强制稳定界面 |
 | FASTCODE_BASE_URL | 自定义服务商基地址 |
 | FASTCODE_MODEL | 自定义服务商默认模型 |
@@ -282,6 +304,7 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_UPDATE_REGISTRY | fastcode update 查询地址 |
 | FASTCODE_SKILLS_REGISTRY | 覆盖 skills 注册表地址；空字符串或纯空白视为未设置，回落到 `skillsRegistry`；两者都空时按名称/owner-repo 安装会被拒绝，直接 URL 安装仍可用 |
 | FASTCODE_DEBUG | 设为 1 打开低流量 stderr 调试日志（timeout 钳位、配置缓存失效等） |
+| FASTCODE_HOOKS | 设为 1 在 TUI / headless 加载 `<FASTCODE_HOME>/hooks/*.mjs`；默认关；SDK 用 `RunOptions.enableHooks`（默认 false）；hook 只读观察，失败不阻断 run |
 | FASTCODE_ALLOW_PATHS | 额外允许访问的根目录，多个用系统分隔符（Termux 为冒号） |
 | FASTCODE_ALLOW_SHARED_STORAGE | 设为 0 关闭 Termux 默认放行的 ~/storage/shared |
 | FASTCODE_TOOL_OUTPUT_LIMIT | 工具输出上限（字符），默认 30000，边产边截断 |
@@ -307,7 +330,7 @@ Key 输入时终端以 `*` 掩码显示。↑/↓、Enter 和数字键可操作�
 | FASTCODE_SHELL_ALLOWLIST | 只允许匹配这些正则的命令，分号分隔 |
 | FASTCODE_SHELL_DENY_EXTRA | 追加的危险命令正则，分号分隔 |
 | FASTCODE_RESTRICT_TO_WORKSPACE | 设为 1 额外拒绝 ../ 路径穿越 |
-| FASTCODE_HEADLESS_SESSION_LOG | `--ui json/plain` ? session facts?????1.2 ??????? | 0 |
+| FASTCODE_HEADLESS_SESSION_LOG | `--ui json/plain` 是否写 session facts；默认 1，设为 0 关闭 | 1 |
 | FASTCODE_READ_MAX_BYTES | read_file 单次读取上限；read_many 的单文件读取上限，默认 200000 |
 | FASTCODE_READ_SCAN_MAX_BYTES | read_file offset/limit 统计总行数时的扫描上限，默认 8000000；超出时 totalLines 为下界并标记 truncated |
 | FASTCODE_READ_MANY_MAX_BYTES | read_many 的总输出字节预算，默认 400000；超出后跳过剩余文件并给出 hint。单次调用的 `maxBytes` 会被钳制到该值；单文件错误只标记 skipped，不再丢弃整次结果 |
@@ -438,8 +461,9 @@ Tier 3 不给默认 yes；本批未接备份，因此 Tier 3 破坏性动作 fai
 所以崩溃或被杀进程后内容仍可读、可恢复：
 
     fastcode sessions           列出会话
-    fastcode sessions show <id> 打印某次会话
-    fastcode resume [id|latest] 在 TUI 中恢复该会话
+    fastcode sessions show <id> 打印某次会话（--full / --max-chars N）
+    fastcode sess                sessions 的别名
+    fastcode resume [id|latest] 无 id 时选择会话（单会话/非 TTY 直接最近）；给 id 或 latest 直接恢复
 
 每轮工具执行后追加一条 `type:"checkpoint"`（turn / cwd / providerId / model / activeFiles / lastFactSeq）。
 启动时若最近的会话没有 `session_end`，会提示上次会话未正常结束并给出 resume 命令。
@@ -461,7 +485,8 @@ Tier 3 不给默认 yes；本批未接备份，因此 Tier 3 破坏性动作 fai
 缓存上限默认 256MB（FASTCODE_SESSION_CACHE_MB 可调）。剪枝前会先把旧会话摘要写入
 `<id>.projection.json`，再删除 `.jsonl`；投影文件不参与自动删除。
 checkpoint 的 fsync 见 `FASTCODE_FSYNC`（FUSE/sdcard 上建议开启）。
-`fastcode sessions show <id>` 会先列事实，再单独打印 `[projection]` 摘要。
+`fastcode sessions show <id> [--full|--max-chars N]` 会先列事实（含 tool_result 输出），再单独打印 `[projection]` 摘要与 provenance 告警；只有 `.projection.json` 的会话也能列出和查看。
+`fastcode sessions` 默认显示时间、消息数、`provider::model` 与 cwd，最多 20 条；`--all` 显示全部，`--limit N` 自定义条数。`fastcode sess` 与 `fastcode ls` 是同一子命令的别名，不会把 `sess` 当成 prompt。
 
 ## 5. 三种改主模型的方式（等价）
 
@@ -528,7 +553,7 @@ catalog 42（OpenAI 兼容，`providers/catalog.ts`）：
 以下命令无参数时打开与 `/model` 相同的选择器窗口（固定 9 行、`1`–`9` 选当前页、↑/↓ 翻页、Enter 确认、Esc 取消）：
 
     /theme      # 颜色主题
-    /threads    # resident shell 并发 1–6
+    /threads    # resident shell 并发 1–128
     /agent      # agent 模式 on/off
     /effort     # 思考强度 auto/low/medium/high/max
     /skills enable|disable|info   # 省略 name 时列出已安装技能
@@ -582,7 +607,7 @@ shell 工具有两条执行路径，预算互不共享：
 - `/threads` 只调整 resident 池，不影响 one-shot，也不构成“全局最多 2/128 个进程”的承诺。
 - `FASTCODE_MAX_SPAWN_PER_TURN` 同时计入新建 resident 和 one-shot；同一轮若新建 2 个 resident，本轮只剩 6 次 one-shot 配额。
 - `shellPoolStats().active` 和 `doctor` 的 `active` 统计所有仍在运行的 shell job（resident + one-shot）；`pool/maxPool` 只统计 resident。二者会不一致。
-- 同轮默认最多约 8 个新进程（2 resident + 6 one-shot，或 0 resident + 8 one-shot）；跨 turn 时 resident 池保留、one-shot 预算重置，未结束的旧 one-shot 仍占并发（例如既有 2 resident + 本轮 8 one-shot = 10；`/threads 6` 时为 14），长期未结束的 one-shot 没有全局回收上限。
+- 同轮默认最多约 8 个新进程（2 resident + 6 one-shot，或 0 resident + 8 one-shot）；跨 turn 时 resident 池保留、one-shot 预算重置，未结束的旧 one-shot 仍占并发（例如既有 2 resident + 本轮 8 one-shot = 10；`/threads 128` 时为 136），长期未结束的 one-shot 没有全局回收上限。
 - 命令内部再启动的后台进程不计入上述两个预算；`setsid` 逃逸的后代即使 `shutdownShellsAsync` 也可能清不掉。
 - resident 超时/被杀会销毁该 resident，下一条 resident 命令需要新建并消耗本轮 spawn 预算；one-shot 超时同样消耗预算，但不占 resident 池。
 - 每条命令在子 shell（resident）或独立进程（one-shot）中执行，`export`/`umask`/`set -e`/`exit` **不跨命令泄漏**。旧观察“常驻 `export` 会让后续命令看见”在 2026-11-09 子 shell 修复后已不成立。
@@ -592,7 +617,7 @@ shell 工具有两条执行路径，预算互不共享：
 - `/exit`（`/quit`、`/q`）会中止当前运行、终止所有运行中的 shell 与常驻 shell，再退出；运行中需要二次确认。
 - `Esc` 中止当前 run 并保留已生成文本/部分输出，提示输入 `继续`；`Ctrl+C` 在 run 中第一次先中止并保留部分输出，再按一次才退出。
 
-## 8. CLI 子命令与斜杠命令速查（0.1.8-beta.0）
+## 8. CLI 子命令与斜杠命令速查（0.1.9-beta.2）
 
 > 原则：子命令与配置类斜杠命令本身不发送模型请求；`fastcode "prompt"`、`resume` 以及 TUI 中发送的消息才会进入对话并可能消耗 token。
 
@@ -607,14 +632,18 @@ shell 工具有两条执行路径，预算互不共享：
 | `fastcode provider` / `provider <id> [model]` | 列出 provider / 设置默认 provider（无已验证默认模型时必须同时给 model） |
 | `fastcode model` / `model <id>` | 列出当前 provider 的模型 / 设置默认模型 |
 | `fastcode config` / `config path` | 打印配置与数据目录 / 只打印 config.json 路径 |
-| `fastcode sessions` / `sessions show <id>` | 列出会话 / 打印某会话事实与投影摘要 |
-| `fastcode resume [id|latest]` | 在 TUI 中恢复会话（恢复后可继续对话） |
+| `fastcode config export [--out <file>] [--with-keys]` | 导出 config/auth/trust/model-meta；`--with-keys` 会包含 Key 并警告 |
+| `fastcode config import <file>` | 导入导出文件；覆盖前写 `.import.bak.<ts>`，catalogHash 过期的审批会提示重新批准 |
+| `fastcode sessions` / `sess` / `sessions show <id> [--full\|--max-chars N]` | 列出会话（--all/--limit N）/ 打印事实、投影与 provenance |
+| `fastcode resume [id\|latest]` | 恢复会话；无 id 且 TTY 下多个会话时用 ↑/↓、1–9、Enter 选择；单会话/非 TTY 直接恢复最近一条 |
 | `fastcode trust [dir]` / `untrust [dir]` / `trusted` | 信任 / 撤销信任 / 列出信任目录 |
 | `fastcode trust --forget <key>` | 撤销某条记住的工具审批 |
-| `fastcode skills list\|install <id>\|uninstall <id>\|search <q>` | 技能管理 |
-| `fastcode doctor` / `doctor --net` | 环境诊断 / 额外探测 registry 连通性 |
+| `fastcode skills list\|install <id> [--force]\|uninstall <id>\|search <q>` | 技能管理 |
+| `fastcode doctor` / `doctor --net` / `doctor --backup-check` | 环境诊断 / 探测 registry / 检查 config/auth/trust/model-meta 是否存在与权限 |
 | `fastcode update` | 检查新版本 |
 | `--ui tty\|native\|plain\|json` | 审批/渲染后端（默认 tty；plain/json 用于无 TTY） |
+| `--long-run` / `--full-access` | turns=9999、anchor 30000 字符；不关闭 egress/trust/sandbox/approval |
+| `--cost-cap <USD>` | 进程级费用上限（默认无限） |
 
 API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`OPENROUTER_API_KEY`、`GROQ_API_KEY`、`MISTRAL_API_KEY`、`XAI_API_KEY`、`MOONSHOT_API_KEY`、`ZHIPUAI_API_KEY`、`DASHSCOPE_API_KEY`。
 
@@ -622,8 +651,8 @@ API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`�
 
 | 命令 | 作用 | 示例 |
 |---|---|---|
-| `/help` (`h`, `?`) | 列出全部斜杠命令 | `/help` |
-| `/about` (`version`) | 版本、平台、Node、链接 | `/about` |
+| `/help` (`/h`, `/?`) | 列出全部斜杠命令 | `/help` |
+| `/about` (`/version`) | 版本、平台、Node、链接 | `/about` |
 | `/config` | 打印生效配置与数据路径 | `/config` |
 | `/theme [id]` | 主题选择器；带 id 直接切换 | `/theme` → picker |
 | `/system [prompt]` | 查看或设置系统提示词 | `/system 你是一个简洁助手` |
@@ -637,17 +666,18 @@ API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`�
 | `/agent [on\|off\|status]` | agent 模式选择器 / 显式开关 / 状态 | `/agent` → picker |
 | `/tools` | 列出 15 个 agent 工具 | `/tools` |
 | `/cwd` | 显示当前工作目录与沙箱根 | `/cwd` |
-| `/plugin [...]` | 常驻插件：`list/import/enable/disable/remove/info`；`enable/disable/info` 省略名字时打开选择器 | `/plugin enable` |
-| `/skills [...]` | 技能：`list/search/install/uninstall/enable/disable/info/verify/registry`；`enable/disable/info` 省略名字时打开选择器 | `/skills info` |
-| `/clear` (`cls`) | 清空当前会话历史并写 `cleared` fact | `/clear` |
-| `/compact` | 强制压缩历史并写 `compacted` fact | `/compact` |
+| `/plugin [list\|import <path> [name]\|enable [name]\|disable [name]\|remove <name>\|info [name]]` | 常驻插件；`enable/disable/info` 省略名字时打开选择器 | `/plugin enable` |
+| `/skills [list\|search <q>\|install <id\|owner/repo\|url> [--force]\|uninstall <name>\|enable [name]\|disable [name]\|info [name]\|verify [name]\|registry <url>]` | 技能管理；`enable/disable/info` 省略名字时打开选择器 | `/skills info` |
+| `/clear` (`/cls`) | 清空当前会话历史并写 `cleared` fact | `/clear` |
+| `/compact [list\|clean <seq\|all>]` | 强制压缩并写 `compacted` fact；`list` 列压缩记录；`clean` 删摘要文件 | `/compact list` |
+| `/facts show <seq>` / `/facts provenance` | 打印某条事实的完整 raw 输出 / 打印最新 provenance 报告 | `/facts show 12` |
 | `/context` | 当前 token 估算、压缩阈值、heap、指令来源 | `/context` |
-| `/revert <n>` | 删除第 n 条 user 消息及之后并重建投影；`--files` 未实现 | `/revert 2` |
-| `/plan` (`/todo`) | 查看/编辑会话计划 | `/plan set a; b` |
-| `/goal` | 设置会话目标 | `/goal ship it` |
-| `/worktree` | git worktree list/create/diff/apply/remove | `/worktree create fix-ui` |
+| `/revert <n>` (`/undo`) | 删除第 n 条 user 消息及之后并重建投影；`--files` 未实现 | `/revert 2` |
+| `/plan` (`/todo`, `/todos`) | `show` / `set a; b` / `add` / `start <n>` / `done <n>` / `remove <n>` / `clear` / `goal` | `/plan set a; b` |
+| `/goal [text\|off]` | 查看、设置或清除会话目标 | `/goal ship it` |
+| `/worktree list\|create <slug>\|diff <path>\|apply <path> [--commit]\|remove <path> [--force]` | git worktree 隔离与增量应用 | `/worktree create fix-ui` |
 | `/cost` | 本会话 token 与费用 | `/cost` |
-| `/expand` | 切换工具输出展开/折叠 | `/expand` |
+| `/expand [id]` | 无参数切换后续工具输出展开/折叠；带 `<id>` 重新打印该工具已存的完整输出与 diff | `/expand tc_3` |
 | `/cancel` | 取消当前 run（保留部分输出） | `/cancel` |
 | `/steer <text>` | 运行中追加引导 | `/steer 改用更小的改动` |
 | `/exit` (`quit`, `q`) | 退出；run 中需 5s 内二次确认 | `/exit` |
@@ -655,10 +685,10 @@ API Key 也可由环境变量提供：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`�
 | `/attach [id]` | 查看后台会话的新输出；省略 id 时打开会话选择器 | `/attach` |
 | `/kill [id]` | 终止后台会话进程树；省略 id 时打开会话选择器 | `/kill` |
 | `/bg` | 说明长命令自动转后台机制 | `/bg` |
-| `/threads [1-128]` (`pool`) | resident shell 并发选择器 / 设置 | `/threads` → picker |
+| `/threads [1-128]` (`/pool`) | resident shell 并发设置 | `/threads` → 显示当前值并预填 `/threads `；补 `37` 回车设置 |
 | `/edit` | 用 `$EDITOR` 编辑当前输入 | `/edit` |
 
-说明：`/provider`、`/model`、`/theme`、`/threads`、`/agent`、`/effort` 无参数时都会打开同一套选择器；带参数时保留快捷路径。
+说明：`/provider`、`/model`、`/theme`、`/agent`、`/effort` 无参数时都会打开同一套选择器；`/threads` 无参数时只显示当前值和用法，并把 `/threads ` 预填到输入框，直接补数字设置。
 
 说明：`/system` 本身不发模型请求，但会改变后续对话的系统提示词；`/agent`、`/theme`、`/config`、`/reset`、`/whoami` 等只改本地状态/配置。
 

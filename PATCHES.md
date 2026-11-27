@@ -1,10 +1,39 @@
-# FastCode 0.1.3 → 0.1.9-beta.1 修复清单（工作树，未发布）
+# FastCode 0.1.3 → 0.1.9-beta.2 修复清单（工作树，未发布）
 
-> 本版 = 0.1.8 + P4–P9 harness 工作；当前工作树 **未提交、未发布**；npm `latest` 仍为 0.1.8，`beta` 仍为 0.1.8-beta.4。
+> 本版 = 0.1.8 + P4–P9 harness + B29–B45；当前工作树 **未提交、未推送、未发布**；npm `latest` 为 0.1.8，`beta` 为 Release workflow 误发的 0.1.9-beta.1（token 401，待回退）。
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树
 （package/src 成为唯一事实来源，dist 由 `tsc + esbuild` 重新生成）。
+
+## B29–B45 收口（2026-11-26）
+
+| 编号 | 文件 | 修复 | 状态 |
+|---|---|---|---|
+| B29 | `agent/limits.ts`、`agent/runner.ts`、`agent/tools/grep.ts`、`app.ts` | buffer 增加 `fullValue()`；runner 从 `result.rawOutput` 落 raw；grep 透传 `rawText`/`droppedChars` | 已完成；真实 provider 未验 |
+| B30 | `agent/policy/sensitive.ts`、`session/raw-output.ts`、`app.ts` | raw 记录真实丢弃字符；facts/raw 出口统一 `redactSensitive` | 已完成 |
+| B31 | `lib/diff.ts` | DP 预算 250000 → 4,000,000；超预算先剥公共前后缀，再用唯一行锚点 + LIS 继续分 hunk | 已完成；n/p 翻页未做 |
+| B32 | `agent/tools/write_file.ts`、`append_file.ts` | 改为读取完整 before，不再用 16K 前缀计算 diff/审批 | 已完成 |
+| B33 | `app.ts` | JSON UI 审批 deny 文案改为“无交互审批通道”，不再称协议未接线 | 已完成 |
+| B34 | `app.ts`、`agent/compaction.ts` | `approval` fact 增加 `source`；Requests/Notes/Actions/Outcomes 带 `[seq=N]`，Requests 上限 20 | 已完成 |
+| B35 | `session/raw-output.ts` | 会话 raw 额度按字符统计，不再用 `stat.size` 字节与字符阈值比较 | 已完成 |
+| B36 | `config/paths.ts`、`lib/diagnostics.ts` | `lockdown()` 返回布尔状态；doctor 打印 anchorChars | 已完成 |
+| B37 | `ui/DiffPreview.ts` | 按完整 hunk 截断并提示 `/expand <id>`，不再从 hunk 中间硬切 | 部分；native 预览限长仍在 |
+| B38 | `session/projection.ts`、`types.ts` | INTERRUPTED 结果保留可读文本，同时写结构化 `code` / `doNotRetry` | 已完成 |
+| B39 | `commands/expand.ts`、`app.ts`、`types.ts` | 保存最近 tool_result；`/expand <id>` 重放完整输出与 diff；编辑类工具不折叠 | 部分；`<Static>` 原位重渲染未做 |
+| B40 | `commands/threads.ts` | 无参不弹 picker，显示当前值并预填 `/threads `；范围 1–128 | 已完成 |
+| B41 | `cli-main.ts` | `sess`/`ls` 作为 `sessions` 别名，不再当 prompt | 已完成 |
+| B42 | `cli-main.ts`、`session/provenance.ts` | `sessions show` 打印 tool_call/tool_result/compacted/checkpoint；`--full`、`--max-chars`；追加 provenance 告警 | 已完成 |
+| B43 | `cli-main.ts`、`session/log.ts` | JSONL 被 prune 后可从 `.projection.json` 列出、show、resume | 已完成 |
+| B44 | `session/log.ts`、`cli-main.ts` | 按事实计数；列表增加 cwd/model；`--all`/`--limit`；projection-only 入列表 | 已完成 |
+| B45 | `headless.ts` | headless 默认写 session log；`FASTCODE_HEADLESS_SESSION_LOG=0` 关闭 | 已完成 |
+| R1 | `cli-main.ts` | `fastcode resume` 无 id 时打开终端选择器：↑/↓、1–9、Enter、Esc；`resume <id>`/`latest` 保持直连；非 TTY 回退最近一条 | 已完成 |
+| R2 | `commands/cost.ts`、`cli-main.ts`、README/CONFIGURATION | `/cost` 兼容空会话 totals；CLI `--help` 补 config export/import、sessions 参数、resume picker、skills `--force`；命令表补齐别名和子命令 | 已完成 |
+| R3 | `i18n/catalog/{en,zh}.ts`、`ui/*`、`app.ts` | 中文覆盖 banner、prompt、trust gate、picker 提示/页码、status bar、activity、help/about、footer；新增 zh catalog 全 key 回归 | 已完成 |
+| R4 | `agent/runner.ts`、`app.ts`、`session/projection.ts`、`providers/catalog.ts`、`agent/tools/readers.ts` | 清理英文界面残留中文：中断/取消提示、`[user interrupted]`、projection 说明、provider 标签、列表分隔符；新增英文无 CJK 回归 | 已完成 |
+| R5 | `scripts/security-test.mjs`、`docs/SECURITY_MATRIX.md`、`.github/workflows/verify.yml` | 新增 24 项安全攻击回归矩阵与设计/缺口规划；`npm run security`；CI 在 check 后执行 | 已完成 |
+
+验证：计数见 `fastcode/docs/VERIFICATION_BASELINE.md`；POSIX/Termux 未实跑。
 
 | # | 文件 | 问题 | 修复 |
 |---|------|------|------|
@@ -370,7 +399,7 @@
 - **2.7**：`plugins/manager.ts` 支持 `plugin.json` manifest、capabilities/scope/version；导入默认关闭；prompt/skills 之外拒绝。
 - **2.6**：`session/plan.ts` + `/plan`/`/todo`/`/goal`；`plan` fact；投影 `[plan]` 保护；自动续跑未实现。
 - **3.3**：`session/worktree.ts` + `/worktree`；create/list/diff/apply/remove；dirty remove 需 force。
-- 回归：Windows **ALL PASS (479/479)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
+- 回归：Windows **ALL PASS (483/483)**；`typecheck`/`lint`/`build`/`verify:artifacts` 通过。
 
 ## B2 修复批次（2026-11-22，工作树，未发布）
 
@@ -386,4 +415,4 @@
 - **D1/P2（工作树）**：`ApprovalRequest.patchDiffs` + `plan.files[].diff`；执行 `diffs[].unified` 来自 `applied.files[].diff`；TUI 默认真 diff、gate diffstat 真计数、native/plain 同步。
 - **P2**：permission regex 锚定、`*` 不跨目录、连续星号拒绝、项目层 catch-all allow 收窄；atomic restore 安全写、backup `COPYFILE_EXCL`、精确 backup 匹配、Q14 保留 backup、`O_NOFOLLOW` fail closed、native 合法调用清零错误。
 - **yq 第二轮**：permissions/grep regex 长度与嵌套量词防护；`**` 上限 4；read_many UTF-8 码点/预算一致；grep 行上限按字节；apply_patch SANDBOX_DENY；worktree recorded base + binary + `--commit` 增量 apply。
-- 回归：Windows **ALL PASS (479/479)**（POSIX 480）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。
+- 回归：Windows **ALL PASS (483/483)**（POSIX 484）；`typecheck`/`lint`/`build`/`verify:artifacts`/`verify:gate`/`version-anchors` 通过。

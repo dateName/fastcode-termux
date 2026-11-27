@@ -15,12 +15,19 @@
   <img alt="Termux" src="https://img.shields.io/badge/Termux-ready-7c3aed?style=for-the-badge&logo=android&logoColor=white">
 </p>
 
+Install from npm:
+
 ```bash
 npm install -g @datename/fastcode-termux@latest
+```
+
+Start FastCode:
+
+```bash
 fastcode
 ```
 
-`latest` is the stable channel. The short alias is `fc`:
+`latest` is the stable channel. The short alias is `fc`.
 
 ---
 
@@ -44,6 +51,10 @@ and usable from anywhere: Linux, macOS, Windows, and Android through Termux.
 | 🧠 Agent Skills | Install and enable `SKILL.md` powered workflows |
 | 🧩 Plugins | Import always-active plugin packs with bundled skills |
 | 🛠️ Coding Agent | Shell, file editing, grep, patching, and sandboxed local tools |
+| 💾 Session recovery | Append-only facts + projections; `resume` restores cwd/provider/model, marks interrupted calls `INTERRUPTED`, and can recover projection-only sessions |
+| 🗜️ Safe compaction | `/context`/`/compact`/`/clear`; token/heap compaction keeps decisions, files and recent turns while full history stays append-only |
+| 🔍 Auditable diffs | Full-file before, separate hunks for distant edits, hunk-boundary truncation, and `/expand <id>` for the complete stored output/diff |
+| 🛡️ Risk-based approval | Sensitive paths, dangerous commands and large edits require approval; once/session/always, fail-closed without a resolver, Hard Block preserved |
 | ⚡ Slash commands | Switch models, manage keys, enable skills, inspect config |
 | 📱 Termux-ready | Stable UI mode helps avoid flicker on Android terminals |
 | 🔐 Local config | Keys and preferences stay under `~/.fastcode` |
@@ -55,28 +66,67 @@ and usable from anywhere: Linux, macOS, Windows, and Android through Termux.
 ### Install from the source repo (recommended)
 
 The repo ships a self-contained bundle at `package/dist/cli.js`, so a plain
-`git clone` runs without `npm install`:
+`git clone` runs without `npm install`.
+
+Clone the repository:
 
 ```bash
 git clone https://github.com/dateName/fastcode-termux.git
+```
+
+Enter the directory:
+
+```bash
 cd fastcode-termux
+```
+
+Install the launcher:
+
+```bash
 bash scripts/install.sh
+```
+
+Start FastCode:
+
+```bash
 fastcode
 ```
 
-Manual equivalent:
+Manual equivalent — clone:
 
 ```bash
 git clone https://github.com/dateName/fastcode-termux.git
+```
+
+Enter the package directory:
+
+```bash
 cd fastcode-termux/package
-npm install          # ⚠️ do not skip
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Link the build:
+
+```bash
 npm link
 ```
 
 ### Global install
 
+Install from npm:
+
 ```bash
-npm install -g @datename/fastcode-termux@beta
+npm install -g @datename/fastcode-termux@latest
+```
+
+Start FastCode:
+
+```bash
 fastcode
 ```
 
@@ -91,6 +141,38 @@ npx @datename/fastcode-termux
 ```bash
 fastcode "explain this repository"
 ```
+
+### Resume a conversation
+
+Sessions are saved automatically. Run these from your shell; inside the TUI, exit with `/exit` first.
+
+List sessions:
+
+```bash
+fastcode sessions
+```
+
+Inspect a session:
+
+```bash
+fastcode sessions show <id> --full
+```
+
+Open the session picker:
+
+```bash
+fastcode resume
+```
+
+In a terminal: ↑/↓ move, `1`–`9` jump, Enter resume, Esc cancel. Piped stdin falls back to the newest session.
+
+Resume a specific session directly:
+
+```bash
+fastcode resume <id>
+```
+
+`resume` restores cwd, provider, model and conversation, including the compacted summary. A pruned JSONL falls back to its projection with a warning.
 
 ---
 
@@ -139,6 +221,20 @@ Switch anytime:
 /provider openai
 /model gpt-4o-mini
 ```
+
+Check whether FastCode can see a key:
+
+```bash
+fastcode doctor
+```
+
+List models for the current provider (live `/models` when a key is available, static fallback otherwise):
+
+```bash
+fastcode model
+```
+
+`doctor --net` only probes the npm registry; it does not verify provider authentication.
 
 ---
 
@@ -202,17 +298,40 @@ fastcode "run the tests, find the failing file, patch it, and verify the fix"
 
 ---
 
+## 🧩 Programmatic SDK (Node)
+
+Use FastCode from your own Node program:
+
+```ts
+import { runTask } from "@datename/fastcode-termux";
+import type { RunResult } from "@datename/fastcode-termux/types";
+
+const handle = await runTask({ prompt: "summarize this repository", cwd: process.cwd() });
+const result: RunResult = await handle.wait();
+console.log(result.status, result.sessionId, result.logPath);
+```
+
+`runTask(config, options?)` returns a `TaskHandle` with `wait()` and `stop()`. Requires a configured provider/key (same as the CLI).
+
+Full contract (camelCase) and a self-contained runnable check: https://github.com/dateName/fastcode-termux/blob/main/docs/SDK.md
+
+---
+
 ## 🧩 Plugins
 
-Plugins are always-active behavior packs. A plugin folder can contain:
+Plugins are always-active behavior packs. They are not npm dependencies and do not execute code. A plugin folder can contain:
 
 ```text
 my-plugin/
-├── PLUGIN.md
+├── plugin.json          # optional manifest: name/version/description/scope/capabilities
+├── PLUGIN.md            # prompt body; README.md is the fallback
+├── SKILL.md             # optional root skill
 └── skills/
     └── reviewer/
         └── SKILL.md
 ```
+
+`capabilities` supports only `prompt` and `skills`; other capabilities are rejected at import. With no manifest, capabilities are inferred from the files. `scope:"project"` installs under `<cwd>/.fastcode/plugins/` and loads only when the project is trusted.
 
 Import and enable a plugin:
 
@@ -243,12 +362,15 @@ These subcommands do not start a conversation:
 | `fastcode --version` / `-v` / `--help` / `-h` | version / all commands |
 | `fastcode provider [id]` / `model [id]` | list or set default provider / model |
 | `fastcode config` / `config path` | config + paths / config.json path only |
-| `fastcode sessions` / `sessions show <id>` / `resume [id\|latest]` | list / inspect / resume sessions |
+| `fastcode config export [--out <file>] [--with-keys]` / `config import <file>` | export/import config, auth, trust and model metadata (import creates `.import.bak.<ts>`) |
+| `fastcode sessions` / `sess` / `sessions show <id> [--full\|--max-chars N]` / `resume [id\|latest]` | list (`--all`, `--limit N`) / inspect / resume (no id opens the picker) |
 | `fastcode trust [dir]` / `untrust [dir]` / `trusted` / `trust --forget <key>` | trust management |
-| `fastcode skills list\|install <id>\|uninstall <id>\|search <q>` | skill management |
-| `fastcode doctor` / `doctor --net` | diagnostics / probe registry |
+| `fastcode skills list\|install <id> [--force]\|uninstall <id>\|search <q>` | skill management |
+| `fastcode doctor` / `doctor --net` / `doctor --backup-check` | diagnostics / probe registry / check config-auth-trust-model-meta presence and modes |
 | `fastcode update` | check for updates |
 | `--ui tty\|native\|plain\|json` | approval/render backend |
+| `--long-run` / `--full-access` | turns=9999, anchor 30000 chars; does not disable egress/trust/sandbox/approval |
+| `--cost-cap <USD>` | process-local cost cap |
 
 ---
 
@@ -258,35 +380,40 @@ These run in the TUI without sending a model request:
 
 | Command | Action |
 | --- | --- |
-| `/help` | Show command list |
+| `/help` (`/h`, `/?`) | Show command list |
 | `/agent [on/off/status]` | Toggle local coding-agent tools |
 | `/tools` | Show available coding tools |
 | `/cwd` | Show agent sandbox root |
-| `/plugin ...` | Import and manage always-active plugin packs |
+| `/plugin [list\|import\|enable\|disable\|remove\|info]` | Import and manage always-active plugin packs |
 | `/provider [id]` | Pick or switch provider (interactive when omitted) |
 | `/model [id]` | Pick or switch model (interactive when omitted) |
 | `/effort [level]` | Thinking effort: auto / low / medium / high / max |
 | `/login [provider] [model] [key]` | Bind a provider-wide API key (guided when omitted) |
-| `/logout <provider>` | Remove the provider's key (`--all` accepted for compatibility) |
-| `/skills ...` | Search, install, enable, disable, list skills |
+| `/logout <provider> [model\|--all]` | Remove the provider's key (`--all` for provider-wide) |
+| `/skills [list\|search\|install\|uninstall\|enable\|disable\|info\|verify\|registry]` | Search, install, enable, disable, verify and list skills |
 | `/theme [id]` | Switch theme |
 | `/cost` | Show token and cost usage |
 | `/system [text]` | Show or update system prompt |
 | `/whoami` | Show configured provider keys |
 | `/config` | Print config and paths |
-| `/clear` (`cls`) | Clear conversation |
+| `/clear` (`/cls`) | Clear conversation and write a `cleared` fact |
 | `/reset` | Reset config |
-| `/about` | Show version and platform |
+| `/about` (`/version`) | Show version and platform |
 | `/context` | Token estimate, compaction threshold, heap |
-| `/compact` | Force local context compaction |
+| `/compact [list\|clean <seq\|all>]` | Force compaction, list compacted facts, or clean summary files |
+| `/facts show <seq> \| provenance` | Print a full fact/raw output or the latest provenance report |
+| `/revert <n>` (`/undo`) | Remove user message n and later; message-only |
 | `/cancel` | Abort the active run (mobile alternative to Esc) |
 | `/steer <text>` | Guide the next request of an active run |
-| `/jobs` / `/attach <id>` / `/kill <id>` | Background shell sessions |
-| `/threads [1-128]` | Show or set resident shell concurrency (default 2, max 128) |
-| `/expand` | Toggle full/collapsed tool output |
+| `/plan` (`/todo`, `/todos`) | show / set a; b / add / start / done / remove / clear |
+| `/goal [text\|off]` | Show, set or clear the session goal |
+| `/worktree` | list / create / diff / apply / remove git worktrees |
+| `/jobs` / `/attach [id]` / `/kill [id]` | Background shell sessions; omit id to pick |
+| `/threads [1-128]` (`/pool`) | Show current value and prefill `/threads `; set resident shell concurrency (default 2, max 128) |
+| `/expand [id]` | Toggle full/collapsed future tool output; with `<id>`, reprint that stored tool result and diff |
 | `/edit` | Edit the prompt in `$EDITOR` (works around Ink IME bugs) |
 | `/bg` | Explain background shell behaviour |
-| `/exit` | Abort the active run, kill resident shells, then quit |
+| `/exit` (`/quit`, `/q`) | Exit; during a run requires a second confirmation |
 
 Keyboard controls:
 
@@ -323,16 +450,51 @@ Install Node.js first:
 
 ```bash
 pkg install nodejs
-npm install -g @datename/fastcode-termux@beta
+```
+
+HTTPS to npm, GitHub and model APIs needs a CA root bundle. If Node/npm reports `certificate verify failed` or `unable to get local issuer certificate`, install the bundle:
+
+```bash
+pkg install ca-certificates
+```
+
+If your Termux already has a working bundle and you do not want to install it explicitly, the command above without `ca-certificates` is enough:
+
+```bash
+pkg install nodejs
+```
+
+Verify HTTPS:
+
+```bash
+node -e "fetch('https://registry.npmjs.org/').then((r) => console.log(r.status)).catch((e) => { console.error(e.message); process.exit(1); })"
+```
+
+Do not disable TLS verification (`NODE_TLS_REJECT_UNAUTHORIZED=0` / `strict-ssl=false`) as a workaround.
+
+Install the stable package:
+
+```bash
+npm install -g @datename/fastcode-termux@latest
+```
+
+Start FastCode:
+
+```bash
 fastcode
 ```
 
-> Install `@beta`; the `beta` tag carries this version, `latest` remains the stable line.
+> `latest` is the stable line; `beta` is the pre-release channel.
 
-If the command is not found, check your npm global binary path:
+If the command is not found, print the global binary directory:
 
 ```bash
 npm bin -g
+```
+
+Then check your `PATH`:
+
+```bash
 echo "$PATH"
 ```
 

@@ -99,6 +99,16 @@ function scan(pattern: string, content: string): Array<{ start: number; end: num
 }
 
 /** Return every sensitive match; this scans the full input, not a window. */
+export function redactSensitive(content: string): { text: string; redacted: number } {
+    const matches = detect(content);
+    if (matches.length === 0)
+        return { text: content, redacted: 0 };
+    let text = content;
+    for (const match of [...matches].sort((a, b) => b.start - a.start))
+        text = text.slice(0, match.start) + "[REDACTED]" + text.slice(match.end);
+    return { text, redacted: matches.length };
+}
+
 export function detect(content: string, extraPatterns: string[] = []): SensitiveMatch[] {
     if (!content)
         return [];

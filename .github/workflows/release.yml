@@ -17,6 +17,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Clean stale release artifacts
+        run: rm -rf release
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -48,12 +51,12 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, 'beta') }}
 
-      # Publishes to npm on a v* tag OR a manual run.
-      #  - Preferred: Trusted Publishing (OIDC) — no long-lived secret. Configure the
-      #    package on npmjs.com → Settings → Trusted Publishing with this repo+workflow,
-      #    then delete the NPM_TOKEN secret.
-      #  - Fallback: if NPM_TOKEN is set, it is used instead.
+      # npm publish is opt-in. A tag push builds the GitHub Release; it must not
+      # silently publish to npm (0.1.9-beta.1 was published accidentally).
+      # Enable per release with repository variable PUBLISH_NPM=true, then use
+      # Trusted Publishing (OIDC) or the NPM_TOKEN fallback below.
       - name: Publish to npm
+        if: ${{ vars.PUBLISH_NPM == 'true' }}
         working-directory: package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

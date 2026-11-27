@@ -23,6 +23,7 @@ export interface GrepOptions {
 }
 export interface GrepResult {
     text: string;
+    rawText: string;
     truncated: boolean;
     matchCount: number;
     filesScanned: number;

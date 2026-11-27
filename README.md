@@ -39,14 +39,16 @@ Ink/React/meow), so a plain `git clone` runs **without `npm install`**.
 | 🧩 Agent Skills | install `SKILL.md` skills; directory sha256 locks with `/skills verify --confirm` re-baseline |
 | 🧠 Thinking effort | `/effort auto/low/medium/high/max`, shown in the status bar |
 | 🎨 Themes | `/theme` |
-| 🌐 UI language | English / 简体中文 string catalog (`FASTCODE_LANG=zh` or `config.language`); currently covers extracted UI strings only |
+| 🌐 UI language | English / 简体中文 string catalog (`FASTCODE_LANG=zh` or `config.language`); covers banner, prompt, trust gate, pickers, status bar, activity labels, help/about and footer; most command output remains English |
 | 💰 Usage | token and cost readout in the status bar |
 | 🤖 Model support | **DeepSeek / OpenAI / Anthropic**, plus Gemini, Qwen, GLM, Kimi, Grok, OpenRouter, Ollama |
-| 💾 Resume & facts | append-only facts + `*.projection.json`; resume restores cwd/provider/model and unpaired tool calls |
-| 🧠 Context control | `/context`, `/compact`, `/clear`; token/heap-triggered local compaction with `summary-*.md`; `/compact`/`/clear` persist facts and old summaries are cleaned |
-| 🖥️ Background shell | long commands return a session id; `/jobs` `/attach` `/kill`; resident `sh -s` pool (default 2, up to 6 via `/threads`; one-shot commands use a separate per-turn spawn budget) |
+| 💾 Resume the real session | append-only facts + `*.projection.json`; `resume` restores cwd/provider/model, marks interrupted calls `INTERRUPTED`, and can recover projection-only sessions after JSONL pruning; headless logs by default |
+| 🗜️ Compaction without losing decisions | `/context`, `/compact`, `/clear`; `/compact` or automatic token/heap compaction keeps decisions, files and recent turns in a summary while full history stays append-only |
+| 🔍 Auditable diffs | edits are diffed against the full file, not a 16K prefix; distant changes stay separate hunks, large diffs cut at hunk boundaries, and `/expand <id>` replays the complete stored output/diff |
+| 🛡️ Risk-based approval | sensitive paths, dangerous commands and large edits need approval; once/session/always, no resolver fails closed, Hard Block is not bypassed, and approval facts record their source |
+| 🖥️ Background shell | long commands return a session id; `/jobs` `/attach` `/kill`; resident `sh -s` pool (default 2, up to 128 via `/threads`; one-shot commands use a separate per-turn spawn budget) |
 | 🧰 Dual tool protocol | pseudo `<fastcode_tool>` or native `tool_calls` (default `auto`; native = OpenAI dialect, other providers fail closed to pseudo); `FASTCODE_TOOL_PROTOCOL=legacy|native|auto` |
-| 📱 Mobile commands | `/cancel` `/steer` `/expand` `/edit` (external editor for IME issues) |
+| 📱 Mobile commands | `/cancel` `/steer` `/expand [id]` (reprint a stored tool result/diff) `/edit` (external editor for IME issues) |
 
 **Key bindings**
 
@@ -76,7 +78,7 @@ Provider keys, custom paths and finer policy controls are documented in
 
 - On Termux, IME cursor placement can be affected by a stale pty size; `stty` or `/edit` usually fixes it.
 - Native tool calls are used for OpenAI-compatible providers; others use the pseudo protocol.
-- `/threads` controls the resident shell pool, not the global number of running commands.
+- `/threads` controls the resident shell pool (1–128), not the global number of running commands.
 
 ---
 
@@ -89,13 +91,41 @@ Provider keys, custom paths and finer policy controls are documented in
 | OS | Termux (Android) / Linux / macOS / Windows |
 | Arch | aarch64 / armv7 / x86_64 all work; if you hit a binary mismatch, use the **from-source** install |
 
-Termux: install deps and grant storage access:
+Termux: install deps and grant storage access.
+
+Update packages:
 
 ```bash
 pkg update -y && pkg upgrade -y
-pkg install -y nodejs git ca-certificates
-termux-setup-storage     # so the agent can reach ~/storage/shared (phone projects/downloads/photos)
 ```
+
+Install Node.js, git and CA root certificates (`ca-certificates`):
+
+```bash
+pkg install -y nodejs git ca-certificates
+```
+
+Grant storage access so the agent can reach `~/storage/shared`:
+
+```bash
+termux-setup-storage
+```
+
+`ca-certificates` is the CA root bundle used by Node/npm/git to verify HTTPS connections to npm, GitHub and model APIs. Without a usable CA bundle you may see `certificate verify failed`, `unable to get local issuer certificate` or `self-signed certificate`.
+
+If your Termux already has a working CA bundle and you do **not** want to install the package explicitly, install only Node.js and git:
+
+```bash
+pkg install -y nodejs git
+```
+
+Check HTTPS from Node:
+
+```bash
+node -e "fetch('https://registry.npmjs.org/').then((r) => console.log(r.status)).catch((e) => { console.error(e.message); process.exit(1); })"
+```
+
+If that fails, install `ca-certificates` or point Node/npm at a CA file. Do **not** disable TLS verification (`NODE_TLS_REJECT_UNAUTHORIZED=0` / `strict-ssl=false`) as a workaround.
 
 ---
 
@@ -103,28 +133,65 @@ termux-setup-storage     # so the agent can reach ~/storage/shared (phone projec
 
 In order of preference. The repo commits a **self-contained bundle** `package/dist/cli.js` (esbuild inlines Ink/React/meow, so no `npm install` is needed after cloning).
 
-From npm: `npm install -g @datename/fastcode-termux@latest` (`latest` is the stable channel; `beta` is the pre-release channel). The tracked `release/` contains the current release assets.
+Install the stable channel from npm:
+
+```bash
+npm install -g @datename/fastcode-termux@latest
+```
+
+`latest` is the stable channel; `beta` is the pre-release channel. The tracked `release/` contains the current release assets.
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
 ### 1. One-line script (recommended)
 
+Clone the repository:
+
 ```bash
 git clone https://github.com/dateName/fastcode-termux.git
-cd fastcode-termux
-bash scripts/install.sh
-fastcode          # ready to go (short alias: fc)
 ```
+
+Enter the directory:
+
+```bash
+cd fastcode-termux
+```
+
+Install the launcher:
+
+```bash
+bash scripts/install.sh
+```
+
+Start FastCode:
+
+```bash
+fastcode
+```
+
+The short alias is `fc`.
 
 The script symlinks `package/dist/cli.js` into `$PREFIX/bin` (Termux) or `~/.local/bin`, **skipping `npm install` entirely**; it only falls back to `npm install && npm run build` if the bundle is missing.
 
 ### 2. Portable bundle (no npm)
 
-After the release build, download `fastcode-portable-<version>.tar.gz` (see `SHA256SUMS`), unpack and run:
+After the release build, download `fastcode-portable-<version>.tar.gz` (see `SHA256SUMS`).
+
+Unpack it:
 
 ```bash
 tar -xzf fastcode-portable-<version>.tar.gz
+```
+
+Enter the unpacked directory:
+
+```bash
 cd fastcode-portable-<version>
+```
+
+Run it:
+
+```bash
 ./fastcode
 ```
 
@@ -135,29 +202,63 @@ The tracked `release/` contains the published stable assets. `sh scripts/build-p
 You do **not** need this to use FastCode — the committed bundle already runs
 (see above). Use it when you change `package/src` or want a local rebuild:
 
+Clone the repository:
+
 ```bash
 git clone https://github.com/dateName/fastcode-termux.git
-cd fastcode-termux/package
-npm install          # needed only to rebuild / run the TypeScript source
-npm run build        # regenerates dist/ from src/
-npm link             # then `fastcode` / `fc` are global
 ```
+
+Enter the package directory:
+
+```bash
+cd fastcode-termux/package
+```
+
+Install build dependencies:
+
+```bash
+npm install
+```
+
+Rebuild `dist/` from `src/`:
+
+```bash
+npm run build
+```
+
+Link the local build globally:
+
+```bash
+npm link
+```
+
+After linking, `fastcode` and `fc` are available globally.
 
 To just run the committed bundle from a checkout, no install is required:
 
 ```bash
-node package/dist/cli.js          # or: node package/bin/fastcode.mjs doctor
+node package/dist/cli.js
+```
+
+You can also run a subcommand directly:
+
+```bash
+node package/bin/fastcode.mjs doctor
 ```
 
 ---
 
 ## 🚀 Quick start
 
-```bash
-# 1) set a key (add to ~/.bashrc to persist)
-export DEEPSEEK_API_KEY=sk-your-key
+Set a key (add it to `~/.bashrc` to persist):
 
-# 2) run
+```bash
+export DEEPSEEK_API_KEY=sk-your-key
+```
+
+Start the TUI:
+
+```bash
 fastcode
 ```
 
@@ -166,6 +267,61 @@ fastcode
 > 🔒 The first time you enter a folder, FastCode asks whether to trust it (the agent can read/write files and run commands). Press `y`.
 >
 > 📱 On Termux: run `termux-setup-storage` first, and `termux-wake-lock` to keep the session alive.
+
+---
+
+## 🧩 Programmatic SDK (Node)
+
+Use FastCode from your own Node program:
+
+```ts
+import { runTask } from "@datename/fastcode-termux";
+import type { RunResult } from "@datename/fastcode-termux/types";
+
+const handle = await runTask({ prompt: "summarize this repository", cwd: process.cwd() });
+const result: RunResult = await handle.wait();
+console.log(result.status, result.sessionId, result.logPath);
+```
+
+- `runTask(config, options?)` returns a `TaskHandle` with `wait()` and `stop()`.
+- `stop()` is idempotent; `stop()` then `wait()` resolves `status: "stopped"`.
+- Requires a configured provider/Key (same as the TUI).
+
+Full contract (camelCase) and a self-contained runnable check: [docs/SDK.md](docs/SDK.md).
+
+---
+
+## 🔁 Resume a conversation
+
+Sessions are saved automatically. Run the commands below from your shell; if the TUI is open, exit first with `/exit`. There is no `/resume` slash command inside the TUI.
+
+List saved sessions:
+
+```bash
+fastcode sessions
+```
+
+Inspect one before resuming:
+
+```bash
+fastcode sessions show <id> --full
+```
+
+Open the session picker:
+
+```bash
+fastcode resume
+```
+
+In a terminal this shows your sessions. Use ↑/↓ to move, `1`–`9` to jump, Enter to resume, Esc to cancel. When stdout/stdin is piped it falls back to the newest session.
+
+Resume a specific session directly:
+
+```bash
+fastcode resume <id>
+```
+
+`resume` restores the working directory, provider, model and conversation, including the compacted summary. If the original JSONL was pruned, FastCode prints a warning and resumes from the projection instead. `/compact` does not delete history; it writes a summary and keeps recent turns.
 
 ---
 
@@ -189,6 +345,8 @@ Pick **one** provider and export its key:
 | Custom | `FASTCODE_BASE_URL` + `FASTCODE_API_KEY` |
 | Stdio CLI (opt-in) | `FASTCODE_STDIO_COMMAND` (+ optional `FASTCODE_STDIO_ARGS`, `FASTCODE_STDIO_MODEL`, `FASTCODE_STDIO_ENV_ALLOWLIST`) |
 
+Optional hooks: set `FASTCODE_HOOKS=1` to load `~/.fastcode/hooks/*.mjs` in the TUI and `--ui` runners (off by default; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md)).
+
 **Persist it in `~/.bashrc`:**
 
 ```bash
@@ -210,6 +368,24 @@ Offline model lists show built-in/cached choices with a notice; a model ID can a
 
 > 🔐 Keys live in `~/.fastcode/auth.json`, **one key per provider**, separate from `config.json`. Switching models inside a provider reuses the same key. v1/v2 files are migrated automatically on first read and backed up as `auth.json.v2.bak` — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Env vars (`DEEPSEEK_API_KEY`, …) are also provider-wide.
 
+### Live provider check
+
+After setting a real key, ask FastCode to list models for the current provider:
+
+```bash
+fastcode model
+```
+
+When a key is available, this calls the provider's `/models` endpoint. If the request fails or the provider has no endpoint, FastCode falls back to the built-in/cached list. In the TUI, `/model` opens the picker and uses the live list when possible.
+
+Check whether the key is visible:
+
+```bash
+fastcode doctor
+```
+
+`doctor --net` only probes the npm registry, not provider authentication. A `401` from a model list usually means an invalid key; DNS/timeout means network trouble; a static list means no key, no supported endpoint, or offline fallback.
+
 ---
 
 ## 🧰 Commands
@@ -220,20 +396,24 @@ Offline model lists show built-in/cached choices with a notice; a model ID can a
 | `fastcode --version` / `-v` / `--help` / `-h` / `help` | version / all commands |
 | `fastcode provider [id] [model]` / `model [id]` | list or set the default provider / model (model is required when the provider has no verified default) |
 | `fastcode config` / `config path` | show config + paths / print only config.json |
-| `fastcode sessions` / `sessions show <id>` / `resume [id\|latest]` | list / inspect / resume sessions |
+| `fastcode config export [--out <file>] [--with-keys]` / `config import <file>` | export/import config, auth, trust and model metadata; import writes `.import.bak.<ts>` backups |
+| `fastcode sessions` / `sess` / `sessions show <id> [--full\|--max-chars N]` / `resume [id\|latest]` | list (`--all`, `--limit N`) / inspect facts, projection and provenance / resume (no id opens the picker) |
 | `fastcode trust [dir]` / `untrust [dir]` / `trusted` / `trust --forget <key>` | trust management and remembered approvals |
-| `fastcode skills list\|install <id>\|uninstall <id>\|search <q>` | skill management |
-| `fastcode doctor` / `doctor --net` | environment self-check; `--net` adds a registry connectivity probe — **start here when debugging** |
+| `fastcode skills list\|install <id> [--force]\|uninstall <id>\|search <q>` | skill management |
+| `fastcode doctor` / `doctor --net` / `doctor --backup-check` | environment self-check; `--net` probes registry connectivity; `--backup-check` lists config/auth/trust/model-meta presence and modes |
 | `fastcode update` | check for a newer release |
 | `--ui tty\|native\|plain\|json` | approval/render backend (default `tty`; plain/json for no TTY) |
+| `--long-run` / `--full-access` | long-run mode: turns=9999, anchor 30000 chars; does not disable egress/trust/sandbox/approval |
+| `--cost-cap <USD>` | process-local cost cap (default unlimited) |
 
 `fastcode "prompt"` and `resume` enter a conversation; the subcommands above do not send a model request.
 
 **TUI slash commands (no model request):**
-- Config/info: `/help` `/about` `/config` `/theme` `/system` `/reset` `/whoami`
+- Config/info: `/help` (`/h`, `/?`) `/about` (`/version`) `/config` `/theme` `/system` `/reset` `/whoami`
 - Model/key: `/provider` `/model` `/effort` `/login` `/logout`
-- Context/run: `/clear` `/compact` `/context` `/cost` `/expand` `/cancel` `/steer` `/exit`
-- Agent/background: `/agent` `/tools` `/cwd` `/jobs` `/attach` `/kill` `/bg` `/threads` (`/pool`)
+- Context/audit: `/context` `/compact [list|clean <seq|all>]` `/cost` `/facts show <seq>|provenance` `/expand [id]` `/clear` (`/cls`) `/revert <n>` (`/undo`) `/cancel` `/steer` `/exit` (`/quit`, `/q`)
+- Planning/worktree: `/plan` (`/todo`/`/todos`) `/goal` `/worktree`
+- Agent/background: `/agent` `/tools` `/cwd` `/jobs` `/attach` `/kill` `/bg` `/threads [1-128]` (`/pool`)
 - Extensions/input: `/skills` `/plugin` `/edit`
 
 Full command and settings reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
@@ -310,8 +490,9 @@ SHA256SUMS                               checksums
 
 ### Publish to npm
 
-CI publishes to npm automatically on a `v*` tag when the repo secret
-`NPM_TOKEN` is set (see `.github/workflows/release.yml`). Manual fallback:
+npm publish is **opt-in**: set repository variable `PUBLISH_NPM=true` to let
+`.github/workflows/release.yml` publish on a `v*` tag (Trusted Publishing or
+`NPM_TOKEN`). A tag alone only creates the GitHub Release. Manual fallback:
 
 ```bash
 cd package
@@ -351,9 +532,11 @@ gh release create v<version> -t "FastCode <version>" \
 |---|---|
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | all deployment methods and troubleshooting |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | the two config files, every environment variable |
+| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | runtime/build dependencies, packaging, plugin boundaries |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | architecture, modules, data flow |
 | [docs/MODULES.md](docs/MODULES.md) | what every source file does |
 | [docs/AUDIT.md](docs/AUDIT.md) | security and robustness audit |
+| [docs/SECURITY_MATRIX.md](docs/SECURITY_MATRIX.md) | attack regression matrix and known security gaps |
 | [docs/DEVLOG.md](docs/DEVLOG.md) | change log: migrations, risks, rollback |
 | [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md) | 0.1.6-beta handover report (historical) |
 | [CHANGELOG.md](CHANGELOG.md) | release notes (historical versions included) |

@@ -6,6 +6,7 @@
  * provider/model selection, config paths, skills, doctor and update.
  */
 import meow from "meow";
+import { emitKeypressEvents } from "node:readline";
 import { readPackageMeta } from "./lib/pkg.js";
 import { installSkill, listInstalledSkills, uninstallSkill, searchRegistry, resolveRegistry } from "./skills/manager.js";
 import { loadConfig, saveConfig, resolveProviderKey } from "./config/store.js";
@@ -18,6 +19,7 @@ import { probeConnectivity } from "./lib/http.js";
 import { copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { latestSessionFile, listSessions, projectionPath, readSession, resolveResumeFile, resolveSessionFile } from "./session/log.js";
 import { readProjection, sessionMetaFromFile } from "./session/projection.js";
+import { buildProvenance } from "./session/provenance.js";
 import { forgetToolApproval, listToolApprovals, listTrusted, trustProject, untrustProject } from "./config/trust.js";
 import { isValidModelId } from "./commands/model.js";
 import { toolCatalogHash } from "./agent/registry.js";
@@ -38,9 +40,12 @@ const HELP = [
     "    $ fastcode model <id>            Set the default model",
     "    $ fastcode config                Print config file and data paths",
     "    $ fastcode config path           Print just the config file path",
-    "    $ fastcode sessions              List saved sessions (JSONL)",
-    "    $ fastcode sessions show <id>    Print a saved session",
-    "    $ fastcode resume [id|latest]    Resume a saved session in the TUI",
+    "    $ fastcode config export [--out <file>] [--with-keys]",
+    "    $ fastcode config import <file>  Restore config/auth/trust/model-meta",
+    "    $ fastcode sessions              List saved sessions (--all, --limit N)",
+    "    $ fastcode sess                  Alias for sessions / ls",
+    "    $ fastcode sessions show <id>    Print a saved session (--full, --max-chars N)",
+    "    $ fastcode resume [id|latest]    Resume; omit id to pick from a list",
     "",
     "  Trust (first-run safety)",
     "    $ fastcode trust [dir]           Trust a folder (enables agent tools)",
@@ -50,7 +55,7 @@ const HELP = [
     "",
     "  Skills & maintenance",
     "    $ fastcode skills list           Print installed skills",
-    "    $ fastcode skills install <id>   Install a skill from the registry",
+    "    $ fastcode skills install <id> [--force]  Install a skill from the registry",
     "    $ fastcode skills uninstall <id> Remove an installed skill",
     "    $ fastcode skills search <q>     Search the registry",
     "    $ fastcode doctor                Environment diagnostics (Termux/mobile)",
@@ -82,6 +87,100 @@ const HELP = [
     "  Approval UI:  --ui tty|native|plain|json   (default tty)",
     "",
 ].join(NL);
+export async function chooseSession(
+    sessions: any[],
+    io: { stdin?: any; stdout?: any } = {},
+): Promise<string | undefined> {
+    if (sessions.length === 0)
+        return undefined;
+    const stdin = io.stdin ?? process.stdin;
+    const stdout = io.stdout ?? process.stdout;
+    if (!stdin.isTTY || !stdout.isTTY)
+        return sessions[0].id;
+    if (sessions.length === 1)
+        return sessions[0].id;
+    return await new Promise<string | undefined>((resolve) => {
+        const wasRaw = Boolean(stdin.isRaw);
+        const windowSize = 10;
+        const width = Math.max(40, stdout.columns ?? 80);
+        let index = 0;
+        let renderedLines = 0;
+        let finished = false;
+        const start = () => Math.max(0, Math.min(index - Math.floor(windowSize / 2), Math.max(0, sessions.length - windowSize)));
+        const label = (entry: any) => {
+            const model = entry.model ? "  " + entry.model : "";
+            const cwd = entry.cwd ? "  " + entry.cwd : "";
+            return (entry.id + "  " + entry.messages + " msgs  " + entry.modified + model + cwd).slice(0, width - 2);
+        };
+        const render = () => {
+            if (renderedLines > 0)
+                stdout.write("\x1b[" + renderedLines + "A");
+            stdout.write("\x1b[0J");
+            const first = start();
+            const visible = sessions.slice(first, first + windowSize);
+            const lines = [
+                "Resume a session",
+                ...visible.map((entry, offset) => {
+                    const selected = first + offset === index;
+                    return (selected ? "❯ " : "  ") + (offset + 1) + ". " + label(entry);
+                }),
+                "",
+                "  ↑/↓ select · 1-9 jump · Enter resume · Esc cancel",
+            ];
+            stdout.write(lines.join(NL) + NL);
+            renderedLines = lines.length;
+        };
+        const cleanup = () => {
+            stdin.removeListener("keypress", onKey);
+            if (!wasRaw)
+                stdin.setRawMode(false);
+            stdin.pause();
+            stdout.write("\x1b[?25h");
+        };
+        const finish = (value: string | undefined) => {
+            if (finished)
+                return;
+            finished = true;
+            cleanup();
+            stdout.write("\x1b[0J");
+            resolve(value);
+        };
+        const onKey = (input: string, key: any) => {
+            if ((key?.ctrl && input === "c") || key?.name === "escape") {
+                finish(undefined);
+                return;
+            }
+            if (key?.name === "up") {
+                index = (index - 1 + sessions.length) % sessions.length;
+                render();
+                return;
+            }
+            if (key?.name === "down") {
+                index = (index + 1) % sessions.length;
+                render();
+                return;
+            }
+            if (key?.name === "return") {
+                finish(sessions[index].id);
+                return;
+            }
+            if (/^[1-9]$/.test(input ?? "")) {
+                const target = start() + Number(input) - 1;
+                if (target < sessions.length) {
+                    index = target;
+                    render();
+                }
+            }
+        };
+        stdout.write("\x1b[?25l");
+        emitKeypressEvents(stdin);
+        stdin.setRawMode(true);
+        stdin.resume();
+        stdin.on("keypress", onKey);
+        render();
+    });
+}
+
 export async function parseCli(): Promise<any> {
     // meow's autoHelp covers `--help` but not `-h`; handle both (and `help`)
     // here so every documented spelling prints the same formatted help.
@@ -126,7 +225,8 @@ export async function parseCli(): Promise<any> {
         process.exit(1);
     }
     // First positional dictates the sub-command. Anything else is a prompt.
-    const [first, ...rest] = cli.input;
+    const [rawFirst, ...rest] = cli.input;
+    const first = rawFirst === "sess" || rawFirst === "ls" ? "sessions" : rawFirst;
     if (first === "provider") {
         const cfg = loadConfig();
         const paths = getPaths();
@@ -182,7 +282,7 @@ export async function parseCli(): Promise<any> {
                 }
                 if (models.length > 0) {
                     console.log("");
-                    console.log("Known models for " + provider.label + " (use /model in the TUI for the live list):");
+                    console.log("Known models for " + provider.label + " (live when reachable; /model in the TUI opens the picker):");
                     for (const m of models.slice(0, 40)) {
                         const marker = m.id === cfg.model ? "●" : " ";
                         console.log("  " + marker + " " + m.id + (m.label ? "  — " + m.label : ""));
@@ -278,21 +378,40 @@ export async function parseCli(): Promise<any> {
         }
         if (rest[0] === "show") {
             const idOrFile = rest[1] ?? all[0].id;
-            if (rest[1] && !existsSync(resolveSessionFile(rest[1]))) {
+            const file = resolveSessionFile(idOrFile);
+            if (rest[1] && !existsSync(file) && !existsSync(projectionPath(file))) {
                 console.error("No such session: " + rest[1]);
                 process.exit(1);
             }
+            const full = rest.includes("--full");
+            const maxChars = (() => {
+                const index = rest.indexOf("--max-chars");
+                const value = index >= 0 ? Number(rest[index + 1]) : 2000;
+                return Number.isFinite(value) && value > 0 ? Math.floor(value) : 2000;
+            })();
+            const clip = (value: unknown) => {
+                const text = String(value ?? "");
+                return full || text.length <= maxChars ? text : text.slice(0, maxChars) + "...";
+            };
             const entries = readSession(idOrFile);
             for (const entry of entries) {
                 if (entry.type === "message")
-                    console.log("[" + entry.role + "] " + entry.content);
-                else if (entry.type === "user" || entry.type === "assistant_raw")
-                    console.log("[" + entry.type + "] " + String(entry.content ?? "").slice(0, 300));
+                    console.log("[" + entry.role + "] " + clip(entry.content));
+                else if (["user", "assistant_raw", "assistant_text"].includes(entry.type))
+                    console.log("[" + entry.type + "] " + clip(entry.content));
+                else if (entry.type === "tool_call")
+                    console.log("[tool_call] " + entry.tool + " " + clip(JSON.stringify(entry.args ?? {})));
+                else if (entry.type === "tool_result")
+                    console.log("[tool_result] " + clip(entry.output));
+                else if (entry.type === "compacted")
+                    console.log("[compacted] " + (entry.summaryRef ?? "(no summary)") + " dropped=" + (entry.droppedCount ?? "unmapped") + " range=" + (entry.droppedFromSeq ?? "?") + ".." + (entry.droppedToSeq ?? "?"));
+                else if (entry.type === "checkpoint")
+                    console.log("[checkpoint] " + (entry.lastFactSeq ?? "?"));
                 else
                     console.log("[" + entry.type + "]");
             }
-            const file = resolveSessionFile(idOrFile);
             const projection = readProjection(file);
+            const provenance = entries.length > 0 || existsSync(projectionPath(file)) ? buildProvenance(file) : undefined;
             console.log("");
             if (projection) {
                 console.log("[projection] " + projectionPath(file));
@@ -301,28 +420,52 @@ export async function parseCli(): Promise<any> {
             else {
                 console.log("[projection] (none)");
             }
+            if (provenance?.warnings.length)
+                console.log("[provenance] " + provenance.warnings.join(" | "));
             return { done: true };
         }
         console.log("Sessions (newest first):");
-        for (const entry of all.slice(0, 20)) {
-            console.log("  " + entry.id + "   " + (entry.bytes / 1024).toFixed(1) + "KB   " + entry.messages + " msgs   " + entry.modified);
+        const showAll = rest.includes("--all");
+        const limitIndex = rest.indexOf("--limit");
+        const limit = showAll ? all.length : Math.max(1, limitIndex >= 0 ? Number(rest[limitIndex + 1]) || 20 : 20);
+        for (const entry of all.slice(0, limit)) {
+            const cwd = entry.cwd ? "   " + entry.cwd : "";
+            const model = entry.model ? "   " + entry.model : "";
+            console.log("  " + entry.id + "   " + (entry.bytes / 1024).toFixed(1) + "KB   " + entry.messages + " msgs   " + entry.modified + model + cwd);
         }
+        if (!showAll && all.length > limit)
+            console.log("  ... " + (all.length - limit) + " more (use --all or --limit N)");
         console.log("");
-        console.log("Resume:  fastcode resume [id|latest]");
+        console.log("Resume:  fastcode resume [id|latest]   (omit id to pick)");
         console.log("Show:    fastcode sessions show <id>");
         return { done: true };
     }
     if (first === "resume") {
-        const target = rest[0];
-        const file = !target || target === "latest" ? latestSessionFile() : resolveResumeFile(target);
+        let target = rest[0];
+        if (!target) {
+            const all = listSessions();
+            if (all.length === 0) {
+                console.error("No saved session to resume. Start one with: fastcode");
+                process.exit(1);
+            }
+            target = await chooseSession(all);
+            if (!target) {
+                console.log("Resume cancelled.");
+                return { done: true };
+            }
+        }
+        const file = target === "latest" ? latestSessionFile() : resolveResumeFile(target);
         if (!file) {
             console.error("Resume expects a session id or a .jsonl file inside the sessions directory.");
             process.exit(1);
         }
-        if (!existsSync(file)) {
+        const projection = projectionPath(file);
+        if (!existsSync(file) && !existsSync(projection)) {
             console.error("No saved session to resume. Start one with: fastcode");
             process.exit(1);
         }
+        if (!existsSync(file))
+            console.error("[fastcode] session JSONL is gone; resuming from its projection " + projection);
         const meta = sessionMetaFromFile(file);
         if (meta.cwd) {
             if (existsSync(meta.cwd)) {

@@ -137,7 +137,7 @@ export async function listFiles(sandbox: string, root: string, maxDepth: number,
             let line = `${indent(depth + 1)}${entry.name}  (${formatSize(info.size)})`;
             const symbols = await fileSymbols(full, entry.name, info.size);
             if (symbols)
-                line += `  鈥?${symbols}`;
+                line += `  — ${symbols}`;
             out.line(line);
             if (out.full)
                 return;
@@ -202,6 +202,7 @@ export interface GrepOptions {
 
 export interface GrepResult {
     text: string;
+    rawText: string;
     truncated: boolean;
     matchCount: number;
     filesScanned: number;
@@ -282,7 +283,7 @@ export async function grepFiles(sandbox: string, root: string, options: GrepOpti
     });
     if (out.full)
         truncated = true;
-    return { text: out.value(), truncated, matchCount, filesScanned };
+    return { text: out.value(), rawText: out.fullValue(), truncated, matchCount, filesScanned };
 }
 
 function globToRegExp(glob: string): RegExp {

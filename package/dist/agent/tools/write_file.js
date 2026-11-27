@@ -1,12 +1,11 @@
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { atomicFile } from "../../lib/atomic-file.js";
 import { buildStructuredDiff, structuredDiffFields } from "../../lib/values.js";
 import { countChangedLines, unifiedDiff } from "../../lib/diff.js";
 import { approveLargeEdit } from "./edit-approval.js";
 import { assertNotSymlink, existingMode, sandboxWritePath } from "./paths.js";
-import { readTextFileResult } from "./readers.js";
 import { invalid, prepareWritePath, requiredString } from "./validate.js";
 export const writeFileTool = {
     name: "write_file",
@@ -32,9 +31,7 @@ export const writeFileTool = {
         let beforeTruncated = false;
         if (existed) {
             try {
-                const before = await readTextFileResult(file, 16_384);
-                beforeText = before.binary ? "" : before.text;
-                beforeTruncated = before.truncated || before.binary;
+                beforeText = await readFile(file, "utf8");
             }
             catch {
                 // A binary/locked file still lets write_file replace it; the diff

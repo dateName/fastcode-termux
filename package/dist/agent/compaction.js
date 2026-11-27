@@ -173,15 +173,16 @@ export function buildSummary(messages, config, options) {
         const content = message.content.length > SUMMARY_SCAN_LIMIT
             ? message.content.slice(0, SUMMARY_SCAN_LIMIT)
             : message.content;
+        const seq = message.seq ? `[seq=${message.seq}] ` : "";
         if (message.role === "user") {
             if (content.startsWith("FastCode executed the requested local tools.")) {
                 for (const line of content.split(/\r?\n/)) {
                     if (/error|failed|not found|denied|timed out/i.test(line))
-                        outcomes.push(clip(line, 240));
+                        outcomes.push(clip(`${seq}${line}`, 240));
                 }
             }
             else {
-                requests.push(clip(`${message.seq ? `[seq=${message.seq}] ` : ""}${content}`, 300));
+                requests.push(clip(`${seq}${content}`, 300));
             }
             collectFiles(content, files);
             continue;
@@ -189,17 +190,17 @@ export function buildSummary(messages, config, options) {
         if (message.role === "assistant") {
             const calls = parseToolCalls(content).calls;
             for (const call of calls)
-                actions.push(describeCall(call));
+                actions.push(clip(`${seq}${describeCall(call)}`, 300));
             const visible = stripToolCalls(content);
             if (visible)
-                notes.push(clip(visible, 300));
+                notes.push(clip(`${seq}${visible}`, 300));
             collectFiles(content, files);
             continue;
         }
         const lines = content.split(/\r?\n/);
         for (const line of lines) {
             if (/error|failed|not found|denied|timed out/i.test(line))
-                outcomes.push(clip(line, 240));
+                outcomes.push(clip(`${seq}${line}`, 240));
         }
         collectFiles(content, files);
     }
@@ -224,7 +225,7 @@ export function buildSummary(messages, config, options) {
             : ["- (none recorded)"]),
         "",
         "## Requests",
-        ...limitLines(requests, 8, "requests").map((line) => `- ${line}`),
+        ...limitLines(requests, 20, "requests").map((line) => `- ${line}`),
         "",
         "## Actions",
         ...limitLines(actions, 20, "actions").map((line) => `- ${line}`),

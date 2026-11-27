@@ -29,6 +29,7 @@ export declare function createOutputBuffer(limit?: number, mode?: string): {
     readonly full: boolean;
     push(chunk: any): void;
     line(value: any): void;
+    fullValue(): string;
     value(): string;
     trimEnd(): string;
     toString(): string;

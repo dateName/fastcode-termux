@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { detect, RULESET_VERSION } from "../agent/policy/sensitive.js";
+import { redactSensitive, RULESET_VERSION } from "../agent/policy/sensitive.js";
 export const RAW_OUTPUT_THRESHOLD_CHARS = 30_000;
 export const RAW_FILE_MAX_CHARS = 1_000_000;
 export const RAW_SESSION_MAX_CHARS = 50_000_000;
@@ -16,8 +16,10 @@ function sessionRawBytes(sessionFile) {
         return 0;
     let total = 0;
     for (const name of readdirSync(dir)) {
+        if (!name.endsWith(".txt"))
+            continue;
         try {
-            total += statSync(join(dir, name)).size;
+            total += readFileSync(join(dir, name), "utf8").length;
         }
         catch {
             // best effort
@@ -25,21 +27,12 @@ function sessionRawBytes(sessionFile) {
     }
     return total;
 }
-function redact(content) {
-    const matches = detect(content);
-    if (matches.length === 0)
-        return { text: content, redacted: 0 };
-    let text = content;
-    for (const match of [...matches].sort((a, b) => b.start - a.start))
-        text = text.slice(0, match.start) + "[REDACTED]" + text.slice(match.end);
-    return { text, redacted: matches.length };
-}
 /** Persist the full tool output for a fact; redaction applies only to this file. */
-export function saveRawOutput(sessionFile, seq, content) {
+export function saveRawOutput(sessionFile, seq, content, droppedChars = 0) {
     const outputChars = content.length;
     const base = {
         outputChars,
-        droppedChars: 0,
+        droppedChars,
         redacted: 0,
         rulesetVersion: RULESET_VERSION,
     };
@@ -52,7 +45,7 @@ export function saveRawOutput(sessionFile, seq, content) {
     const dir = outputsDir(sessionFile);
     try {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
-        const safe = redact(content);
+        const safe = redactSensitive(content);
         const file = join(dir, seq + ".txt");
         writeFileSync(file, safe.text, { encoding: "utf8", mode: 0o600 });
         writeFileSync(join(dir, seq + ".json"), JSON.stringify({

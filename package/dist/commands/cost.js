@@ -6,7 +6,7 @@ export const costCommand = {
             `Provider: ${state.providerId}`,
             `Model:    ${state.model}`,
             `Tokens:   ${state.totalInputTokens} in / ${state.totalOutputTokens} out`,
-            `Cost:     ~$${state.totalCostUsd.toFixed(4)}`,
+            `Cost:     ~$${Number(state.totalCostUsd ?? 0).toFixed(4)}`,
         ];
         return { message: lines.join("\n") };
     },

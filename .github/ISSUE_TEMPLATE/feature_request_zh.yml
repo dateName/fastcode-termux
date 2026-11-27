@@ -1,0 +1,30 @@
+name: 功能建议（中文）
+description: 为 FastCode 提一个改进建议。
+title: "[功能建议]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这里用于公开的产品建议。安全问题请不要发公开 issue，改用私密渠道报告。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 遇到的问题
+      description: 现在哪个流程不好用，或者缺少什么能力？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 你希望 FastCode 怎么做？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的替代方案
+      description: 你试过哪些其他做法？
+    validations:
+      required: false

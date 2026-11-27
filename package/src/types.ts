@@ -30,6 +30,9 @@ export interface ChatMessage {
     seq?: number;
     toolCalls?: NativeToolCall[];
     toolCallId?: string;
+    /** Structured interruption marker for repaired/unknown tool results. */
+    code?: "INTERRUPTED";
+    doNotRetry?: boolean;
 }
 export interface ChatRequest {
     model: string;
@@ -181,6 +184,8 @@ export interface CommandResult {
     cleared?: boolean;
     /** /compact clean result; the app appends a compaction_cleaned fact. */
     compactionCleaned?: { refs: string[] };
+    /** /expand <id>; the app prints the stored full output as a new visual entry. */
+    expandTool?: string;
 }
 export interface CommandContext {
     args: string[];

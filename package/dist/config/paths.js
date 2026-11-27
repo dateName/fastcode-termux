@@ -31,6 +31,7 @@ export function getPaths() {
         cache: join(root, "cache"),
         sessions: join(root, "sessions"),
         logs: join(root, "logs"),
+        hooks: join(root, "hooks"),
     };
     ensureDir(paths.root);
     ensureDir(paths.skills);
@@ -38,6 +39,10 @@ export function getPaths() {
     ensureDir(paths.cache);
     ensureDir(paths.sessions);
     ensureDir(paths.logs);
+    // hooks is intentionally lazy: do NOT create it here. The H1 hook host
+    // starts only when wiring sees *.mjs files; an absent dir means "no hooks".
+    // state/ is reserved for H2 and intentionally not created or exposed:
+    // sessions/ remains the authoritative logPath root; logs/ is debug-only.
     cached = paths;
     return paths;
 }
@@ -58,12 +63,14 @@ export function ensureDir(dir, mode = 0o700) {
 /** Tighten permissions on a file storing secrets where the OS supports it. */
 export function lockdown(file) {
     if (isWindows())
-        return;
+        return true;
     try {
         chmodSync(file, 0o600);
+        return true;
     }
     catch {
         // best effort; some filesystems (FAT, Termux on internal storage) don't
         // honor chmod and that's fine.
+        return false;
     }
 }

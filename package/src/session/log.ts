@@ -272,25 +272,44 @@ export function listSessions() {
     const { sessions } = getPaths();
     if (!existsSync(sessions))
         return [];
-    return readdirSync(sessions)
-        .filter((name) => name.endsWith(".jsonl"))
-        .map((name) => {
-            const file = join(sessions, name);
+    const ids = new Set(readdirSync(sessions)
+        .filter((name) => name.endsWith(".jsonl") || name.endsWith(".projection.json"))
+        .map((name) => name.replace(/[.](jsonl|projection[.]json)$/, "")));
+    return Array.from(ids)
+        .map((id) => {
+            const file = join(sessions, id + ".jsonl");
+            const projection = projectionPath(file);
+            const path = existsSync(file) ? file : projection;
             let bytes = 0;
             let modified = "";
             let messages = 0;
+            let cwd = "";
+            let model = "";
             try {
-                const info = statSync(file);
+                const info = statSync(path);
                 bytes = info.size;
                 modified = info.mtime.toISOString();
-                messages = readFileSync(file, "utf8").split(NL).filter((line) =>
-                    line.includes('"type":"user"') ||
-                    (line.includes('"type":"message"') && line.includes('"role":"user"'))).length;
+                if (existsSync(file)) {
+                    const entries = readSession(file);
+                    const summary = summarize(id, file, entries);
+                    cwd = summary.cwd;
+                    model = summary.model ? `${summary.providerId}::${summary.model}` : "";
+                    messages = entries.filter((entry) => entry.type === "user" ||
+                        (entry.type === "message" && entry.role === "user")).length;
+                }
+                else {
+                    const parsed = JSON.parse(readFileSync(projection, "utf8"));
+                    messages = Array.isArray(parsed.messages)
+                        ? parsed.messages.filter((message: any) => message.role === "user").length
+                        : 0;
+                    cwd = String(parsed.meta?.cwd ?? "");
+                    model = parsed.meta?.providerId ? `${parsed.meta.providerId}::${parsed.meta.model ?? ""}` : "";
+                }
             }
             catch {
                 // unreadable: report what we have
             }
-            return { id: name.replace(/[.]jsonl$/, ""), file, bytes, modified, messages };
+            return { id, file, bytes, modified, messages, cwd, model };
         })
         .sort((a, b) => (a.modified < b.modified ? 1 : -1));
 }

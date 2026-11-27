@@ -1,11 +1,10 @@
 import { constants, existsSync } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { buildStructuredDiff, structuredDiffFields } from "../../lib/values.js";
 import { countChangedLines, unifiedDiff } from "../../lib/diff.js";
 import { approveLargeEdit } from "./edit-approval.js";
 import { assertNotSymlink, sandboxWritePath } from "./paths.js";
-import { readTextFileResult } from "./readers.js";
 import { invalid, prepareWritePath, requiredString } from "./validate.js";
 const APPEND_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0);
 export const appendFileTool = {
@@ -32,9 +31,7 @@ export const appendFileTool = {
         let beforeTruncated = false;
         if (existed) {
             try {
-                const before = await readTextFileResult(file, 16_384);
-                beforeText = before.binary ? "" : before.text;
-                beforeTruncated = before.truncated || before.binary;
+                beforeText = await readFile(file, "utf8");
             }
             catch {
                 beforeTruncated = true;

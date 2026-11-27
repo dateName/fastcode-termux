@@ -8,6 +8,7 @@ import { copyFile as fsCopyFile, open as fsOpen, rename as fsRename } from "node
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -94,6 +95,7 @@ if (existsSync(join(pkgDir, "node_modules", "highlight.js"))) {
 const providers = await load("providers/index.js");
 ok("at least 13 providers registered", providers.PROVIDERS.length >= 13, "count=" + providers.PROVIDERS.length);
 ok("every provider exposes id/label/defaultModel/stream", providers.PROVIDERS.every((p) => typeof p.id === "string" && typeof p.label === "string" && typeof p.defaultModel === "string" && typeof p.stream === "function"));
+ok("English provider labels contain no CJK characters", providers.PROVIDERS.every((p) => !/[\u3400-\u9fff]/.test(p.label)), providers.PROVIDERS.map((p) => p.label).join(", "));
 ok("DeepSeek defaults to deepseek-flash", providers.getProvider("deepseek").defaultModel === "deepseek-flash", providers.getProvider("deepseek").defaultModel);
 
 const requestSpec = await load("providers/spec.js");
@@ -1101,6 +1103,82 @@ ok("plan done updates the item status",
     planResult.plan?.items[1].status === "done", JSON.stringify(planResult));
 const goalResult = planCommands.goalCommand.run({ args: ["ship", "it"], state: { plan: planResult.plan } });
 ok("goal sets the session goal", goalResult.plan?.goal === "ship it", JSON.stringify(goalResult));
+const commandIndex = await load("commands/index.js");
+const helpModule = await load("commands/help.js");
+const helpText = helpModule.helpCommand.run({ state: {} }).message;
+const commandNames = commandIndex.COMMANDS.map((command) => command.name);
+const aliasNames = commandIndex.COMMANDS.flatMap((command) => command.aliases ?? []);
+ok("slash command registry has complete metadata and unique names/aliases",
+    commandIndex.COMMANDS.length >= 36 &&
+        new Set(commandNames).size === commandNames.length &&
+        new Set(aliasNames).size === aliasNames.length &&
+        commandIndex.COMMANDS.every((command) => typeof command.run === "function" && command.description),
+    JSON.stringify({ names: commandNames, aliases: aliasNames }));
+ok("slash /help lists every registered command", commandNames.every((name) => helpText.includes("/" + name)), helpText.slice(0, 300));
+ok("slash aliases resolve to the canonical command",
+    commandIndex.findCommand("todo")?.name === "plan" &&
+        commandIndex.findCommand("cls")?.name === "clear" &&
+        commandIndex.findCommand("version")?.name === "about" &&
+        commandIndex.findCommand("pool")?.name === "threads");
+const costModule = await load("commands/cost.js");
+const costWithoutTotals = costModule.costCommand.run({ state: { providerId: "deepseek", model: "deepseek-flash" } });
+ok("/cost is safe with an empty session state", /\$0\.0000/.test(costWithoutTotals.message), costWithoutTotals.message);
+const cliHelpText = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "--help"], {
+    env: { ...process.env },
+    encoding: "utf8",
+});
+ok("CLI --help covers config export/import, backup-check and resume picker",
+    cliHelpText.includes("config export") && cliHelpText.includes("config import") &&
+        cliHelpText.includes("--backup-check") && cliHelpText.includes("omit id to pick"),
+    cliHelpText.slice(0, 300));
+const cliMainModule = await load("cli-main.js");
+const pickerSessions = [
+    { id: "session-a", messages: 1, modified: "2026-11-26", model: "deepseek::flash", cwd: "/a" },
+    { id: "session-b", messages: 2, modified: "2026-11-26", model: "deepseek::flash", cwd: "/b" },
+    { id: "session-c", messages: 3, modified: "2026-11-26", model: "deepseek::flash", cwd: "/c" },
+];
+async function runSessionPicker(keys) {
+    const input = new EventEmitter();
+    const rawModes = [];
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = (value) => rawModes.push(value);
+    input.resume = () => {};
+    input.pause = () => {};
+    input.setEncoding = () => {};
+    let rendered = "";
+    const output = { isTTY: true, columns: 80, write: (text) => { rendered += text; return true; } };
+    const result = cliMainModule.chooseSession(pickerSessions, { stdin: input, stdout: output });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    for (const [text, key] of keys)
+        input.emit("keypress", text, key);
+    return { selected: await result, rawModes, rendered };
+}
+const downPick = await runSessionPicker([["\u001b[B", { name: "down" }], ["\r", { name: "return" }]]);
+const numberPick = await runSessionPicker([["3", { name: "3" }], ["\r", { name: "return" }]]);
+const escapePick = await runSessionPicker([["\u001b", { name: "escape" }]]);
+ok("resume picker supports arrows, number jump and Enter",
+    downPick.selected === "session-b" && numberPick.selected === "session-c" &&
+        downPick.rendered.includes("Resume a session") && downPick.rendered.includes("session-c"),
+    JSON.stringify({ down: downPick.selected, number: numberPick.selected }));
+ok("resume picker cancels with Esc and restores raw mode",
+    escapePick.selected === undefined && escapePick.rawModes[0] === true && escapePick.rawModes.at(-1) === false,
+    JSON.stringify(escapePick.rawModes));
+const editCommand = await load("commands/edit.js");
+const previousEditor = process.env.EDITOR;
+process.env.EDITOR = "fastcode-missing-editor-" + Date.now();
+let editedDraft = null;
+const editFailure = editCommand.editCommand.run({
+    state: { draft: "keep me" },
+    actions: { setInput: (value) => { editedDraft = value; } },
+});
+if (previousEditor === undefined)
+    delete process.env.EDITOR;
+else
+    process.env.EDITOR = previousEditor;
+ok("/edit fails safely when the editor is missing",
+    editedDraft === null && /Could not launch/.test(editFailure.message),
+    JSON.stringify(editFailure));
 
 let gitAvailable = false;
 try {
@@ -1804,6 +1882,10 @@ ok("#138 headless JSON emits an aggregate summary frame",
 ok("#141 summary reports the successful request count",
     structuredSummary?.http_request_count === 2,
     JSON.stringify(structuredSummary));
+const structuredSessions = existsSync(join(structuredHome, "sessions"))
+    ? readdirSync(join(structuredHome, "sessions")).filter((name) => name.endsWith(".jsonl"))
+    : [];
+ok("#B45 headless writes a session log by default", structuredSessions.length > 0, JSON.stringify(structuredSessions));
 rmSync(structuredCliDir, { recursive: true, force: true });
 rmSync(structuredHome, { recursive: true, force: true });
 
@@ -2474,7 +2556,7 @@ const aborted = await collect(runner.runAgent({
 }));
 const abortDone = aborted.at(-1);
 ok("#33 abort keeps the generated text in history", abortDone.stopReason === "aborted" && abortDone.history.length === 2 &&
-    abortDone.history[1].content.includes("partial text") && abortDone.history[1].content.includes("[用户中断]"), JSON.stringify(abortDone.history));
+    abortDone.history[1].content.includes("partial text") && abortDone.history[1].content.includes("[user interrupted]"), JSON.stringify(abortDone.history));
 
 const readScript = Array.from({ length: 3 }, () => ({ text: '<fastcode_tool>{"tool":"read_file","path":"a.txt"}</fastcode_tool>' }));
 readScript.push({ text: "ok" });
@@ -2796,6 +2878,13 @@ ok("egress allows the .env.example whitelist", exampleWrite.ok === true && !exam
 const markerWrite = await agentTools.runAgentTool({ tool: "write_file", path: "marker.txt", content: "AKIAIOSFODNN7EXAMPLE" }, stage0);
 const rawOutput = await load("session/raw-output.js");
 const rawSessionFile = join(stage0, "raw-session.jsonl");
+const limitsModule = await load("agent/limits.js");
+const bounded = limitsModule.createOutputBuffer(10, "head");
+bounded.push("1234567890");
+bounded.push("abc");
+ok("P1 B30 fullValue keeps dropped raw text and droppedChars is real",
+    bounded.fullValue() === "1234567890abc" && /\[3 more characters omitted\]/.test(bounded.value()),
+    JSON.stringify({ full: bounded.fullValue(), view: bounded.value() }));
 writeFileSync(rawSessionFile, "", "utf8");
 const rawSaved = rawOutput.saveRawOutput(rawSessionFile, 1, "sk-" + "a".repeat(32) + "\n" + "x".repeat(30_000));
 const rawFile = join(stage0, "outputs", "raw-session", "1.txt");
@@ -3187,13 +3276,15 @@ writeFileSync(factLog.file, factLines.filter((line) => !line.includes('"type":"t
 rmSync(projectionFile, { force: true });
 const degraded = projectionModule.resumeSession(factLog.file, stage0);
 const degradedText = degraded.messages.map((message) => message.content).join("\n");
-ok("#43 resume survives a missing fact line", degradedText.includes("可安全重试") && degraded.messages.length >= 3, degradedText.slice(0, 200));
+ok("#43 resume survives a missing fact line", degradedText.includes("safe to retry") && degraded.messages.length >= 3, degradedText.slice(0, 200));
 const unpairedShell = projectionModule.factsToMessages([
     { type: "user", content: "run" },
     { type: "assistant_raw", content: "running" },
     { type: "tool_call", id: "s1", tool: "shell", args: { tool: "shell", command: "rm build" } },
 ]);
-ok("unpaired non-idempotent calls are marked execution-unknown", unpairedShell.map((message) => message.content).join("\n").includes("执行状态未知"));
+ok("unpaired non-idempotent calls are marked execution-unknown", unpairedShell.map((message) => message.content).join("\n").includes("Execution status unknown"));
+ok("interrupted tool notices stay English in the default locale", !/[\u3400-\u9fff]/.test(projectionModule.unpairedToolNotice("shell")), projectionModule.unpairedToolNotice("shell"));
+ok("P7 B38 interrupted tool results carry structured code", unpairedShell.some((message) => message.code === "INTERRUPTED" && message.doNotRetry === true), JSON.stringify(unpairedShell));
 const hugeProjection = projectionModule.buildProjection([
     { seq: 1, type: "user", content: "hi" },
     { seq: 2, type: "assistant_raw", content: "reading" },
@@ -3234,6 +3325,26 @@ const showOutput = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode
     encoding: "utf8",
 });
 ok("sessions show distinguishes facts and projection", showOutput.includes("[assistant_raw]") && showOutput.includes("[projection]"), showOutput.slice(0, 200));
+const listedFactSession = slog.listSessions().find((entry) => entry.id === factLog.id);
+ok("#B44 sessions list carries cwd and model", listedFactSession?.cwd === stage0 && /deepseek-v4-pro/.test(listedFactSession?.model ?? ""), JSON.stringify(listedFactSession));
+const aliasHome = mkdtempSync(join(tmpdir(), "fastcode-sess-alias-"));
+const aliasOut = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "sess"], {
+    env: { ...process.env, FASTCODE_HOME: aliasHome },
+    encoding: "utf8",
+});
+rmSync(aliasHome, { recursive: true, force: true });
+ok("#B41 sess is a sessions alias, not a prompt", /No sessions yet/.test(aliasOut) && !/requires a TTY/.test(aliasOut), aliasOut.slice(0, 200));
+const orphanId = "orphan-" + Date.now();
+const orphanProjection = join(dirname(projectionFile), orphanId + ".projection.json");
+writeFileSync(orphanProjection, readFileSync(projectionFile));
+const orphanListed = slog.listSessions().find((entry) => entry.id === orphanId);
+const orphanShow = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode.mjs"), "sessions", "show", orphanId], {
+    env: { ...process.env, FASTCODE_HOME: process.env.FASTCODE_HOME },
+    encoding: "utf8",
+});
+ok("#B43/#B44 projection-only sessions stay listed and showable",
+    Boolean(orphanListed) && orphanShow.includes("[projection]") && orphanShow.includes(orphanId + ".projection.json"),
+    JSON.stringify({ listed: orphanListed, show: orphanShow.slice(0, 200) }));
 
 const pruneLog = slog.createSessionLog({ providerId: "deepseek", model: "deepseek-v4-pro", cwd: stage0 });
 pruneLog.append({ type: "user", content: "prune me" });
@@ -3450,6 +3561,16 @@ ok("P3-6 write/append/replace expose unified diffs",
         /^-two/m.test(previewReplace.diffs?.[0]?.unified ?? "") &&
         /^\+TWO/m.test(previewReplace.diffs?.[0]?.unified ?? ""),
     JSON.stringify({ write: previewWrite.diffs, append: previewAppend.diffs, replace: previewReplace.diffs }));
+const fullBefore = Array.from({ length: 1200 }, (_value, index) => "line " + (index + 1) + " payload " + (index * 31)).join(LF) + LF;
+writeFileSync(join(stage0, "p2-full-window.txt"), fullBefore, "utf8");
+const fullAfter = fullBefore.replace("line 1200 payload " + (1199 * 31), "line 1200 changed");
+const fullWindowWrite = await agentTools.runAgentTool({ tool: "write_file", path: "p2-full-window.txt", content: fullAfter }, stage0, {
+    requestApproval: async () => ({ kind: "allow", scope: "once" }),
+});
+ok("P2 B32 writes diff against the full file, not a 16K prefix",
+    fullWindowWrite.ok === true && readFileSync(join(stage0, "p2-full-window.txt"), "utf8") === fullAfter &&
+        (fullWindowWrite.diffs?.[0]?.changedStartLine ?? 0) > 1000,
+    JSON.stringify({ ok: fullWindowWrite.ok, diff: fullWindowWrite.diffs?.[0]?.changedStartLine, output: fullWindowWrite.output?.slice(0, 120) }));
 const largeWriteBody = Array.from({ length: 205 }, (_value, index) => "line " + index).join(LF) + LF;
 const largeWriteDenied = await agentTools.runAgentTool({ tool: "write_file", path: "p3-large-write.txt", content: largeWriteBody }, stage0);
 ok("P3-1 large write requires approval",
@@ -4022,11 +4143,12 @@ if (process.platform !== "win32") {
 
     shells.setShellPoolSize(2);
     const threadsModule = await load("commands/threads.js");
-    const threadsActions = { setShellPoolSize: (size) => shells.setShellPoolSize(size) };
+    let threadsPrefill = "";
+    const threadsActions = { setShellPoolSize: (size) => shells.setShellPoolSize(size), setInput: (text) => { threadsPrefill = text; } };
     const threadsShow = threadsModule.threadsCommand.run({ args: [], actions: threadsActions });
     const threadsSet = threadsModule.threadsCommand.run({ args: ["200"], actions: threadsActions });
     ok("/threads shows the safe default and clamps the maximum to 128",
-        /2/.test(threadsShow.message) && shells.shellPoolSize() === 128 && /clamped/.test(threadsSet.message),
+        /2/.test(threadsShow.message) && threadsPrefill === "/threads " && shells.shellPoolSize() === 128 && /clamped/.test(threadsSet.message),
         JSON.stringify({ show: threadsShow.message, set: threadsSet.message }));
     shells.setShellPoolSize(2);
 }
@@ -4307,7 +4429,28 @@ ok("P3-1/P3-2 multi-hunk diff keeps three context lines",
 ok("P3-2 missing final newline marker",
     diffModule.unifiedDiff("a.txt", "a.txt", "a\n", "a", "update").includes("\\ No newline at end of file"));
 ok("P3-3 standard insert count",
+
     diffModule.countChangedLines("a\nb\nc\n", "a\nx\nb\nc\n") === 1);
+const p3LargeOld = Array.from({ length: 800 }, (_value, index) => "line " + (index + 1));
+const p3LargeNew = [...p3LargeOld];
+p3LargeNew[4] = "line five changed";
+p3LargeNew[794] = "line seven ninety five changed";
+const p3LargeHunks = diffModule.diffHunks(p3LargeOld.join(LF) + LF, p3LargeNew.join(LF) + LF);
+ok("P3-4 501/800 line far edits produce two hunks",
+    p3LargeHunks.length === 2 && p3LargeHunks.every((hunk) => hunk.lines.filter((line) => line.type === " ").length >= 6),
+    JSON.stringify(p3LargeHunks.map((hunk) => [hunk.oldStart, hunk.oldCount, hunk.newStart, hunk.newCount])));
+const hugeOld = Array.from({ length: 3000 }, (_value, index) => "stable unique line " + index + " #" + (index * 7919));
+const hugeNew = [...hugeOld];
+hugeNew[10] = "changed near the top";
+hugeNew[2900] = "changed near the bottom";
+const hugeHunks = diffModule.diffHunks(hugeOld.join(LF) + LF, hugeNew.join(LF) + LF);
+ok("P3-5 over-budget fallback keeps multiple hunks", hugeHunks.length >= 2,
+    JSON.stringify(hugeHunks.map((hunk) => [hunk.oldStart, hunk.oldCount, hunk.newStart, hunk.newCount])));
+const diffPreviewModule = await load("ui/DiffPreview.js");
+const hunkLimited = diffPreviewModule.formatUnifiedDiff("--- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new\n@@ -100 +100 @@\n-old2\n+new2", 4);
+ok("P7 B38 truncates whole hunks instead of cutting a hunk",
+    !/lines omitted/.test(hunkLimited) && /hunk\(s\) omitted/.test(hunkLimited) && /\+new/.test(hunkLimited) && !/\+new2/.test(hunkLimited),
+    JSON.stringify(hunkLimited));
 const unrepaired = valuesModule.parseJsonObjectWithRepair('{"path":');
 ok("[1.3] irreparable arguments still fail", Boolean(unrepaired.error) && !unrepaired.value, JSON.stringify(unrepaired));
 
@@ -4564,6 +4707,8 @@ let expandedValue = false;
 const expandCommand = await load("commands/expand.js");
 expandCommand.expandCommand.run({ state: { expanded: false }, actions: { setExpanded: (value) => { expandedValue = value; } } });
 ok("/expand toggles full tool output", expandedValue === true);
+const expandById = expandCommand.expandCommand.run({ args: ["tc_1"], state: { expanded: true }, actions: { setExpanded: () => {} } });
+ok("P4 /expand <id> targets a stored tool result", expandById.expandTool === "tc_1", JSON.stringify(expandById));
 let steered = "";
 const steerCommand = await load("commands/steer.js");
 const steerOutput = steerCommand.steerCommand.run({ args: ["focus", "on", "tests"], state: { busy: true }, actions: { steer: (text) => { steered = text; } } });
@@ -4581,6 +4726,18 @@ ok("B2-09 invalid config language falls back safely",
     i18nModule.normalizeLocale(123) === "en" && i18nModule.normalizeLocale("zh-CN") === "zh" &&
         i18nModule.setLocale(123) === "en",
     JSON.stringify({ numeric: i18nModule.normalizeLocale(123), region: i18nModule.normalizeLocale("zh-CN") }));
+const enCatalog = (await load("i18n/catalog/en.js")).en;
+const zhCatalog = (await load("i18n/catalog/zh.js")).zh;
+const enKeys = Object.keys(enCatalog).sort();
+const zhKeys = Object.keys(zhCatalog).sort();
+i18nModule.setLocale("zh");
+const zhPrompt = i18nModule.t("prompt.working");
+i18nModule.setLocale("en");
+ok("zh catalog covers every English key with translated UI strings",
+    JSON.stringify(enKeys) === JSON.stringify(zhKeys) &&
+        enKeys.every((key) => typeof zhCatalog[key] === "string" && zhCatalog[key].length > 0) &&
+        /处理中/.test(zhPrompt) && /Esc/.test(zhPrompt),
+    JSON.stringify({ en: enKeys.length, zh: zhKeys.length, prompt: zhPrompt }));
 
 const residualBackup = join(process.env.FASTCODE_HOME, "probe.fastcode-backup-123-456-abc");
 writeFileSync(residualBackup, "backup", "utf8");
@@ -4633,6 +4790,199 @@ const doctorNet = execFileSync(process.execPath, [join(pkgDir, "bin", "fastcode.
     timeout: 20_000,
 });
 ok("doctor --net prints a network conclusion", /network\s+(reachable|unreachable)/.test(doctorNet), doctorNet.slice(-300));
+
+// M1 public contract (docs/36_sdk_plan): types emitted + exhaustive error map.
+const publicTypesDts = join(distDir, "public", "types.d.ts");
+ok("M1 public types are emitted",
+    existsSync(publicTypesDts) && readFileSync(publicTypesDts, "utf8").includes("interface RunResult"),
+    String(publicTypesDts));
+const errorMap = await load("runtime/error-map.js");
+const stopReasons = ["complete", "max_turns", "token_budget", "cost_budget", "loop_detected", "aborted", "incomplete", "stream_error", "protocol_error"];
+const stopStatus = {
+    complete: "completed",
+    aborted: "stopped",
+    max_turns: "failed",
+    token_budget: "failed",
+    cost_budget: "failed",
+    loop_detected: "failed",
+    incomplete: "failed",
+    stream_error: "failed",
+    protocol_error: "failed",
+};
+for (const reason of stopReasons) {
+    ok("M1 stopReason " + reason + " -> " + stopStatus[reason],
+        errorMap.taskStatusForStopReason(reason) === stopStatus[reason],
+        String(errorMap.taskStatusForStopReason(reason)));
+}
+const errorKinds = ["token_budget", "cost_budget", "loop_detected", "aborted", "stream_error", "protocol_error", "incomplete"];
+for (const kind of errorKinds) {
+    const err = errorMap.runErrorForErrorKind(kind, "boom");
+    ok("M1 errorKind " + kind,
+        err.code.length > 0 && err.category.length > 0 && typeof err.retryable === "boolean" && err.message === "boom",
+        JSON.stringify(err));
+}
+ok("M1 aborted stop has no error", errorMap.runErrorForStopReason("aborted") === null);
+ok("M1 max_turns has MAX_TURNS error", errorMap.runErrorForStopReason("max_turns").code === "MAX_TURNS");
+const stopError = {
+    complete: null,
+    aborted: null,
+    max_turns: { code: "MAX_TURNS", category: "agent", retryable: false },
+    token_budget: { code: "TOKEN_BUDGET", category: "config", retryable: false },
+    cost_budget: { code: "COST_BUDGET", category: "config", retryable: false },
+    loop_detected: { code: "LOOP_DETECTED", category: "agent", retryable: false },
+    incomplete: { code: "INCOMPLETE", category: "network", retryable: true },
+    stream_error: { code: "STREAM_ERROR", category: "network", retryable: true },
+    protocol_error: { code: "PROTOCOL_ERROR", category: "agent", retryable: true },
+};
+for (const reason of stopReasons) {
+    const got = errorMap.runErrorForStopReason(reason);
+    const want = stopError[reason];
+    const pass = want === null
+        ? got === null
+        : Boolean(got) && got.code === want.code && got.category === want.category && got.retryable === want.retryable;
+    ok("M1 stopReason " + reason + " -> RunError", pass, JSON.stringify(got));
+}
+
+// M2 public wrapper (docs/36_sdk_plan): runTask + TaskHandle through a local provider.
+const taskApi = await load("runtime/task.js");
+let taskSyncThrew = false;
+try {
+    taskApi.runTask({});
+}
+catch {
+    taskSyncThrew = true;
+}
+ok("M2 runTask validates config synchronously", taskSyncThrew);
+
+const taskServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "sdk hello" } }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+    });
+});
+await new Promise((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+const taskPort = taskServer.address().port;
+const previousBaseUrl = process.env.FASTCODE_BASE_URL;
+const previousModel = process.env.FASTCODE_MODEL;
+process.env.FASTCODE_BASE_URL = `http://127.0.0.1:${taskPort}/v1`;
+process.env.FASTCODE_MODEL = "mock";
+
+const taskEvents = [];
+const taskOrder = [];
+const taskHandle = await taskApi.runTask(
+    { prompt: "sdk task", provider: "custom", model: "mock", cwd: stage0 },
+    {
+        onEvent: (event) => { taskEvents.push(event.type); taskOrder.push("event"); },
+        onComplete: () => taskOrder.push("complete"),
+    },
+);
+ok("M2 handle exposes wait/stop", typeof taskHandle.wait === "function" && typeof taskHandle.stop === "function");
+ok("M2 wait returns the same promise", taskHandle.wait() === taskHandle.wait());
+const taskResult = await taskHandle.wait();
+ok("M2 runTask completes through a provider", taskResult.status === "completed", JSON.stringify(taskResult));
+    ok("M2 result carries session id and log path",
+        typeof taskResult.sessionId === "string" && taskResult.sessionId.length > 0 && existsSync(taskResult.logPath),
+        JSON.stringify({ session: taskResult.sessionId, log: taskResult.logPath }));
+    ok("H2 logPath stays under sessions/",
+        dirname(taskResult.logPath) === paths.getPaths().sessions && existsSync(taskResult.logPath),
+        JSON.stringify({ log: taskResult.logPath, sessions: paths.getPaths().sessions }));
+ok("M2 events were delivered before completion", taskEvents.length > 0, JSON.stringify(taskEvents));
+ok("M2 onComplete is the last callback",
+    taskOrder.at(-1) === "complete" && !taskOrder.slice(taskOrder.indexOf("complete")).includes("event"),
+    JSON.stringify(taskOrder));
+await taskHandle.stop();
+ok("M2 stop after completion is idempotent", true);
+taskServer.close();
+
+const slowServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        setTimeout(() => {
+            if (res.writableEnded || res.destroyed)
+                return;
+            res.writeHead(200, { "content-type": "text/event-stream" });
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "late" } }] })}\n\n`);
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
+            res.write("data: [DONE]\n\n");
+            res.end();
+        }, 500);
+    });
+});
+await new Promise((resolve) => slowServer.listen(0, "127.0.0.1", resolve));
+process.env.FASTCODE_BASE_URL = `http://127.0.0.1:${slowServer.address().port}/v1`;
+const slowHandle = await taskApi.runTask({ prompt: "slow", provider: "custom", model: "mock", cwd: stage0 });
+await new Promise((resolve) => setTimeout(resolve, 20));
+await slowHandle.stop();
+await slowHandle.stop();
+const slowResult = await slowHandle.wait();
+ok("M2 stop is idempotent and wait resolves stopped", slowResult.status === "stopped", JSON.stringify(slowResult));
+slowServer.close();
+if (previousBaseUrl === undefined) delete process.env.FASTCODE_BASE_URL;
+else process.env.FASTCODE_BASE_URL = previousBaseUrl;
+if (previousModel === undefined) delete process.env.FASTCODE_MODEL;
+else process.env.FASTCODE_MODEL = previousModel;
+
+// M3 build/publish (docs/36_sdk_plan): library entry + exports + artifacts.
+const libSource = readFileSync(join(pkgDir, "src", "lib.ts"), "utf8");
+ok("M3 lib.ts does not touch the CLI entry",
+    !/from\s+["']\.\/index(?:\.js)?["']/.test(libSource), libSource.slice(0, 200));
+const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+ok("M3 exports expose . and ./types without ./runtime",
+    Boolean(pkgJson.exports?.["."]?.["types"]) &&
+        Boolean(pkgJson.exports?.["./types"]?.["types"]) &&
+        pkgJson.exports?.["./runtime"] === undefined,
+    JSON.stringify(pkgJson.exports));
+ok("M3 library artifacts are emitted",
+    existsSync(join(distDir, "lib.js")) &&
+        existsSync(join(distDir, "lib.d.ts")) &&
+        existsSync(join(distDir, "public", "types.d.ts")));
+const lib = await load("lib.js");
+ok("M3 lib.js exports runTask", typeof lib.runTask === "function");
+
+// M4 contract snapshots (docs/36_sdk_plan): exports/types/envelope drift + onError.
+const expectedTypes = ["RunConfig", "RunError", "RunErrorCategory", "RunOptions", "RunResult", "TaskHandle", "TaskStatus"];
+const emittedTypes = Array.from(readFileSync(join(distDir, "public", "types.d.ts"), "utf8").matchAll(/export\s+(?:type|interface)\s+([A-Za-z0-9_]+)/g)).map((m) => m[1]).sort();
+ok("M4 public .d.ts export snapshot",
+    JSON.stringify(emittedTypes) === JSON.stringify(expectedTypes), JSON.stringify(emittedTypes));
+const exportKeys = Object.keys(pkgJson.exports ?? {}).sort();
+ok("M4 package exports snapshot",
+    JSON.stringify(exportKeys) === JSON.stringify([".", "./types"]), JSON.stringify(exportKeys));
+const m4EventStream = await load("agent/event-stream.js");
+const envelopeLines = [];
+const snapshotStream = new m4EventStream.EventStream("snapshot", (line) => envelopeLines.push(line));
+snapshotStream.emit({ event: "snapshot" });
+const envelopeFrame = JSON.parse(envelopeLines[0]);
+const envelopeKeys = Object.keys(envelopeFrame).filter((key) => key !== "event").sort();
+ok("M4 NDJSON envelope snapshot",
+    JSON.stringify(envelopeKeys) === JSON.stringify(["seq", "session_id", "ts", "turn", "v"]), JSON.stringify(envelopeKeys));
+
+const failServer = createServer((req, res) => {
+    req.on("data", () => { });
+    req.on("end", () => {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "snapshot auth failure" } }));
+    });
+});
+await new Promise((resolve) => failServer.listen(0, "127.0.0.1", resolve));
+const baseBeforeM4 = process.env.FASTCODE_BASE_URL;
+process.env.FASTCODE_BASE_URL = `http://127.0.0.1:${failServer.address().port}/v1`;
+let onErrorSeen;
+let onCompleteSeen = false;
+const failHandle = await taskApi.runTask(
+    { prompt: "fail", provider: "custom", model: "mock", cwd: stage0 },
+    { onError: (err) => { onErrorSeen = err; }, onComplete: () => { onCompleteSeen = true; } },
+);
+const failResult = await failHandle.wait();
+ok("M4 onError fires and wait resolves failed",
+    failResult.status === "failed" && onErrorSeen === failResult.error && onCompleteSeen === false,
+    JSON.stringify({ status: failResult.status, error: failResult.error, onCompleteSeen }));
+failServer.close();
+if (baseBeforeM4 === undefined) delete process.env.FASTCODE_BASE_URL;
+else process.env.FASTCODE_BASE_URL = baseBeforeM4;
 
 rmSync(stage0, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 rmSync(process.env.FASTCODE_HOME, { recursive: true, force: true });
