@@ -135,7 +135,7 @@ node -e "fetch('https://registry.npmjs.org/').then((r) => console.log(r.status))
 npm install -g @datename/fastcode-termux@latest
 ```
 
-`latest` 为当前正式版；`beta` 为预发布通道。`release/` 为已发布资产。
+`latest` 为当前正式版；`beta` 为预发布通道。`release/` 为历史已发布资产；当前 tag 资产由 Release workflow 构建并上传 GitHub。
 
 > ⚠️ **不要 `git clone` 后直接 `node package/bin/fastcode.mjs` 就完事**：若 `package/dist/cli.js` 存在则没问题；一旦它缺失或你拿到的是旧版本，请按下文任选一种方式安装，不要只 clone。
 
@@ -191,7 +191,7 @@ cd fastcode-portable-<version>
 ./fastcode
 ```
 
-> `release/` 保存最近一次已发布的资产；`npm run build` + `sh scripts/build-portable.sh` 会按当前 `package.json` 版本重新生成 `fastcode-portable-<version>.tar.gz|zip`、`datename-fastcode-termux-<version>.tgz` 与 `SHA256SUMS`。
+> `release/` 保存历史已发布资产（当前为 0.1.9-beta.1）；`npm run build` + `sh scripts/build-portable.sh` 会按当前 `package.json` 版本生成 `fastcode-portable-<version>.tar.gz|zip`、`datename-fastcode-termux-<version>.tgz` 与 `SHA256SUMS`；tag 版本的附件由 Release workflow 构建并上传 GitHub。
 
 ### 方式三：从源码运行（仅在你要改源码 / 重新构建时）
 

@@ -1,6 +1,6 @@
-# FastCode 0.1.3 → 0.1.9-beta.2 修复清单（工作树，未发布）
+# FastCode 0.1.3 → 0.1.9-beta.2 修复清单（GitHub prerelease；npm 未发布）
 
-> 本版 = 0.1.8 + P4–P9 harness + B29–B45；当前工作树 **未提交、未推送、未发布**；npm `latest` 为 0.1.8，`beta` 为 Release workflow 误发的 0.1.9-beta.1（token 401，待回退）。
+> 本版 = 0.1.8 + P4–P9 harness + B29–B45；已提交/推送并发布 **GitHub prerelease v0.1.9-beta.2**；npm `latest` 仍为 0.1.8，`beta` 为 Release workflow 误发的 0.1.9-beta.1（token 401，待回退）；beta.2 未发布到 npm。
 
 基线：npm 包 @simplelittledev/fastcode 0.1.3（本项目 package/ 内的已编译产物）。
 前 14 项直接作用于 package/dist 的编译 JS；第 15 项起已由 dist 逆向重建 TypeScript 源码树

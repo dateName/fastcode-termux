@@ -139,7 +139,7 @@ Install the stable channel from npm:
 npm install -g @datename/fastcode-termux@latest
 ```
 
-`latest` is the stable channel; `beta` is the pre-release channel. The tracked `release/` contains the current release assets.
+`latest` is the stable channel; `beta` is the pre-release channel. The tracked `release/` contains historical published assets; current tag assets are built by the Release workflow.
 
 > ⚠️ **Don't just `git clone` and run** `node package/bin/fastcode.mjs`: that's fine when `package/dist/cli.js` is present, but if it's missing (or you have an old tree) use one of the methods below instead.
 
@@ -195,7 +195,7 @@ Run it:
 ./fastcode
 ```
 
-The tracked `release/` contains the published stable assets. `sh scripts/build-portable.sh` after `npm run build` generates `fastcode-portable-<version>.tar.gz|zip` and `datename-fastcode-termux-<version>.tgz` for the current `package.json` version.
+The tracked `release/` contains historical published assets (currently 0.1.9-beta.1). `sh scripts/build-portable.sh` after `npm run build` generates `fastcode-portable-<version>.tar.gz|zip` and `datename-fastcode-termux-<version>.tgz` for the current `package.json` version; tagged releases are built in CI and uploaded to GitHub.
 
 ### 3. From source (only if you want to modify or rebuild)
 

@@ -1,6 +1,6 @@
 # FastCode SDK
 
-> 状态：**v1 契约（草稿）**；当前工作树 `0.1.9-beta.2`，未发布。
+> 状态：**v1 契约（草稿）**；当前工作树 `0.1.9-beta.2`，已发布 GitHub prerelease；npm 未发布。
 > 范围：单任务、进程内、Node import。
 > 本文件是 SDK 契约的**唯一定义处**；其他文档只链接本文，不复制字段。
 > 验证基线（smoke / security / bundle）以仓库 `AGENTS.md` 为准，本文不重复计数。

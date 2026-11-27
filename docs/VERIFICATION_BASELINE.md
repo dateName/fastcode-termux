@@ -26,9 +26,10 @@
 | `verify:artifacts` | PASS | 5 guard markers |
 | `verify:gate --self-test` | PASS | |
 | SDK 包内容 | `dist/lib.js` / `dist/lib.d.ts` / `dist/public/types.d.ts` | `npm pack --dry-run`；`prepack` 触发 build |
-| 版本 | 0.1.9-beta.2 | 工作树 bump；npm beta.2 未发布 |
+| 版本 | 0.1.9-beta.2 | 已提交/推送；npm beta.2 未发布 |
 | npm dist-tags | latest=0.1.8；beta=0.1.9-beta.1 | 2026-11-27 查询；beta.2 未发布 |
-| `release/` | 0.1.9-beta.1 资产 | 未重建 |
+| GitHub Release | **v0.1.9-beta.2（prerelease）** | 2026-11-27；4 个附件（tar.gz/zip/tgz/SHA256SUMS）；由 tag workflow 构建 |
+| `release/` | 0.1.9-beta.1 历史资产 | 本地未重建；beta.2 资产在 GitHub Release |
 
 ## 2. 复跑命令
 

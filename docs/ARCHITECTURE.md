@@ -1,6 +1,6 @@
 # FastCode 架构说明
 
-> 版本：见 `package/package.json`（0.1.9-beta.2 工作树；基于 0.1.8 + P4–P9 harness；未提交/未发布）
+> 版本：见 `package/package.json`（0.1.9-beta.2；基于 0.1.8 + P4–P9 harness；已推送并发布 GitHub prerelease；npm 未发布）
 > 适用：`package/src` 当前源码树与 `dist/cli.js` 构建产物
 > 维护：改模块、命令、环境变量或安全语义时同步本文件
 

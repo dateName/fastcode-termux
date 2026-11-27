@@ -1,7 +1,7 @@
 # 开发日志（DEVLOG）
 
 > 项目：fastcode-termux（`dateName/fastcode-termux`）
-> 当前开发线：**0.1.9-beta.2 工作树**（基于 0.1.8 + P4–P9 harness；未提交/未发布，npm `latest` 仍为 0.1.8，`beta` 见 npm）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 / 0.1.8-beta.1 / 0.1.8-beta.2 / 0.1.8-beta.3 / 0.1.8-beta.4 保持不变
+> 当前开发线：**0.1.9-beta.2**（基于 0.1.8 + P4–P9 harness；已推送并发布 GitHub prerelease，npm 未发布；npm `latest` 仍为 0.1.8，`beta` 见 npm）；历史条目中的 0.1.6-beta / 0.1.8-beta.0 / 0.1.8-beta.1 / 0.1.8-beta.2 / 0.1.8-beta.3 / 0.1.8-beta.4 保持不变
 > 基线提交：`43c8835`（0.1.6 交接基线）
 > 本轮工程改造：`630eae3`、`0bedcb5`、`05f833d`、`1e746cc`（2026-10-23）
 > 适用平台：Termux / Android、Linux、macOS、Windows

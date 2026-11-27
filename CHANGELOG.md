@@ -2,9 +2,9 @@
 
 本文件记录每个版本的用户可见变化。逐项的技术修复明细见 [PATCHES.md](PATCHES.md)。
 
-## 0.1.9-beta.2（2026-11-27，工作树，未发布）
+## 0.1.9-beta.2（2026-11-27，GitHub prerelease 已发布；npm 未发布）
 
-> 状态：基于 0.1.8 的 P4–P9 harness 工作 + B29–B45 收口 + H1/H2/H3；Windows smoke **547/547**（POSIX 未实跑）；H1 hook tests **13/13**；Termux H1 **13/13**；bundle 2,256,678 bytes；未提交/未发布；npm `latest` 仍为 0.1.8，`beta` 为误发的 0.1.9-beta.1（待回退）。计数唯一源见 `docs/VERIFICATION_BASELINE.md`。
+> 状态：基于 0.1.8 的 P4–P9 harness 工作 + B29–B45 收口 + H1/H2/H3；Windows smoke **547/547**（POSIX 未实跑）；H1 hook tests **13/13**；Termux H1 **13/13**；bundle 2,256,678 bytes；已提交/推送并发布 GitHub prerelease v0.1.9-beta.2（4 个附件，含 SHA256SUMS）；npm `latest` 仍为 0.1.8，`beta` 为误发的 0.1.9-beta.1（待回退），beta.2 未发布到 npm。计数唯一源见 `docs/VERIFICATION_BASELINE.md`。
 
 - P4：sensitive、raw output、seq、S 索引、Provenance、`/facts show`
 - P5/P6：累计 anchor、`--long-run`/`--full-access`、cost cap

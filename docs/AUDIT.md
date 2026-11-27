@@ -428,4 +428,4 @@ provider 级 Key 复用、v1/v2 迁移。
 | TUI B39/B40 | 部分 | `/expand <id>` 重放完整输出与 diff；编辑类工具不折叠；`/threads` 预填输入并支持 1–128。`<Static>` 原位重渲染与 diff `n/p` 翻页未做 |
 | sessions B41–B45 | 代码完成 | `sess`/`ls` 别名；`show` 打印事实正文、`--full`/`--max-chars`、provenance；projection-only 可列/show/resume；列表带 cwd/model、`--all`/`--limit`；headless 默认写 log |
 
-验证边界：计数见 `docs/VERIFICATION_BASELINE.md`；`verify:artifacts`、`verify:gate --self-test` PASS。POSIX/Termux 未当前实跑。npm `beta` 的 0.1.9-beta.1 为误发且无有效 token 回退，不属于代码完成项。
+验证边界：计数见 `docs/VERIFICATION_BASELINE.md`；`verify:artifacts`、`verify:gate --self-test` PASS。POSIX/Termux 未当前实跑。GitHub prerelease v0.1.9-beta.2 已发布；npm `beta` 的 0.1.9-beta.1 为误发且无有效 token 回退，不属于代码完成项。

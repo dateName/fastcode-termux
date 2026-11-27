@@ -3,9 +3,9 @@
 目标平台优先级：Termux（Android） > Linux/macOS > Windows。
 所有方式都要求已安装 Node.js 18.17 及以上。
 
-> 当前工作树版本：`0.1.9-beta.2`（基于 0.1.8 + P4–P9 harness + B29–B45；未提交/未推送）。
-> `release/` 是 tag `v0.1.9-beta.1`（`b42f5cf`）的 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`，**不包含**当前未提交改动和 README 重写；assets 也未随 main `0c2ab21` 重建。
-> npm `latest` 为 0.1.8；`beta` 为 Release workflow 误发的 0.1.9-beta.1，token 401，尚未回退。GitHub Release 与 npm 的实际同步以外部查询为准。
+> 当前已推送版本：`0.1.9-beta.2`（基于 0.1.8 + P4–P9 harness + B29–B45 + H1/H2/H3）；GitHub prerelease `v0.1.9-beta.2` 已发布（4 个附件）。
+> `release/` 仍是历史 tag `v0.1.9-beta.1` 的 portable tar.gz/zip、npm tgz 与 `SHA256SUMS`；`v0.1.9-beta.2` 的附件由 tag workflow 构建并上传到 GitHub Release，本地 `release/` 未重建。
+> npm `latest` 为 0.1.8；`beta` 仍为 Release workflow 误发的 0.1.9-beta.1（token 401，尚未回退）；`0.1.9-beta.2` 未发布到 npm。GitHub Release 与 npm 的实际状态以外部查询为准。
 
 ## 0. 先确认 Node 与 git
 
